@@ -6,7 +6,7 @@ This service does **not** implement attendance (check-in/out, shifts, overtime, 
 
 | Service | Role |
 |---------|------|
-| **ai-service** (this) | Face detect, embed, FAISS search, liveness |
+| **ai-service** (this) | Face detect, embed, FAISS search, anti-spoof liveness |
 | **backend** (Laravel) | Attendance engine, employees, cameras, audit, reports |
 | **frontend** | Admin UI |
 
@@ -42,3 +42,26 @@ Authorization: Bearer {token}
 ```
 
 Or use `python scripts/test-face.py your-photo.jpg` from the project root.
+
+## Anti-spoof liveness
+
+Three layers prevent print/screen buddy punching:
+
+1. **Face quality** — exactly one face, InsightFace detection score ≥ threshold  
+2. **MiniFASNetV2 ONNX** — classifies live vs spoof (photo/screen)  
+3. **Heuristics** — blur, moiré (screen replay), saturation on face crop  
+
+Download the model once:
+
+```bash
+cd ai-service
+python scripts/download_antispoof_model.py
+```
+
+Check `/health` → `antispoof_model_loaded: true`.
+
+Configure in `.env` (see `.env.example`):
+
+- `ANTISPOOF_ENABLED=true`
+- `ANTISPOOF_BLOCK_ENROLLMENT=true` — blocks enrolling from a printed photo
+- `ANTISPOOF_REAL_THRESHOLD=0.5` — minimum “live” probability

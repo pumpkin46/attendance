@@ -18,6 +18,25 @@ class RecognitionController extends Controller
         private readonly AttendanceService $attendance
     ) {}
 
+    public function detect(Request $request): JsonResponse
+    {
+        $data = $request->validate(['image' => 'required|string']);
+
+        $result = $this->ai->detect($data['image']);
+
+        if (! ($result['success'] ?? false)) {
+            return response()->json(['message' => $result['error'] ?? 'Detection failed'], 503);
+        }
+
+        return response()->json([
+            'faces' => $result['faces'] ?? [],
+            'face_count' => $result['face_count'] ?? 0,
+            'processing_ms' => $result['processing_ms'] ?? 0,
+            'image_width' => $result['image_width'] ?? null,
+            'image_height' => $result['image_height'] ?? null,
+        ]);
+    }
+
     public function identify(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -42,6 +61,8 @@ class RecognitionController extends Controller
         $imageHash = hash('sha256', $data['image']);
 
         if ($requireLiveness && ! $livenessPassed) {
+            $livenessReason = $result['liveness_reason'] ?? 'liveness_failed';
+
             RecognitionEvent::create([
                 'camera_id' => $camera?->id,
                 'result' => 'liveness_failed',
@@ -49,13 +70,19 @@ class RecognitionController extends Controller
                 'liveness_passed' => false,
                 'processing_ms' => $processingMs,
                 'image_hash' => $imageHash,
+                'metadata' => [
+                    'liveness_reason' => $livenessReason,
+                    'liveness_checks' => $result['liveness_checks'] ?? null,
+                ],
                 'recognized_at' => now(),
             ]);
 
             return response()->json([
                 'matched' => false,
-                'reason' => 'liveness_failed',
+                'reason' => $livenessReason,
                 'processing_ms' => $processingMs,
+                'liveness_score' => $result['liveness_score'] ?? null,
+                'liveness_checks' => $result['liveness_checks'] ?? null,
             ]);
         }
 
@@ -94,6 +121,8 @@ class RecognitionController extends Controller
             'employee' => $employee->only(['id', 'employee_code', 'first_name', 'last_name']),
             'confidence' => $confidence,
             'processing_ms' => $processingMs,
+            'liveness_passed' => $livenessPassed,
+            'liveness_score' => $result['liveness_score'] ?? null,
             'attendance' => $attendanceResult,
         ]);
     }

@@ -24,6 +24,11 @@ class AiRecognitionClient
         ]);
     }
 
+    public function detect(string $imageBase64): array
+    {
+        return $this->post('/api/v1/detect', ['image' => $imageBase64]);
+    }
+
     public function deleteEmployee(string $employeeId): array
     {
         return $this->post('/api/v1/delete', ['employee_id' => $employeeId]);

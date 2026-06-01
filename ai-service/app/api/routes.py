@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException
 
 from app.schemas.recognition import (
     DeleteRequest,
+    DetectRequest,
+    DetectResponse,
     EnrollRequest,
     EnrollResponse,
     IdentifyRequest,
@@ -24,6 +26,12 @@ def enroll(req: EnrollRequest):
 def identify(req: IdentifyRequest):
     result = face_service.identify(req.image, req.require_liveness)
     return IdentifyResponse(**result)
+
+
+@router.post("/detect", response_model=DetectResponse)
+def detect(req: DetectRequest):
+    result = face_service.detect_faces(req.image)
+    return DetectResponse(**result)
 
 
 @router.post("/delete")

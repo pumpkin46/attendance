@@ -6,6 +6,8 @@ interface IdentifyResult {
   reason?: string
   confidence?: number
   processing_ms?: number
+  liveness_score?: number
+  liveness_checks?: Record<string, unknown>
   employee?: { id: number; employee_code: string; first_name: string; last_name: string }
   attendance?: { action: string; employee_id?: number }
 }
@@ -13,7 +15,7 @@ interface IdentifyResult {
 export default function RecognitionTestPage() {
   const [preview, setPreview] = useState<string | null>(null)
   const [cameraId, setCameraId] = useState('')
-  const [requireLiveness, setRequireLiveness] = useState(false)
+  const [requireLiveness, setRequireLiveness] = useState(true)
   const [result, setResult] = useState<IdentifyResult | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -48,8 +50,13 @@ export default function RecognitionTestPage() {
   }
 
   const reasonHelp: Record<string, string> = {
-    liveness_failed:
-      'Face detected but liveness check failed. Uncheck "Require liveness" for testing, or use a clearer single-face photo.',
+    liveness_failed: 'Anti-spoof check failed. Use a live face (not a photo of a photo or phone screen).',
+    spoof_detected: 'Spoof detected (print or screen replay). Present your live face to the camera.',
+    heuristic_failed: 'Image quality too low for liveness. Improve lighting and focus.',
+    antispoof_model_unavailable:
+      'Anti-spoof model not loaded. Run: python scripts/download_antispoof_model.py',
+    multiple_or_no_face: 'Exactly one face must be visible in the frame.',
+    low_detection_score: 'Face not clear enough — move closer to the camera.',
     unknown: 'No matching enrolled face. Enroll this person under Face Enrollment first.',
     low_confidence: 'Face found but similarity below threshold. Re-enroll with a clearer photo.',
   }
@@ -77,7 +84,7 @@ export default function RecognitionTestPage() {
             checked={requireLiveness}
             onChange={(e) => setRequireLiveness(e.target.checked)}
           />
-          Require liveness (stricter; off recommended for still photos)
+          Require liveness / anti-spoof (recommended for production)
         </label>
         <label>
           Camera image

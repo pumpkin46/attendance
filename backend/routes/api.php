@@ -43,6 +43,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('cameras', CameraController::class)->middleware('permission:cameras.manage');
         Route::post('cameras/{camera}/heartbeat', [CameraController::class, 'heartbeat']);
 
+        Route::post('recognition/detect', [RecognitionController::class, 'detect']);
         Route::post('recognition/identify', [RecognitionController::class, 'identify']);
         Route::get('recognition/events', [RecognitionController::class, 'events'])->middleware('permission:recognition.view');
 

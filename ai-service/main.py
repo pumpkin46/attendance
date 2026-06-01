@@ -19,12 +19,18 @@ app.include_router(router)
 
 @app.get("/health")
 def health():
+    from pathlib import Path
+
     from app.services.face_service import _get_face_app
 
     model_loaded = _get_face_app() is not None
+    antispoof_path = Path(settings.antispoof_model_path)
     return {
         "status": "ok",
         "service": settings.app_name,
         "insightface_loaded": model_loaded,
+        "antispoof_enabled": settings.antispoof_enabled,
+        "antispoof_model_loaded": antispoof_path.is_file(),
+        "liveness_enabled": settings.liveness_enabled,
         "recognition_threshold": settings.recognition_threshold,
     }
