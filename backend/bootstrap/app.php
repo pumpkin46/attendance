@@ -15,7 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'permission' => CheckPermission::class,
         ]);
-        $middleware->statefulApi();
+        // Token-based API (Bearer); no stateful Sanctum cookies / CSRF required.
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

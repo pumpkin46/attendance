@@ -173,6 +173,8 @@ th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: u
 .alert-error { background: rgba(239, 68, 68, 0.15); color: var(--danger); padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.85rem; }
 
 .enroll-form label { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; color: var(--muted); font-size: 0.85rem; }
+.checkbox-row { flex-direction: row !important; align-items: center; gap: 0.5rem !important; color: var(--text) !important; }
+.checkbox-row input { width: auto; }
 .enroll-form select, .enroll-form input[type='file'] { color: var(--text); }
 .enroll-preview { max-width: 240px; border-radius: 8px; margin: 0.5rem 0 1rem; border: 1px solid var(--border); }
 

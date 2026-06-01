@@ -1,7 +1,6 @@
 import base64
 import io
 import time
-import uuid
 
 import cv2
 import numpy as np
@@ -9,7 +8,7 @@ from PIL import Image
 
 from app.core.config import settings
 from app.services.faiss_index import FaissIndex
-from app.services.liveness import check_liveness
+from app.services.liveness import passes_liveness
 
 _index: FaissIndex | None = None
 _face_app = None
@@ -55,31 +54,36 @@ def _mock_embedding(seed: str) -> np.ndarray:
     return vec / np.linalg.norm(vec)
 
 
-def extract_embedding(image_b64: str, employee_id: str | None = None) -> tuple[np.ndarray | None, float]:
+def _analyze_image(image_b64: str, employee_id: str | None = None):
+    """
+    Returns (embedding, quality/det_score, face_count, insightface_available).
+    """
     img = _decode_image(image_b64)
     if img is None:
-        return None, 0.0
+        return None, 0.0, 0, False
 
     app = _get_face_app()
     if app is None:
         seed = employee_id or str(hash(image_b64) % 100000)
-        return _mock_embedding(seed), 0.85
+        return _mock_embedding(seed), 0.85, 1, False
 
     faces = app.get(img)
     if not faces:
-        return None, 0.0
+        return None, 0.0, 0, True
 
     face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
     quality = float(getattr(face, "det_score", 0.9))
-    return np.array(face.embedding, dtype=np.float32), quality
+    embedding = np.array(face.embedding, dtype=np.float32)
+    return embedding, quality, len(faces), True
 
 
 def enroll(employee_id: str, image_b64: str) -> dict:
     start = time.perf_counter()
-    embedding, quality = extract_embedding(image_b64, employee_id)
+    embedding, quality, face_count, _ = _analyze_image(image_b64, employee_id)
 
     if embedding is None:
-        return {"success": False, "error": "No face detected"}
+        detail = "No face detected" if face_count == 0 else "Multiple faces detected — use a single-person photo"
+        return {"success": False, "error": detail}
 
     idx = get_index().add(employee_id, embedding)
     processing_ms = int((time.perf_counter() - start) * 1000)
@@ -95,19 +99,24 @@ def enroll(employee_id: str, image_b64: str) -> dict:
 
 def identify(image_b64: str, require_liveness: bool = True) -> dict:
     start = time.perf_counter()
+    embedding, det_score, face_count, insightface_ok = _analyze_image(image_b64)
 
-    liveness_passed, _ = check_liveness(image_b64)
-    if require_liveness and not liveness_passed:
+    liveness_passed, liveness_score = passes_liveness(
+        face_count, det_score, insightface_ok
+    )
+
+    if require_liveness and settings.liveness_enabled and not liveness_passed:
         processing_ms = int((time.perf_counter() - start) * 1000)
         return {
             "success": True,
             "employee_id": None,
             "confidence": 0.0,
             "liveness_passed": False,
+            "liveness_score": liveness_score,
+            "face_count": face_count,
             "processing_ms": processing_ms,
         }
 
-    embedding, _ = extract_embedding(image_b64)
     processing_ms = int((time.perf_counter() - start) * 1000)
 
     if embedding is None:
@@ -116,6 +125,7 @@ def identify(image_b64: str, require_liveness: bool = True) -> dict:
             "employee_id": None,
             "confidence": 0.0,
             "liveness_passed": liveness_passed,
+            "face_count": face_count,
             "processing_ms": processing_ms,
         }
 
@@ -129,7 +139,9 @@ def identify(image_b64: str, require_liveness: bool = True) -> dict:
         "success": True,
         "employee_id": employee_id,
         "confidence": confidence,
-        "liveness_passed": liveness_passed,
+        "liveness_passed": liveness_passed if settings.liveness_enabled else True,
+        "liveness_score": liveness_score,
+        "face_count": face_count,
         "processing_ms": processing_ms,
     }
 

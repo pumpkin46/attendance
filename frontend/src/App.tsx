@@ -8,6 +8,7 @@ import CamerasPage from './pages/CamerasPage'
 import DashboardPage from './pages/DashboardPage'
 import EmployeesPage from './pages/EmployeesPage'
 import EnrollmentPage from './pages/EnrollmentPage'
+import RecognitionTestPage from './pages/RecognitionTestPage'
 import LoginPage from './pages/LoginPage'
 import ReportsPage from './pages/ReportsPage'
 import ShiftsPage from './pages/ShiftsPage'
@@ -29,6 +30,7 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="employees" element={<EmployeesPage />} />
             <Route path="enrollment" element={<EnrollmentPage />} />
+            <Route path="recognition-test" element={<RecognitionTestPage />} />
             <Route path="attendance" element={<AttendancePage />} />
             <Route path="shifts" element={<ShiftsPage />} />
             <Route path="cameras" element={<CamerasPage />} />

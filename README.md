@@ -6,9 +6,12 @@ Enterprise-grade attendance system with face recognition, liveness detection, RB
 
 ```
 Web UI (React)  →  API (Laravel)  →  AI Service (FastAPI)
-                         ↓
-              PostgreSQL + Redis
+                         ↓                    ↓
+              PostgreSQL              enroll / identify only
+              Attendance engine       (no attendance here)
 ```
+
+**Attendance (check-in/out) is only in the Laravel backend.** The AI service returns `employee_id` + confidence; Laravel writes attendance records.
 
 | Layer | Stack |
 |-------|--------|
@@ -69,7 +72,7 @@ AI service runs at **http://127.0.0.1:8001**
 
 Set `AI_SERVICE_URL=http://127.0.0.1:8001` in backend `.env`.
 
-> InsightFace downloads models on first run. Without GPU/models, a deterministic mock embedding mode is used for development.
+> Uses **InsightFace 1.0**, **FAISS 1.14**, **FastAPI 0.136**, **ONNX Runtime 1.23**. Models (`buffalo_l`) download on first run. Without models, a deterministic mock embedding mode is used for development.
 
 ## 4. Frontend
 

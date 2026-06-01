@@ -5,6 +5,7 @@ const nav = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/employees', label: 'Employees' },
   { to: '/enrollment', label: 'Face Enrollment' },
+  { to: '/recognition-test', label: 'Test Recognition' },
   { to: '/attendance', label: 'Attendance' },
   { to: '/shifts', label: 'Shifts' },
   { to: '/cameras', label: 'Cameras' },

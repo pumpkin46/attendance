@@ -127,13 +127,13 @@ class AttendanceService
             return;
         }
 
-        $worked = $record->check_in_at->diffInMinutes($record->check_out_at);
+        $worked = (int) round($record->check_in_at->diffInMinutes($record->check_out_at));
         $overtimeThreshold = config('attendance.overtime_threshold_minutes', 480);
         $overtime = max(0, $worked - $overtimeThreshold);
 
         $record->update([
             'worked_minutes' => $worked,
-            'overtime_minutes' => $overtime,
+            'overtime_minutes' => (int) $overtime,
             'status' => 'present',
         ]);
     }

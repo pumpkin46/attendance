@@ -1,26 +1,136 @@
-# Dependencies
-**/node_modules/
-**/vendor/
-**/.venv/
-**/__pycache__/
+# =============================================================================
+# Attendance Platform — monorepo (.gitignore)
+# backend/ (Laravel) · frontend/ (Vite/React) · ai-service/ (FastAPI)
+# =============================================================================
 
-# Environment
-**/.env
-!**/.env.example
+# -----------------------------------------------------------------------------
+# Environment & secrets (never commit)
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
 
-# Build & runtime
-**/dist/
-**/data/faiss.index
-**/data/metadata.json
-**/storage/logs/*
-**/storage/framework/cache/*
-**/bootstrap/cache/*
+# -----------------------------------------------------------------------------
+# PHP / Laravel (backend/)
+# -----------------------------------------------------------------------------
+backend/vendor/
+backend/.phpunit.cache
+backend/.phpunit.result.cache
+backend/Homestead.json
+backend/Homestead.yaml
+backend/auth.json
+backend/npm-debug.log
+backend/yarn-error.log
 
-# IDE
+# Laravel runtime & generated
+backend/storage/*.key
+backend/storage/app/public/*
+!backend/storage/app/public/.gitignore
+backend/storage/framework/cache/data/*
+!backend/storage/framework/cache/data/.gitignore
+backend/storage/framework/cache/*.php
+backend/storage/framework/sessions/*
+!backend/storage/framework/sessions/.gitignore
+backend/storage/framework/testing/*
+!backend/storage/framework/testing/.gitignore
+backend/storage/framework/views/*
+!backend/storage/framework/views/.gitignore
+backend/storage/logs/*
+!backend/storage/logs/.gitignore
+backend/bootstrap/cache/*.php
+!backend/bootstrap/cache/.gitignore
+backend/public/hot
+backend/public/storage
+
+# Local SQLite (if used instead of PostgreSQL)
+backend/database/*.sqlite
+backend/database/*.sqlite-journal
+
+# -----------------------------------------------------------------------------
+# Node / Vite / React (frontend/)
+# -----------------------------------------------------------------------------
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+frontend/*.local
+frontend/.vite/
+frontend/coverage/
+frontend/.eslintcache
+
+# Lock files: keep package-lock.json & composer.lock in git (reproducible installs)
+
+# -----------------------------------------------------------------------------
+# Python / FastAPI (ai-service/)
+# -----------------------------------------------------------------------------
+ai-service/venv/
+ai-service/.venv/
+ai-service/env/
+ai-service/__pycache__/
+ai-service/**/__pycache__/
+ai-service/*.py[cod]
+ai-service/*$py.class
+ai-service/.pytest_cache/
+ai-service/.mypy_cache/
+ai-service/.ruff_cache/
+ai-service/.coverage
+ai-service/htmlcov/
+ai-service/*.egg-info/
+ai-service/.eggs/
+ai-service/build/
+ai-service/dist/
+ai-service/wheels/
+ai-service/*.egg
+
+# FAISS index & enrollment metadata (generated at runtime)
+ai-service/data/*
+!ai-service/data/.gitkeep
+
+# -----------------------------------------------------------------------------
+# Logs & debug
+# -----------------------------------------------------------------------------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -----------------------------------------------------------------------------
+# IDE & editors
+# -----------------------------------------------------------------------------
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.sublime-project
+*.sublime-workspace
 *.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
 
+# -----------------------------------------------------------------------------
 # OS
+# -----------------------------------------------------------------------------
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# -----------------------------------------------------------------------------
+# Misc
+# -----------------------------------------------------------------------------
+*.bak
+*.tmp
+*.temp
+.cache/
