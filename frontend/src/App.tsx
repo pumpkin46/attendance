@@ -1,0 +1,43 @@
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import ProtectedRoute from './components/ProtectedRoute'
+import { AuthProvider } from './contexts/AuthContext'
+import AppLayout from './layouts/AppLayout'
+import AttendancePage from './pages/AttendancePage'
+import AuditLogsPage from './pages/AuditLogsPage'
+import CamerasPage from './pages/CamerasPage'
+import DashboardPage from './pages/DashboardPage'
+import EmployeesPage from './pages/EmployeesPage'
+import EnrollmentPage from './pages/EnrollmentPage'
+import LoginPage from './pages/LoginPage'
+import ReportsPage from './pages/ReportsPage'
+import ShiftsPage from './pages/ShiftsPage'
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<DashboardPage />} />
+            <Route path="employees" element={<EmployeesPage />} />
+            <Route path="enrollment" element={<EnrollmentPage />} />
+            <Route path="attendance" element={<AttendancePage />} />
+            <Route path="shifts" element={<ShiftsPage />} />
+            <Route path="cameras" element={<CamerasPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="audit-logs" element={<AuditLogsPage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  )
+}

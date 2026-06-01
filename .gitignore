@@ -1,0 +1,26 @@
+# Dependencies
+**/node_modules/
+**/vendor/
+**/.venv/
+**/__pycache__/
+
+# Environment
+**/.env
+!**/.env.example
+
+# Build & runtime
+**/dist/
+**/data/faiss.index
+**/data/metadata.json
+**/storage/logs/*
+**/storage/framework/cache/*
+**/bootstrap/cache/*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
