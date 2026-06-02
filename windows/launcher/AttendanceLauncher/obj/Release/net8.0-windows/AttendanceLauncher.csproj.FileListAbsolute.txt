@@ -1,0 +1,15 @@
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\bin\Release\net8.0-windows\AttendanceLauncher.exe
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\bin\Release\net8.0-windows\AttendanceLauncher.deps.json
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\bin\Release\net8.0-windows\AttendanceLauncher.runtimeconfig.json
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\bin\Release\net8.0-windows\AttendanceLauncher.dll
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\bin\Release\net8.0-windows\AttendanceLauncher.pdb
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\AttendanceLauncher.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\AttendanceLauncher.AssemblyInfoInputs.cache
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\AttendanceLauncher.AssemblyInfo.cs
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\AttendanceLauncher.csproj.CoreCompileInputs.cache
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\AttendanceLauncher.sourcelink.json
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\AttendanceLauncher.dll
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\refint\AttendanceLauncher.dll
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\AttendanceLauncher.pdb
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\AttendanceLauncher.genruntimeconfig.cache
+C:\Users\Administrator\Documents\work\attendance\windows\launcher\AttendanceLauncher\obj\Release\net8.0-windows\ref\AttendanceLauncher.dll
