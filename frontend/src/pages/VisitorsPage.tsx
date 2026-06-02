@@ -19,6 +19,8 @@ interface Visitor {
   visit_end_at: string
   status: string
   face_registered: boolean
+  check_in_code?: string
+  badge_number?: string
   face_expires_at?: string
   host?: Employee
 }
@@ -141,6 +143,7 @@ export default function VisitorsPage() {
           <Th>Company</Th>
           <Th>Host</Th>
           <Th>Visit</Th>
+          <Th>Code / Badge</Th>
           <Th>Face</Th>
           <Th>Status</Th>
           <Th>Actions</Th>
@@ -156,6 +159,10 @@ export default function VisitorsPage() {
               <Td className="text-xs">
                 {new Date(v.visit_start_at).toLocaleString()} –{' '}
                 {new Date(v.visit_end_at).toLocaleString()}
+              </Td>
+              <Td className="font-mono text-xs">
+                {v.check_in_code ?? '—'}
+                {v.badge_number && <div className="text-slate-500">{v.badge_number}</div>}
               </Td>
               <Td>
                 <Badge tone={v.face_registered ? 'ok' : 'neutral'}>

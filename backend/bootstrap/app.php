@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'tenant' => \App\Http\Middleware\EnforceTenantIsolation::class,
             'rfid.reader' => \App\Http\Middleware\AuthenticateRfidReader::class,
             'edge.device' => \App\Http\Middleware\AuthenticateEdgeDevice::class,
+            'visitor.kiosk' => \App\Http\Middleware\AuthenticateVisitorKiosk::class,
         ]);
         if (env('FORCE_HTTPS', false)) {
             $middleware->append(\App\Http\Middleware\ForceHttps::class);

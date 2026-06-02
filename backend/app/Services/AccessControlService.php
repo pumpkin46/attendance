@@ -13,6 +13,8 @@ class AccessControlService
 {
     public function __construct(
         private readonly LiveEventService $liveEvents,
+        private readonly BuildingIntegrationService $building,
+        private readonly SecurityMonitoringService $security,
     ) {}
 
     public function evaluateAndExecute(
@@ -79,6 +81,22 @@ class AccessControlService
                     'payload' => ['action' => $action],
                 ],
             );
+
+            $buildingContext = [
+                'organization_id' => $point->organization_id,
+                'location_id' => $point->location_id,
+                'access_point_id' => $point->id,
+                'access_point' => $point->name,
+                'action' => $action,
+                'person_type' => $employee ? 'employee' : 'visitor',
+                'person_name' => $name,
+            ];
+            $this->building->onAccessGranted($buildingContext);
+
+            if ($employee) {
+                $this->security->checkTailgating($employee, $point);
+                $this->security->onAfterHoursAccess($point->camera()->first(), $employee);
+            }
         } else {
             $this->liveEvents->record(
                 'access_denied',
@@ -86,6 +104,14 @@ class AccessControlService
                 $point->organization_id,
                 ['access_point_id' => $point->id, 'payload' => ['reason' => $denyReason]],
             );
+
+            $this->building->onAccessDenied([
+                'organization_id' => $point->organization_id,
+                'location_id' => $point->location_id,
+                'access_point_id' => $point->id,
+                'deny_reason' => $denyReason,
+            ]);
+            $this->security->onAccessDenied($point, $denyReason, $employee, $visitor);
         }
 
         return [

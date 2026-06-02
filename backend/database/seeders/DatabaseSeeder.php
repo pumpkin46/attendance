@@ -65,6 +65,9 @@ class DatabaseSeeder extends Seeder
             ['name' => 'branches.manage', 'label' => 'Manage Branches'],
             ['name' => 'departments.manage', 'label' => 'Manage Departments'],
             ['name' => 'security.view', 'label' => 'View Security Configuration'],
+            ['name' => 'building.manage', 'label' => 'Manage Smart Building Integrations'],
+            ['name' => 'security.monitor', 'label' => 'AI Security Monitoring'],
+            ['name' => 'visitor_kiosks.manage', 'label' => 'Manage Visitor Kiosks'],
         ];
 
         foreach ($permissions as $perm) {
@@ -86,7 +89,8 @@ class DatabaseSeeder extends Seeder
             'employee' => ['label' => 'Employee', 'permissions' => collect()],
             'security_officer' => ['label' => 'Security Officer', 'permissions' => Permission::whereIn('name', [
                 'cameras.manage', 'edge.manage', 'rfid.manage', 'recognition.view',
-                'reports.view', 'security.view',
+                'reports.view', 'security.view', 'security.monitor', 'building.manage',
+                'visitor_kiosks.manage',
             ])->pluck('id')],
         ];
 

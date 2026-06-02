@@ -11,6 +11,7 @@ use App\Services\AiRecognitionClient;
 use App\Services\AttendanceService;
 use App\Services\NfrComplianceService;
 use App\Services\RecognitionMetricsService;
+use App\Services\SecurityMonitoringService;
 use App\Services\VisitorService;
 use App\Support\CameraSourceResolver;
 use Illuminate\Http\JsonResponse;
@@ -27,6 +28,7 @@ class RecognitionController extends Controller
         private readonly RecognitionMetricsService $metrics,
         private readonly AccessControlService $accessControl,
         private readonly VisitorService $visitors,
+        private readonly SecurityMonitoringService $securityMonitoring,
     ) {}
 
     public function config(): JsonResponse
@@ -116,6 +118,12 @@ class RecognitionController extends Controller
                 'metadata' => $this->eventMetadata($result, $source),
                 'recognized_at' => now(),
             ]);
+
+            $this->securityMonitoring->onSpoofAttempt(
+                $camera,
+                $result['liveness_reason'] ?? $result['spoof_type'] ?? 'liveness_failed',
+                $confidence,
+            );
 
             return response()->json(array_merge([
                 'matched' => false,

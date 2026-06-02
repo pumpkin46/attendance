@@ -25,10 +25,14 @@ use App\Http\Controllers\Api\RfidCardController;
 use App\Http\Controllers\Api\RfidEventController;
 use App\Http\Controllers\Api\RfidReaderController;
 use App\Http\Controllers\Api\RfidTapController;
+use App\Http\Controllers\Api\BuildingIntegrationController;
 use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\DepartmentController;
 use App\Http\Controllers\Api\OrganizationController;
 use App\Http\Controllers\Api\SecurityController;
+use App\Http\Controllers\Api\SecurityMonitoringController;
+use App\Http\Controllers\Api\VisitorKioskApiController;
+use App\Http\Controllers\Api\VisitorKioskController;
 use App\Http\Controllers\Api\ShiftController;
 use Illuminate\Support\Facades\Route;
 
@@ -44,6 +48,17 @@ Route::prefix('v1')->group(function () {
     Route::get('/auth/oauth/{provider}/callback', [AuthController::class, 'oauthCallback']);
 
     Route::post('/rfid/tap', [RfidTapController::class, 'tap'])->middleware('rfid.reader');
+
+    Route::middleware('visitor.kiosk')->prefix('kiosk/visitor')->group(function () {
+        Route::get('/config', [VisitorKioskApiController::class, 'config']);
+        Route::get('/hosts', [VisitorKioskApiController::class, 'hosts']);
+        Route::post('/lookup', [VisitorKioskApiController::class, 'lookup']);
+        Route::post('/register', [VisitorKioskApiController::class, 'register']);
+        Route::post('/identify', [VisitorKioskApiController::class, 'identify']);
+        Route::post('/visitors/{visitor}/enroll-face', [VisitorKioskApiController::class, 'enrollFace']);
+        Route::post('/visitors/{visitor}/check-in', [VisitorKioskApiController::class, 'checkIn']);
+        Route::post('/heartbeat', [VisitorKioskApiController::class, 'heartbeat']);
+    });
 
     Route::middleware('edge.device')->prefix('edge')->group(function () {
         Route::get('/config', [EdgeDeviceApiController::class, 'config']);
@@ -155,6 +170,44 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('access-points', AccessPointController::class)->middleware('permission:cameras.manage');
         Route::post('access-points/{access_point}/execute', [AccessPointController::class, 'execute'])
             ->middleware('permission:cameras.manage');
+
+        Route::get('building/config', [BuildingIntegrationController::class, 'config']);
+        Route::get('building/connectors', [BuildingIntegrationController::class, 'index'])
+            ->middleware('permission:building.manage');
+        Route::post('building/connectors', [BuildingIntegrationController::class, 'store'])
+            ->middleware('permission:building.manage');
+        Route::patch('building/connectors/{buildingConnector}', [BuildingIntegrationController::class, 'update'])
+            ->middleware('permission:building.manage');
+        Route::delete('building/connectors/{buildingConnector}', [BuildingIntegrationController::class, 'destroy'])
+            ->middleware('permission:building.manage');
+        Route::post('building/connectors/{buildingConnector}/test', [BuildingIntegrationController::class, 'testDispatch'])
+            ->middleware('permission:building.manage');
+        Route::get('building/events', [BuildingIntegrationController::class, 'events'])
+            ->middleware('permission:building.manage');
+        Route::post('building/occupancy/publish', [BuildingIntegrationController::class, 'occupancy'])
+            ->middleware('permission:building.manage');
+
+        Route::get('security-monitoring/config', [SecurityMonitoringController::class, 'config'])
+            ->middleware('permission:security.monitor');
+        Route::get('security-monitoring/dashboard', [SecurityMonitoringController::class, 'dashboard'])
+            ->middleware('permission:security.monitor');
+        Route::get('security-monitoring/alerts', [SecurityMonitoringController::class, 'index'])
+            ->middleware('permission:security.monitor');
+        Route::get('security-monitoring/alerts/{securityAlert}', [SecurityMonitoringController::class, 'show'])
+            ->middleware('permission:security.monitor');
+        Route::post('security-monitoring/alerts/{securityAlert}/acknowledge', [SecurityMonitoringController::class, 'acknowledge'])
+            ->middleware('permission:security.monitor');
+        Route::post('security-monitoring/alerts/{securityAlert}/resolve', [SecurityMonitoringController::class, 'resolve'])
+            ->middleware('permission:security.monitor');
+
+        Route::get('visitor-kiosks', [VisitorKioskController::class, 'index'])
+            ->middleware('permission:visitor_kiosks.manage');
+        Route::post('visitor-kiosks', [VisitorKioskController::class, 'store'])
+            ->middleware('permission:visitor_kiosks.manage');
+        Route::patch('visitor-kiosks/{visitorKiosk}', [VisitorKioskController::class, 'update'])
+            ->middleware('permission:visitor_kiosks.manage');
+        Route::post('visitor-kiosks/{visitorKiosk}/regenerate-token', [VisitorKioskController::class, 'regenerateToken'])
+            ->middleware('permission:visitor_kiosks.manage');
 
         Route::apiResource('visitors', VisitorController::class);
         Route::post('visitors/{visitor}/enroll-face', [VisitorController::class, 'enrollFace']);

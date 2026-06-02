@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\RehashesPasswordOnLogin;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\AuditService;
@@ -15,6 +16,8 @@ use Laravel\Socialite\Facades\Socialite;
 
 class AuthController extends Controller
 {
+    use RehashesPasswordOnLogin;
+
     public function __construct(
         private readonly AuditService $audit,
         private readonly LdapAuthService $ldap,
@@ -53,6 +56,8 @@ class AuthController extends Controller
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
+
+        $this->rehashPasswordIfNeeded($user, $request->password);
 
         $token = $user->createToken('api')->plainTextToken;
         $this->audit->log('auth.login', $user);

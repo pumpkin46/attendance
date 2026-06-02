@@ -12,8 +12,8 @@ class Visitor extends Model
 
     protected $fillable = [
         'organization_id', 'host_employee_id', 'name', 'company', 'phone', 'purpose',
-        'visit_start_at', 'visit_end_at', 'status', 'face_registered',
-        'ai_identity_id', 'face_expires_at',
+        'check_in_code', 'badge_number', 'visit_start_at', 'visit_end_at', 'status',
+        'checked_in_at', 'face_registered', 'ai_identity_id', 'face_expires_at',
     ];
 
     protected function casts(): array
@@ -22,6 +22,7 @@ class Visitor extends Model
             'visit_start_at' => 'datetime',
             'visit_end_at' => 'datetime',
             'face_expires_at' => 'datetime',
+            'checked_in_at' => 'datetime',
             'face_registered' => 'boolean',
         ];
     }

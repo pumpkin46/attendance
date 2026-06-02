@@ -22,6 +22,10 @@ import RfidPage from './pages/RfidPage'
 import ShiftsPage from './pages/ShiftsPage'
 import UnknownFacesPage from './pages/UnknownFacesPage'
 import SecurityTenancyPage from './pages/SecurityTenancyPage'
+import SmartBuildingPage from './pages/SmartBuildingPage'
+import SecurityMonitoringPage from './pages/SecurityMonitoringPage'
+import VisitorKiosksPage from './pages/VisitorKiosksPage'
+import VisitorKioskPage from './pages/VisitorKioskPage'
 
 export default function App() {
   return (
@@ -57,7 +61,11 @@ export default function App() {
             <Route path="unknown-faces" element={<UnknownFacesPage />} />
             <Route path="audit-logs" element={<AuditLogsPage />} />
             <Route path="security" element={<SecurityTenancyPage />} />
+            <Route path="smart-building" element={<SmartBuildingPage />} />
+            <Route path="security-monitoring" element={<SecurityMonitoringPage />} />
+            <Route path="visitor-kiosks" element={<VisitorKiosksPage />} />
           </Route>
+          <Route path="/visitor-kiosk" element={<VisitorKioskPage />} />
           <Route
             path="/kiosk"
             element={

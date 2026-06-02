@@ -6,7 +6,10 @@ import { Button } from '../components/ui/Button'
 const nav = [
   { to: '/', label: 'Monitoring', end: true },
   { to: '/visitors', label: 'Visitors' },
+  { to: '/visitor-kiosks', label: 'Visitor Kiosks' },
   { to: '/access-control', label: 'Access Control' },
+  { to: '/smart-building', label: 'Smart Building' },
+  { to: '/security-monitoring', label: 'AI Security' },
   { to: '/employees', label: 'Employees' },
   { to: '/enrollment', label: 'Face Enrollment' },
   { to: '/live-kiosk', label: 'Live Kiosk' },

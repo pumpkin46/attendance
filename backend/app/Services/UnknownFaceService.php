@@ -50,6 +50,7 @@ class UnknownFaceService
                 $camera?->location?->organization_id,
                 ['camera_id' => $camera?->id],
             );
+            app(SecurityMonitoringService::class)->onUnknownPerson($event, $camera);
         }
 
         return $event->load('camera');

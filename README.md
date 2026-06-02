@@ -101,6 +101,9 @@ UI runs at **http://127.0.0.1:5173**
 | Camera Management | Multi-camera, heartbeat monitoring |
 | Edge AI Deployment | On-device inference via edge-agent |
 | Audit Logs | All sensitive actions logged |
+| Smart Building Integration | Webhook/MQTT connectors for BMS, HVAC, occupancy events |
+| AI Security Monitoring | Unknown persons, spoof, access denied, after-hours, tailgating alerts |
+| Autonomous Visitor Kiosks | Self-service walk-in, face enroll, badge check-in at lobby |
 
 ## Recognition flow
 
@@ -117,6 +120,44 @@ UI runs at **http://127.0.0.1:5173**
 3. Physical reader POSTs to `POST /api/v1/rfid/tap` with `Authorization: Bearer <token>` and body `{ "uid": "A1B2C3D4" }`
 4. Laravel looks up the card, records check-in or check-out (60s duplicate window by default)
 5. Unknown or inactive cards are logged in `rfid_events`
+
+## Smart Building Integration
+
+Push access, occupancy, and visitor events to your building management system:
+
+1. Admin creates a **connector** (webhook, MQTT simulated, or BACnet gateway) under **Smart Building**
+2. Subscribe to events: `access_granted`, `access_denied`, `occupancy_update`, `visitor_checked_in`
+3. On door unlock or visitor check-in, Laravel POSTs signed JSON to your BMS webhook URL
+4. Use **Publish occupancy** to sync present/absent headcount from the monitoring dashboard
+
+## AI Security Monitoring
+
+AI-driven security operations center beyond FR-011 unknown faces:
+
+| Alert type | Trigger |
+|------------|---------|
+| `unknown_person` | Unrecognized face on camera |
+| `spoof_attempt` | Liveness / anti-spoof failure |
+| `access_denied` | Face recognized but door not opened |
+| `after_hours` | Employee access outside configured hours |
+| `tailgating` | Same person granted twice within seconds |
+
+Alerts appear in **AI Security** UI with acknowledge/resolve workflow and in-app notifications for security officers.
+
+## Autonomous Visitor Kiosks
+
+Self-service lobby kiosks without reception staff:
+
+```
+Tablet browser → /visitor-kiosk?token=<kiosk-token> → kiosk API (Bearer token)
+```
+
+1. Admin creates a kiosk under **Visitor Kiosks** and copies the one-time URL + token
+2. Visitor chooses **appointment lookup** (visit code / phone) or **walk-in registration**
+3. Webcam captures face → temporary FAISS enrollment → check-in + badge number
+4. Optional linked **access point** unlocks door on successful check-in
+
+Kiosk API: `POST /api/v1/kiosk/visitor/register`, `enroll-face`, `check-in` (device token auth).
 
 ## Edge AI deployment
 

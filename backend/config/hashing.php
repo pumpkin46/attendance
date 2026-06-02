@@ -15,7 +15,8 @@ return [
         'memory' => env('ARGON_MEMORY', 65536),
         'threads' => env('ARGON_THREADS', 1),
         'time' => env('ARGON_TIME', 4),
-        'verify' => true,
+        // Strict algo check is handled by MigratingArgon2IdHasher (bcrypt fallback).
+        'verify' => env('HASH_VERIFY_ALGORITHM', false),
     ],
 
     'rehash_on_login' => true,
