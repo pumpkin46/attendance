@@ -18,6 +18,9 @@ This service does **not** implement attendance (check-in/out, shifts, overtime, 
 | POST | `/api/v1/enroll` | Store face embedding for `employee_id` |
 | POST | `/api/v1/identify` | Match face → returns `employee_id` + confidence |
 | POST | `/api/v1/delete` | Remove embeddings for employee |
+| GET | `/api/v1/embeddings/export` | Export FAISS index for edge sync |
+| POST | `/api/v1/embeddings/import` | Import index on edge device |
+| POST | `/api/v1/embeddings/reload` | Reload index from disk |
 
 ## How attendance works
 

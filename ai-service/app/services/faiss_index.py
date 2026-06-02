@@ -103,3 +103,58 @@ class FaissIndex:
         self.id_to_employee = new_id_to_employee
         self.employee_to_ids = new_employee_to_ids
         self._save()
+
+    def count(self) -> int:
+        return self.index.ntotal
+
+    def version_hash(self) -> str:
+        import hashlib
+
+        if not self.index_path.exists():
+            return hashlib.sha256(b"empty").hexdigest()[:16]
+
+        digest = hashlib.sha256()
+        digest.update(self.index_path.read_bytes())
+        if self.metadata_path.exists():
+            digest.update(self.metadata_path.read_bytes())
+        return digest.hexdigest()[:16]
+
+    def export_bundle(self) -> dict:
+        import base64
+        import hashlib
+
+        if not self.index_path.exists() or self.index.ntotal == 0:
+            return {
+                "version": hashlib.sha256(b"empty").hexdigest()[:16],
+                "embedding_count": 0,
+                "index_b64": None,
+                "metadata": {"id_to_employee": {}, "employee_to_ids": {}},
+            }
+
+        return {
+            "version": self.version_hash(),
+            "embedding_count": self.index.ntotal,
+            "index_b64": base64.b64encode(self.index_path.read_bytes()).decode("ascii"),
+            "metadata": {
+                "id_to_employee": {str(k): v for k, v in self.id_to_employee.items()},
+                "employee_to_ids": self.employee_to_ids,
+            },
+        }
+
+    def import_bundle(self, index_b64: str, metadata: dict) -> None:
+        import base64
+
+        index_bytes = base64.b64decode(index_b64)
+        self.index_path.write_bytes(index_bytes)
+        self.index = faiss.read_index(str(self.index_path))
+        self.id_to_employee = {int(k): v for k, v in metadata.get("id_to_employee", {}).items()}
+        self.employee_to_ids = metadata.get("employee_to_ids", {})
+        self.metadata_path.write_text(
+            json.dumps({
+                "id_to_employee": self.id_to_employee,
+                "employee_to_ids": self.employee_to_ids,
+            })
+        )
+
+    def reload(self) -> None:
+        self._load()

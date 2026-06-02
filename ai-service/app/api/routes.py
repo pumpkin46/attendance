@@ -14,6 +14,9 @@ from app.schemas.recognition import (
     IdentifyResponse,
     StreamCaptureRequest,
     StreamCaptureResponse,
+    EmbeddingExportResponse,
+    EmbeddingImportRequest,
+    EmbeddingImportResponse,
     ValidateImageRequest,
     ValidateImageResponse,
 )
@@ -72,6 +75,22 @@ def capture_stream(req: StreamCaptureRequest):
     if not result.get("success"):
         raise HTTPException(422, detail=result.get("error", "Stream capture failed"))
     return StreamCaptureResponse(**result)
+
+
+@router.get("/embeddings/export", response_model=EmbeddingExportResponse)
+def export_embeddings():
+    return EmbeddingExportResponse(**face_service.export_embeddings())
+
+
+@router.post("/embeddings/import", response_model=EmbeddingImportResponse)
+def import_embeddings(req: EmbeddingImportRequest):
+    result = face_service.import_embeddings(req.index_b64, req.metadata)
+    return EmbeddingImportResponse(**result)
+
+
+@router.post("/embeddings/reload", response_model=EmbeddingImportResponse)
+def reload_embeddings():
+    return EmbeddingImportResponse(**face_service.reload_embeddings())
 
 
 @router.post("/delete")

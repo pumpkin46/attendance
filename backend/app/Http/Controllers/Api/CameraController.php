@@ -44,6 +44,7 @@ class CameraController extends Controller
             'stream_url' => ['nullable', 'string', 'regex:/^(rtsp|rtmp|http|https):\/\/.+/i'],
             'status' => 'in:active,inactive,maintenance',
             'direction' => 'in:in,out,both',
+            'deployment_mode' => 'in:cloud,edge',
         ]);
 
         if (empty($data['device_id'])) {
@@ -52,6 +53,7 @@ class CameraController extends Controller
 
         $data['status'] ??= Camera::STATUS_ACTIVE;
         $data['direction'] ??= 'both';
+        $data['deployment_mode'] ??= 'cloud';
 
         $maxCameras = config('nfr.max_cameras', 100);
         if (Camera::where('status', Camera::STATUS_ACTIVE)->count() >= $maxCameras) {
@@ -80,6 +82,7 @@ class CameraController extends Controller
             'stream_url' => ['nullable', 'string', 'regex:/^(rtsp|rtmp|http|https):\/\/.+/i'],
             'status' => 'in:active,inactive,maintenance',
             'direction' => 'in:in,out,both',
+            'deployment_mode' => 'in:cloud,edge',
             'is_active' => 'boolean',
         ]));
         $this->audit->log('camera.updated', $camera, $old, $camera->fresh()->toArray());

@@ -34,6 +34,7 @@ const emptyForm = {
   name: '',
   stream_url: '',
   status: 'active' as Camera['status'],
+  deployment_mode: 'cloud' as Camera['deployment_mode'],
 }
 
 export default function CamerasPage() {
@@ -62,6 +63,7 @@ export default function CamerasPage() {
       name: camera.name,
       stream_url: camera.stream_url ?? '',
       status: camera.status,
+      deployment_mode: camera.deployment_mode ?? 'cloud',
     })
   }
 
@@ -78,6 +80,7 @@ export default function CamerasPage() {
       name: form.name,
       stream_url: form.stream_url || null,
       status: form.status,
+      deployment_mode: form.deployment_mode,
     }
 
     if (editingId) {
@@ -175,6 +178,21 @@ export default function CamerasPage() {
                 <option value="maintenance">Maintenance</option>
               </Select>
             </Label>
+            <Label>
+              Deployment
+              <Select
+                value={form.deployment_mode}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    deployment_mode: e.target.value as Camera['deployment_mode'],
+                  })
+                }
+              >
+                <option value="cloud">Cloud (central AI)</option>
+                <option value="edge">Edge (on-device AI)</option>
+              </Select>
+            </Label>
             <div className="flex items-end sm:col-span-2">
               <Button type="submit">{editingId ? 'Update camera' : 'Register camera'}</Button>
             </div>
@@ -214,6 +232,7 @@ export default function CamerasPage() {
           <Th>Location</Th>
           <Th>RTSP URL</Th>
           <Th>Status</Th>
+          <Th>Deployment</Th>
           <Th>Online</Th>
           <Th>Frame rate</Th>
           <Th>Recognitions</Th>
@@ -222,7 +241,7 @@ export default function CamerasPage() {
         <TableBody>
           {cameras.length === 0 ? (
             <tr>
-              <Td colSpan={8} className="text-slate-400">
+              <Td colSpan={9} className="text-slate-400">
                 No cameras registered yet
               </Td>
             </tr>
@@ -239,6 +258,11 @@ export default function CamerasPage() {
                     }
                   >
                     {STATUS_LABELS[c.status]}
+                  </Badge>
+                </Td>
+                <Td>
+                  <Badge tone={c.deployment_mode === 'edge' ? 'ok' : 'neutral'}>
+                    {c.deployment_mode === 'edge' ? 'Edge' : 'Cloud'}
                   </Badge>
                 </Td>
                 <Td>

@@ -4,6 +4,8 @@ return [
     'duplicate_window_seconds' => (int) env('FACE_DUPLICATE_WINDOW_SECONDS', 60),
     'rfid_duplicate_window_seconds' => (int) env('RFID_DUPLICATE_WINDOW_SECONDS', 60),
     'rfid_reader_offline_seconds' => (int) env('RFID_READER_OFFLINE_SECONDS', 300),
+    'edge_offline_seconds' => (int) env('EDGE_DEVICE_OFFLINE_SECONDS', 300),
+    'edge_sync_interval_seconds' => (int) env('EDGE_SYNC_INTERVAL_SECONDS', 300),
     'overtime_threshold_minutes' => (int) env('ATTENDANCE_OVERTIME_THRESHOLD_MINUTES', 480),
     'default_grace_minutes' => 15,
     'unknown_person_alert' => filter_var(env('UNKNOWN_PERSON_ALERT', true), FILTER_VALIDATE_BOOL),

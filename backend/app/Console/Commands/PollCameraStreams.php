@@ -23,6 +23,7 @@ class PollCameraStreams extends Command
         do {
             $cameras = Camera::query()
                 ->where('status', Camera::STATUS_ACTIVE)
+                ->where('deployment_mode', 'cloud')
                 ->whereNotNull('stream_url')
                 ->where('stream_url', '!=', '')
                 ->get();

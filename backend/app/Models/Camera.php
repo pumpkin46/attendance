@@ -16,7 +16,7 @@ class Camera extends Model
 
     protected $fillable = [
         'location_id', 'name', 'device_id', 'stream_url',
-        'direction', 'status', 'is_active', 'last_heartbeat_at',
+        'direction', 'deployment_mode', 'status', 'is_active', 'last_heartbeat_at',
         'frame_rate_fps', 'last_frame_at',
     ];
 
@@ -49,5 +49,10 @@ class Camera extends Model
     public function recognitionEvents(): HasMany
     {
         return $this->hasMany(RecognitionEvent::class);
+    }
+
+    public function edgeDevice(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(EdgeDevice::class);
     }
 }

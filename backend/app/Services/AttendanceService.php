@@ -27,7 +27,9 @@ class AttendanceService
         float $confidence,
         bool $livenessPassed,
         int $processingMs,
-        string $imageHash
+        string $imageHash,
+        string $source = 'cloud',
+        ?array $extraMetadata = null,
     ): array {
         $window = config('attendance.duplicate_window_seconds', 60);
         $cacheKey = "attendance:dup:{$employee->id}";
@@ -42,7 +44,7 @@ class AttendanceService
         $workDate = $now->toDateString();
         $direction = $camera?->direction ?? 'both';
 
-        return DB::transaction(function () use ($employee, $camera, $confidence, $livenessPassed, $processingMs, $imageHash, $now, $workDate, $direction) {
+        return DB::transaction(function () use ($employee, $camera, $confidence, $livenessPassed, $processingMs, $imageHash, $now, $workDate, $direction, $source, $extraMetadata) {
             if ($this->isOnLeaveOrHoliday($employee, $workDate)) {
                 RecognitionEvent::create([
                     'camera_id' => $camera?->id,
@@ -52,7 +54,7 @@ class AttendanceService
                     'liveness_passed' => $livenessPassed,
                     'processing_ms' => $processingMs,
                     'image_hash' => $imageHash,
-                    'metadata' => ['skipped' => 'on_leave_or_holiday'],
+                    'metadata' => array_merge(['skipped' => 'on_leave_or_holiday', 'source' => $source], $extraMetadata ?? []),
                     'recognized_at' => $now,
                 ]);
 
@@ -95,7 +97,7 @@ class AttendanceService
                 'liveness_passed' => $livenessPassed,
                 'processing_ms' => $processingMs,
                 'image_hash' => $imageHash,
-                'metadata' => ['attendance_action' => $action],
+                'metadata' => array_merge(['attendance_action' => $action, 'source' => $source], $extraMetadata ?? []),
                 'recognized_at' => $now,
             ]);
 
@@ -199,6 +201,52 @@ class AttendanceService
             'result' => $result,
             'metadata' => $metadata,
             'tapped_at' => $tappedAt ?? now(),
+        ]);
+    }
+
+    public function processEdgeRecognition(
+        Employee $employee,
+        ?Camera $camera,
+        float $confidence,
+        bool $livenessPassed,
+        int $processingMs,
+        int $edgeDeviceId,
+    ): array {
+        $imageHash = hash('sha256', "edge:{$edgeDeviceId}:{$employee->id}:".now()->timestamp);
+
+        return $this->processRecognition(
+            $employee,
+            $camera,
+            $confidence,
+            $livenessPassed,
+            $processingMs,
+            $imageHash,
+            'edge',
+            ['edge_device_id' => $edgeDeviceId],
+        );
+    }
+
+    public function recordEdgeUnknown(
+        ?Camera $camera,
+        float $confidence,
+        bool $livenessPassed,
+        int $processingMs,
+        int $edgeDeviceId,
+    ): RecognitionEvent {
+        $imageHash = hash('sha256', "edge:unknown:{$edgeDeviceId}:".now()->timestamp);
+
+        return RecognitionEvent::create([
+            'camera_id' => $camera?->id,
+            'result' => 'unknown',
+            'confidence' => $confidence,
+            'liveness_passed' => $livenessPassed,
+            'processing_ms' => $processingMs,
+            'image_hash' => $imageHash,
+            'metadata' => [
+                'source' => 'edge',
+                'edge_device_id' => $edgeDeviceId,
+            ],
+            'recognized_at' => now(),
         ]);
     }
 

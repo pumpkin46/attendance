@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\AttendanceController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CameraController;
+use App\Http\Controllers\Api\EdgeDeviceApiController;
+use App\Http\Controllers\Api\EdgeDeviceController;
 use App\Http\Controllers\Api\EmployeeController;
 use App\Http\Controllers\Api\FaceEnrollmentController;
 use App\Http\Controllers\Api\HealthController;
@@ -30,6 +32,14 @@ Route::prefix('v1')->group(function () {
     Route::get('/auth/oauth/{provider}/callback', [AuthController::class, 'oauthCallback']);
 
     Route::post('/rfid/tap', [RfidTapController::class, 'tap'])->middleware('rfid.reader');
+
+    Route::middleware('edge.device')->prefix('edge')->group(function () {
+        Route::get('/config', [EdgeDeviceApiController::class, 'config']);
+        Route::get('/embeddings', [EdgeDeviceApiController::class, 'embeddings']);
+        Route::post('/sync-ack', [EdgeDeviceApiController::class, 'syncAck']);
+        Route::post('/heartbeat', [EdgeDeviceApiController::class, 'heartbeat']);
+        Route::post('/report', [EdgeDeviceApiController::class, 'report']);
+    });
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -62,6 +72,13 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('cameras', CameraController::class)->middleware('permission:cameras.manage');
         Route::post('cameras/{camera}/heartbeat', [CameraController::class, 'heartbeat']);
         Route::post('cameras/{camera}/capture', [CameraController::class, 'capture'])->middleware('permission:cameras.manage');
+
+        Route::get('edge-devices/monitoring', [EdgeDeviceController::class, 'monitoring']);
+        Route::apiResource('edge-devices', EdgeDeviceController::class)->middleware('permission:edge.manage');
+        Route::post('edge-devices/{edge_device}/regenerate-token', [EdgeDeviceController::class, 'regenerateToken'])
+            ->middleware('permission:edge.manage');
+        Route::get('edge-devices/{edge_device}/agent-config', [EdgeDeviceController::class, 'agentConfig'])
+            ->middleware('permission:edge.manage');
 
         Route::apiResource('rfid-readers', RfidReaderController::class)->middleware('permission:rfid.manage');
         Route::post('rfid-readers/{rfid_reader}/regenerate-token', [RfidReaderController::class, 'regenerateToken'])

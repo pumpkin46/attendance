@@ -124,3 +124,22 @@ class StreamCaptureResponse(BaseModel):
     image_height: int | None = None
     processing_ms: int = 0
     error: str | None = None
+
+
+class EmbeddingExportResponse(BaseModel):
+    success: bool = True
+    version: str
+    embedding_count: int = 0
+    index_b64: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EmbeddingImportRequest(BaseModel):
+    index_b64: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EmbeddingImportResponse(BaseModel):
+    success: bool = True
+    embedding_count: int = 0
+    version: str | None = None

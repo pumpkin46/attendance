@@ -380,3 +380,32 @@ def detect_faces(image_b64: str) -> dict:
         "image_width": w,
         "image_height": h,
     }
+
+
+def export_embeddings() -> dict:
+    idx = get_index()
+    bundle = idx.export_bundle()
+    return {"success": True, **bundle}
+
+
+def import_embeddings(index_b64: str, metadata: dict) -> dict:
+    global _index
+    idx = get_index()
+    idx.import_bundle(index_b64, metadata)
+    _index = idx
+    return {
+        "success": True,
+        "embedding_count": idx.count(),
+        "version": idx.version_hash(),
+    }
+
+
+def reload_embeddings() -> dict:
+    global _index
+    _index = None
+    idx = get_index()
+    return {
+        "success": True,
+        "embedding_count": idx.count(),
+        "version": idx.version_hash(),
+    }

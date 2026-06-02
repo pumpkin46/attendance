@@ -49,6 +49,7 @@ class CameraMonitoringService
             'last_frame_at' => $camera->last_frame_at?->toIso8601String(),
             'recognition_count_today' => $recognitionToday,
             'direction' => $camera->direction,
+            'deployment_mode' => $camera->deployment_mode ?? 'cloud',
             'device_id' => $camera->device_id,
         ];
     }

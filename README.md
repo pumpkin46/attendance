@@ -98,6 +98,7 @@ UI runs at **http://127.0.0.1:5173**
 | Shift Management | Schedules, grace periods, assignments |
 | Reporting | Summary, overtime, CSV export |
 | Camera Management | Multi-camera, heartbeat monitoring |
+| Edge AI Deployment | On-device inference via edge-agent |
 | Audit Logs | All sensitive actions logged |
 
 ## Recognition flow
@@ -115,6 +116,20 @@ UI runs at **http://127.0.0.1:5173**
 3. Physical reader POSTs to `POST /api/v1/rfid/tap` with `Authorization: Bearer <token>` and body `{ "uid": "A1B2C3D4" }`
 4. Laravel looks up the card, records check-in or check-out (60s duplicate window by default)
 5. Unknown or inactive cards are logged in `rfid_events`
+
+## Edge AI deployment
+
+Run face recognition **on the camera site** (Jetson, NUC, etc.) instead of streaming video to central AI.
+
+```
+IP Camera → edge-agent → local ai-service → Laravel API (match results only)
+```
+
+1. Admin deploys an edge device in **Edge AI** UI and links it to a camera
+2. Install `ai-service` + `edge-agent` on the edge hardware (see `edge-agent/README.md`)
+3. Agent syncs FAISS embeddings from central server and runs local identify
+4. Only match results are POSTed to `/api/v1/edge/report` — no images leave the device
+5. Cloud-mode cameras continue using `php artisan cameras:poll-streams`
 
 ## Security notes
 
@@ -175,5 +190,6 @@ attendance/
 ├── backend/       # Laravel API
 ├── frontend/      # React admin UI
 ├── ai-service/    # FastAPI face recognition
+├── edge-agent/    # On-site camera agent
 └── README.md
 ```

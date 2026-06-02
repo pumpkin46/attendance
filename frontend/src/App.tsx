@@ -6,6 +6,7 @@ import AttendancePage from './pages/AttendancePage'
 import AuditLogsPage from './pages/AuditLogsPage'
 import CamerasPage from './pages/CamerasPage'
 import DashboardPage from './pages/DashboardPage'
+import EdgeDevicesPage from './pages/EdgeDevicesPage'
 import EmployeesPage from './pages/EmployeesPage'
 import EnrollmentPage from './pages/EnrollmentPage'
 import LiveKioskPage from './pages/LiveKioskPage'
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="attendance" element={<AttendancePage />} />
             <Route path="shifts" element={<ShiftsPage />} />
             <Route path="cameras" element={<CamerasPage />} />
+            <Route path="edge-devices" element={<EdgeDevicesPage />} />
             <Route path="rfid" element={<RfidPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="unknown-faces" element={<UnknownFacesPage />} />
