@@ -7,6 +7,9 @@ import AttendancePage from './pages/AttendancePage'
 import AuditLogsPage from './pages/AuditLogsPage'
 import CamerasPage from './pages/CamerasPage'
 import DashboardPage from './pages/DashboardPage'
+import MonitoringPage from './pages/MonitoringPage'
+import AccessControlPage from './pages/AccessControlPage'
+import VisitorsPage from './pages/VisitorsPage'
 import EdgeDevicesPage from './pages/EdgeDevicesPage'
 import EmployeesPage from './pages/EmployeesPage'
 import EnrollmentPage from './pages/EnrollmentPage'
@@ -33,7 +36,11 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<DashboardPage />} />
+            <Route index element={<MonitoringPage />} />
+            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="monitoring" element={<MonitoringPage />} />
+            <Route path="access-control" element={<AccessControlPage />} />
+            <Route path="visitors" element={<VisitorsPage />} />
             <Route path="employees" element={<EmployeesPage />} />
             <Route path="enrollment" element={<EnrollmentPage />} />
             <Route path="live-kiosk" element={<LiveKioskPage />} />

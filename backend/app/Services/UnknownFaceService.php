@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Camera;
 use App\Models\RecognitionEvent;
+use App\Services\LiveEventService;
 use App\Models\User;
 use App\Notifications\UnknownFaceDetected;
 use Illuminate\Support\Facades\Cache;
@@ -43,6 +44,12 @@ class UnknownFaceService
 
         if ($event->result === 'unknown') {
             $this->maybeNotifyAdmins($event, $camera);
+            app(LiveEventService::class)->record(
+                'unknown_person',
+                now()->format('H:i').' Unknown Person Detected',
+                $camera?->location?->organization_id,
+                ['camera_id' => $camera?->id],
+            );
         }
 
         return $event->load('camera');

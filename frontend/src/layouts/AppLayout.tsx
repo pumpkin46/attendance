@@ -4,7 +4,9 @@ import { useAuth } from '../contexts/AuthContext'
 import { Button } from '../components/ui/Button'
 
 const nav = [
-  { to: '/', label: 'Dashboard', end: true },
+  { to: '/', label: 'Monitoring', end: true },
+  { to: '/visitors', label: 'Visitors' },
+  { to: '/access-control', label: 'Access Control' },
   { to: '/employees', label: 'Employees' },
   { to: '/enrollment', label: 'Face Enrollment' },
   { to: '/live-kiosk', label: 'Live Kiosk' },

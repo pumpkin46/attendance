@@ -6,10 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Camera;
 use App\Models\Employee;
 use App\Models\RecognitionEvent;
+use App\Services\AccessControlService;
 use App\Services\AiRecognitionClient;
 use App\Services\AttendanceService;
 use App\Services\NfrComplianceService;
 use App\Services\RecognitionMetricsService;
+use App\Services\VisitorService;
 use App\Support\CameraSourceResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +25,8 @@ class RecognitionController extends Controller
         private readonly AttendanceService $attendance,
         private readonly NfrComplianceService $nfr,
         private readonly RecognitionMetricsService $metrics,
+        private readonly AccessControlService $accessControl,
+        private readonly VisitorService $visitors,
     ) {}
 
     public function config(): JsonResponse
@@ -122,9 +126,22 @@ class RecognitionController extends Controller
             ], $this->slaMeta($processingMs)));
         }
 
-        $employeeId = $result['employee_id'] ?? null;
+        $identityId = (string) ($result['employee_id'] ?? '');
 
-        if (! $employeeId || $confidence < $threshold) {
+        if ($identityId !== '' && str_starts_with($identityId, 'visitor-')) {
+            return $this->handleVisitorIdentification(
+                $identityId,
+                $camera,
+                $confidence,
+                $livenessPassed,
+                $processingMs,
+                $threshold,
+                $result,
+                $source,
+            );
+        }
+
+        if (! $identityId || $confidence < $threshold) {
             $event = $this->attendance->recordUnknown(
                 $camera,
                 $confidence,
@@ -137,14 +154,14 @@ class RecognitionController extends Controller
 
             return response()->json(array_merge([
                 'matched' => false,
-                'reason' => $employeeId ? 'low_confidence' : 'unknown',
+                'reason' => $identityId ? 'low_confidence' : 'unknown',
                 'confidence' => $confidence,
                 'event_id' => $event->id,
                 'snapshot_url' => $event->snapshotUrl(),
             ], $this->slaMeta($processingMs)));
         }
 
-        $employee = Employee::where('id', $employeeId)->where('is_active', true)->first();
+        $employee = Employee::where('id', $identityId)->where('is_active', true)->first();
 
         if (! $employee) {
             $event = $this->attendance->recordUnknown(
@@ -176,6 +193,8 @@ class RecognitionController extends Controller
             $this->eventMetadata($result, $source),
         );
 
+        $accessResult = $this->triggerAccessControl($camera, $employee, null, $confidence, $livenessPassed);
+
         return response()->json(array_merge([
             'matched' => true,
             'employee' => $employee->only(['id', 'employee_code', 'first_name', 'last_name']),
@@ -186,7 +205,64 @@ class RecognitionController extends Controller
             'quality_score' => $result['quality_score'] ?? null,
             'pipeline' => $result['pipeline'] ?? null,
             'attendance' => $attendanceResult,
+            'access' => $accessResult,
         ], $this->slaMeta($processingMs, $result)));
+    }
+
+    private function handleVisitorIdentification(
+        string $identityId,
+        ?Camera $camera,
+        float $confidence,
+        bool $livenessPassed,
+        int $processingMs,
+        float $threshold,
+        array $result,
+        string $source,
+    ): JsonResponse {
+        $visitor = $this->visitors->resolveVisitorFromIdentity($identityId);
+
+        if (! $visitor || $confidence < $threshold) {
+            return response()->json(array_merge([
+                'matched' => false,
+                'reason' => $visitor ? 'low_confidence' : 'visitor_expired',
+                'confidence' => $confidence,
+            ], $this->slaMeta($processingMs, $result)));
+        }
+
+        $accessResult = $this->triggerAccessControl($camera, null, $visitor, $confidence, $livenessPassed);
+
+        if ($visitor->status === 'scheduled') {
+            $visitor->update(['status' => 'checked_in']);
+        }
+
+        return response()->json(array_merge([
+            'matched' => true,
+            'visitor' => $visitor->only(['id', 'name', 'company', 'visit_end_at', 'face_expires_at']),
+            'confidence' => $confidence,
+            'liveness_passed' => $livenessPassed,
+            'access' => $accessResult,
+        ], $this->slaMeta($processingMs, $result)));
+    }
+
+    private function triggerAccessControl(
+        ?Camera $camera,
+        ?Employee $employee,
+        ?\App\Models\Visitor $visitor,
+        float $confidence,
+        bool $livenessPassed,
+    ): ?array {
+        $point = $this->accessControl->findPointForCamera($camera?->id);
+        if (! $point) {
+            return null;
+        }
+
+        return $this->accessControl->evaluateAndExecute(
+            $point,
+            $employee,
+            $visitor,
+            $confidence,
+            $livenessPassed,
+        );
     }
 
     public function recognize(Request $request): JsonResponse

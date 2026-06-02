@@ -1,7 +1,10 @@
 <?php
 
 use App\Http\Controllers\Api\AttendanceAnomalyController;
+use App\Http\Controllers\Api\AccessPointController;
 use App\Http\Controllers\Api\AttendanceController;
+use App\Http\Controllers\Api\MonitoringCenterController;
+use App\Http\Controllers\Api\VisitorController;
 use App\Http\Controllers\Api\AttendancePolicyController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
@@ -125,6 +128,17 @@ Route::prefix('v1')->group(function () {
         Route::get('reports/overtime', [ReportController::class, 'overtime'])->middleware('permission:reports.view');
         Route::get('reports/unknown-persons', [ReportController::class, 'unknownPersons'])->middleware('permission:reports.view');
         Route::get('reports/export', [ReportController::class, 'export'])->middleware('permission:reports.export');
+
+        Route::get('monitoring/dashboard', [MonitoringCenterController::class, 'dashboard']);
+        Route::get('monitoring/live-feed', [MonitoringCenterController::class, 'liveFeed']);
+
+        Route::get('access-points/config', [AccessPointController::class, 'config']);
+        Route::apiResource('access-points', AccessPointController::class)->middleware('permission:cameras.manage');
+        Route::post('access-points/{access_point}/execute', [AccessPointController::class, 'execute'])
+            ->middleware('permission:cameras.manage');
+
+        Route::apiResource('visitors', VisitorController::class);
+        Route::post('visitors/{visitor}/enroll-face', [VisitorController::class, 'enrollFace']);
 
         Route::get('audit-logs', [AuditLogController::class, 'index'])->middleware('permission:audit.view');
 

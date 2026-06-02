@@ -18,6 +18,7 @@ class AttendanceService
         private readonly AuditService $audit,
         private readonly UnknownFaceService $unknownFaces,
         private readonly AttendancePolicyService $policies,
+        private readonly LiveEventService $liveEvents,
     ) {}
 
     public function processRecognition(
@@ -119,6 +120,7 @@ class AttendanceService
                     'attendance_type' => $status,
                 ]);
                 $action = 'check_in';
+                $this->recordAttendanceLiveEvent($employee, $action, $camera);
             } elseif ($record->check_in_at && ! $record->check_out_at) {
                 $checkOutGate = $this->policies->canAutoCheckOut($employee, $camera, $now, true);
                 if ($checkOutGate['allowed']) {
@@ -128,6 +130,7 @@ class AttendanceService
                     ]);
                     $this->calculateWorkedTime($record->fresh());
                     $action = 'check_out';
+                    $this->recordAttendanceLiveEvent($employee, $action, $camera);
                 }
             }
 
@@ -320,6 +323,23 @@ class AttendanceService
             $imageHash,
             $imageBase64,
             $source,
+        );
+    }
+
+    private function recordAttendanceLiveEvent(Employee $employee, string $action, ?Camera $camera): void
+    {
+        $time = now()->format('H:i');
+        $name = trim("{$employee->first_name} {$employee->last_name}");
+        $label = $action === 'check_out' ? 'Checked Out' : 'Checked In';
+
+        $this->liveEvents->record(
+            $action === 'check_out' ? 'check_out' : 'check_in',
+            "{$time} {$name} {$label}",
+            $employee->organization_id,
+            [
+                'employee_id' => $employee->id,
+                'camera_id' => $camera?->id,
+            ],
         );
     }
 
