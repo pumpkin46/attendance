@@ -39,6 +39,11 @@ class Employee extends Model
         return $this->hasMany(FaceEmbedding::class);
     }
 
+    public function faceEnrollmentSessions(): HasMany
+    {
+        return $this->hasMany(FaceEnrollmentSession::class);
+    }
+
     public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);

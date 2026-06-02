@@ -1,5 +1,9 @@
 import { useState } from 'react'
 import { api } from '../api/client'
+import { Button } from '../components/ui/Button'
+import { Input } from '../components/ui/Input'
+import { PageHeader } from '../components/ui/PageHeader'
+import { StatCard } from '../components/ui/StatCard'
 
 export default function ReportsPage() {
   const [dateFrom, setDateFrom] = useState(() => {
@@ -40,31 +44,28 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h1>Reports</h1>
-          <p className="muted">Attendance summaries, overtime, and exports</p>
-        </div>
-        <div className="filters">
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          <span>to</span>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          <button type="button" className="btn btn-primary" onClick={loadSummary} disabled={loading}>
-            Run report
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={exportCsv}>
-            Export CSV
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Reports"
+        description="Attendance summaries, overtime, and exports"
+        actions={
+          <>
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <span className="text-slate-500">to</span>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            <Button onClick={loadSummary} disabled={loading}>
+              Run report
+            </Button>
+            <Button variant="ghost" onClick={exportCsv}>
+              Export CSV
+            </Button>
+          </>
+        }
+      />
 
       {summary && (
-        <div className="stat-grid">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
           {Object.entries(byStatus).map(([status, count]) => (
-            <div key={status} className="stat-card">
-              <span className="stat-label">{status}</span>
-              <span className="stat-value">{count}</span>
-            </div>
+            <StatCard key={status} label={status} value={count} />
           ))}
         </div>
       )}

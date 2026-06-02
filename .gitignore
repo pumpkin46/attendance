@@ -89,6 +89,8 @@ ai-service/*.egg
 ai-service/data/*
 !ai-service/data/.gitkeep
 
+backend/storage/app/enrollment/
+
 # Anti-spoof ONNX weights (download via scripts/download_antispoof_model.py)
 ai-service/models/*
 !ai-service/models/.gitkeep

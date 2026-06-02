@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { PageHeader } from '../components/ui/PageHeader'
+import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
 
 interface Shift {
   id: number
@@ -19,33 +21,28 @@ export default function ShiftsPage() {
 
   return (
     <div>
-      <h1>Shift Management</h1>
-      <p className="muted">Define work schedules and grace periods</p>
+      <PageHeader title="Shift Management" description="Define work schedules and grace periods" />
 
-      <div className="card table-card">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Start</th>
-              <th>End</th>
-              <th>Grace (min)</th>
-              <th>Status</th>
+      <TableShell>
+        <TableHead>
+          <Th>Name</Th>
+          <Th>Start</Th>
+          <Th>End</Th>
+          <Th>Grace (min)</Th>
+          <Th>Status</Th>
+        </TableHead>
+        <TableBody>
+          {shifts.map((s) => (
+            <tr key={s.id}>
+              <Td>{s.name}</Td>
+              <Td>{s.start_time}</Td>
+              <Td>{s.end_time}</Td>
+              <Td>{s.grace_minutes}</Td>
+              <Td>{s.is_active ? 'Active' : 'Inactive'}</Td>
             </tr>
-          </thead>
-          <tbody>
-            {shifts.map((s) => (
-              <tr key={s.id}>
-                <td>{s.name}</td>
-                <td>{s.start_time}</td>
-                <td>{s.end_time}</td>
-                <td>{s.grace_minutes}</td>
-                <td>{s.is_active ? 'Active' : 'Inactive'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </TableBody>
+      </TableShell>
     </div>
   )
 }

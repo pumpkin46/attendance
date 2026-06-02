@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { Badge } from '../components/ui/Badge'
+import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
+import { StatCard } from '../components/ui/StatCard'
 
 interface TodaySummary {
   date: string
@@ -23,49 +27,37 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h1>Dashboard</h1>
-      <p className="muted">Real-time workforce attendance overview</p>
+      <PageHeader
+        title="Dashboard"
+        description="Real-time workforce attendance overview"
+      />
 
-      <div className="stat-grid">
-        <div className="stat-card">
-          <span className="stat-label">Present today</span>
-          <span className="stat-value">{summary?.present ?? '—'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Late</span>
-          <span className="stat-value warn">{summary?.late ?? '—'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Absent</span>
-          <span className="stat-value danger">{summary?.absent ?? '—'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">On leave</span>
-          <span className="stat-value">{summary?.on_leave ?? '—'}</span>
-        </div>
+      <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+        <StatCard label="Present today" value={summary?.present ?? '—'} />
+        <StatCard label="Late" value={summary?.late ?? '—'} tone="warn" />
+        <StatCard label="Absent" value={summary?.absent ?? '—'} tone="danger" />
+        <StatCard label="On leave" value={summary?.on_leave ?? '—'} />
       </div>
 
-      <div className="card">
-        <h2>System status</h2>
-        <ul className="status-list">
-          <li>
+      <Card>
+        <h2 className="mb-4 text-lg font-medium">System status</h2>
+        <ul className="divide-y divide-slate-800">
+          <li className="flex items-center justify-between py-3">
             <span>API</span>
-            <span className="badge badge-ok">Operational</span>
+            <Badge tone="ok">Operational</Badge>
           </li>
-          <li>
+          <li className="flex items-center justify-between py-3">
             <span>AI recognition service</span>
-            <span
-              className={`badge ${aiHealth?.status === 'ok' ? 'badge-ok' : 'badge-warn'}`}
-            >
+            <Badge tone={aiHealth?.status === 'ok' ? 'ok' : 'warn'}>
               {String(aiHealth?.status ?? 'checking')}
-            </span>
+            </Badge>
           </li>
-          <li>
+          <li className="flex items-center justify-between py-3">
             <span>Recognition threshold</span>
-            <span>≥ 95%</span>
+            <span className="text-slate-300">≥ 95%</span>
           </li>
         </ul>
-      </div>
+      </Card>
     </div>
   )
 }

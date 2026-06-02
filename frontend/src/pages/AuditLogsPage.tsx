@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { PageHeader } from '../components/ui/PageHeader'
+import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
 import type { Paginated } from '../types'
 
 interface AuditLog {
@@ -23,37 +25,30 @@ export default function AuditLogsPage() {
 
   return (
     <div>
-      <h1>Audit Logs</h1>
-      <p className="muted">GDPR-ready activity trail for compliance</p>
+      <PageHeader title="Audit Logs" description="GDPR-ready activity trail for compliance" />
 
-      <div className="card table-card">
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>User</th>
-              <th>Action</th>
-              <th>Entity</th>
-              <th>IP</th>
+      <TableShell>
+        <TableHead>
+          <Th>Time</Th>
+          <Th>User</Th>
+          <Th>Action</Th>
+          <Th>Entity</Th>
+          <Th>IP</Th>
+        </TableHead>
+        <TableBody>
+          {logs.map((log) => (
+            <tr key={log.id}>
+              <Td>{new Date(log.created_at).toLocaleString()}</Td>
+              <Td>{log.user?.name ?? 'System'}</Td>
+              <Td>
+                <code className="rounded bg-slate-800 px-1.5 py-0.5 text-xs">{log.action}</code>
+              </Td>
+              <Td>{log.entity_type ? `${log.entity_type}#${log.entity_id}` : '—'}</Td>
+              <Td>{log.ip_address ?? '—'}</Td>
             </tr>
-          </thead>
-          <tbody>
-            {logs.map((log) => (
-              <tr key={log.id}>
-                <td>{new Date(log.created_at).toLocaleString()}</td>
-                <td>{log.user?.name ?? 'System'}</td>
-                <td><code>{log.action}</code></td>
-                <td>
-                  {log.entity_type
-                    ? `${log.entity_type}#${log.entity_id}`
-                    : '—'}
-                </td>
-                <td>{log.ip_address ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </TableBody>
+      </TableShell>
     </div>
   )
 }

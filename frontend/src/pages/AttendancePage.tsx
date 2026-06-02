@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { Badge } from '../components/ui/Badge'
+import { Input } from '../components/ui/Input'
+import { PageHeader } from '../components/ui/PageHeader'
+import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
 import type { AttendanceRecord, Paginated } from '../types'
 
 export default function AttendancePage() {
@@ -23,52 +27,46 @@ export default function AttendancePage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h1>Attendance</h1>
-          <p className="muted">Automated check-in/out via face recognition</p>
-        </div>
-        <div className="filters">
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          <span>to</span>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-        </div>
-      </div>
+      <PageHeader
+        title="Attendance"
+        description="Automated check-in/out via face recognition"
+        actions={
+          <>
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <span className="text-slate-500">to</span>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </>
+        }
+      />
 
-      <div className="card table-card">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Employee</th>
-              <th>Check in</th>
-              <th>Check out</th>
-              <th>Worked (min)</th>
-              <th>Overtime</th>
-              <th>Status</th>
+      <TableShell>
+        <TableHead>
+          <Th>Date</Th>
+          <Th>Employee</Th>
+          <Th>Check in</Th>
+          <Th>Check out</Th>
+          <Th>Worked (min)</Th>
+          <Th>Overtime</Th>
+          <Th>Status</Th>
+        </TableHead>
+        <TableBody>
+          {records.map((r) => (
+            <tr key={r.id}>
+              <Td>{r.work_date}</Td>
+              <Td>
+                {r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : '—'}
+              </Td>
+              <Td>{fmt(r.check_in_at)}</Td>
+              <Td>{fmt(r.check_out_at)}</Td>
+              <Td>{r.worked_minutes}</Td>
+              <Td>{r.overtime_minutes}</Td>
+              <Td>
+                <Badge tone={r.status === 'late' ? 'warn' : 'neutral'}>{r.status}</Badge>
+              </Td>
             </tr>
-          </thead>
-          <tbody>
-            {records.map((r) => (
-              <tr key={r.id}>
-                <td>{r.work_date}</td>
-                <td>
-                  {r.employee
-                    ? `${r.employee.first_name} ${r.employee.last_name}`
-                    : '—'}
-                </td>
-                <td>{fmt(r.check_in_at)}</td>
-                <td>{fmt(r.check_out_at)}</td>
-                <td>{r.worked_minutes}</td>
-                <td>{r.overtime_minutes}</td>
-                <td>
-                  <span className={`badge status-${r.status}`}>{r.status}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </TableBody>
+      </TableShell>
     </div>
   )
 }

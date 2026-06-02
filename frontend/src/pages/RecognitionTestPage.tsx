@@ -1,5 +1,10 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
+import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { Input } from '../components/ui/Input'
+import { Label } from '../components/ui/Label'
+import { PageHeader } from '../components/ui/PageHeader'
 
 interface IdentifyResult {
   matched: boolean
@@ -63,65 +68,70 @@ export default function RecognitionTestPage() {
 
   return (
     <div>
-      <h1>Test recognition (attendance)</h1>
-      <p className="muted">
-        Step 1: <strong>Face Enrollment</strong> with your image. Step 2: run recognition here (same or similar photo).
-      </p>
+      <PageHeader
+        title="Test recognition (attendance)"
+        description="Step 1: Face Enrollment with your image. Step 2: run recognition here (same or similar photo)."
+      />
 
-      <form className="card enroll-form" onSubmit={submit}>
-        <label>
-          Camera ID (optional)
-          <input
-            type="number"
-            placeholder="e.g. 1"
-            value={cameraId}
-            onChange={(e) => setCameraId(e.target.value)}
-          />
-        </label>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={requireLiveness}
-            onChange={(e) => setRequireLiveness(e.target.checked)}
-          />
-          Require liveness / anti-spoof (recommended for production)
-        </label>
-        <label>
-          Camera image
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
-            required
-          />
-        </label>
-        {preview && <img src={preview} alt="Preview" className="enroll-preview" />}
-        <button type="submit" className="btn btn-primary" disabled={loading}>
-          {loading ? 'Processing…' : 'Run recognition + attendance'}
-        </button>
-      </form>
+      <Card className="mb-6">
+        <form className="flex flex-col gap-4" onSubmit={submit}>
+          <Label>
+            Camera ID (optional)
+            <Input
+              type="number"
+              placeholder="e.g. 1"
+              value={cameraId}
+              onChange={(e) => setCameraId(e.target.value)}
+            />
+          </Label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
+              checked={requireLiveness}
+              onChange={(e) => setRequireLiveness(e.target.checked)}
+            />
+            Require liveness / anti-spoof (recommended for production)
+          </label>
+          <Label>
+            Camera image
+            <Input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+              required
+            />
+          </Label>
+          {preview && (
+            <img src={preview} alt="Preview" className="max-h-64 rounded-lg border border-slate-700" />
+          )}
+          <Button type="submit" disabled={loading}>
+            {loading ? 'Processing…' : 'Run recognition + attendance'}
+          </Button>
+        </form>
+      </Card>
 
-      {error && <p className="text-danger">{error}</p>}
+      {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
       {result && (
-        <div className="card">
-          <h2>Result</h2>
-          <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem' }}>
+        <Card>
+          <h2 className="mb-4 text-lg font-medium">Result</h2>
+          <pre className="overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs text-slate-300">
             {JSON.stringify(result, null, 2)}
           </pre>
           {result.matched && result.attendance?.action && (
-            <p className="text-ok">
+            <p className="mt-4 text-sm text-green-400">
               Attendance action: <strong>{result.attendance.action}</strong>
             </p>
           )}
           {!result.matched && (
-            <p className="text-danger">
+            <p className="mt-4 text-sm text-red-400">
               {reasonHelp[result.reason ?? ''] ??
                 `No match. Reason: ${result.reason ?? 'unknown'}`}
             </p>
           )}
-        </div>
+        </Card>
       )}
     </div>
   )

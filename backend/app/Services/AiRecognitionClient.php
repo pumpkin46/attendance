@@ -16,6 +16,19 @@ class AiRecognitionClient
         ]);
     }
 
+    public function validateImage(string $imageBase64): array
+    {
+        return $this->post('/api/v1/validate-image', ['image' => $imageBase64]);
+    }
+
+    public function enrollBatch(string $employeeId, array $images): array
+    {
+        return $this->post('/api/v1/enroll-batch', [
+            'employee_id' => $employeeId,
+            'images' => $images,
+        ]);
+    }
+
     public function identify(string $imageBase64, bool $requireLiveness = true): array
     {
         return $this->post('/api/v1/identify', [

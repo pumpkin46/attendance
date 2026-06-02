@@ -47,6 +47,14 @@ class FaissIndex:
         self._save()
         return idx
 
+    def add_batch(self, employee_id: str, embeddings: list[np.ndarray]) -> list[int]:
+        """Replace all embeddings for employee with a new batch."""
+        self.remove_employee(employee_id)
+        ids = []
+        for emb in embeddings:
+            ids.append(self.add(employee_id, emb))
+        return ids
+
     def search(self, embedding: np.ndarray, k: int = 1) -> tuple[str | None, float]:
         if self.index.ntotal == 0:
             return None, 0.0

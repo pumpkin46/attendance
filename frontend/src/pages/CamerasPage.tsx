@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { Badge } from '../components/ui/Badge'
+import { PageHeader } from '../components/ui/PageHeader'
+import { StatCard } from '../components/ui/StatCard'
+import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
 import type { Camera } from '../types'
 
 export default function CamerasPage() {
@@ -16,50 +20,39 @@ export default function CamerasPage() {
 
   return (
     <div>
-      <h1>Camera Management</h1>
-      <p className="muted">Multi-camera deployment and health monitoring</p>
+      <PageHeader title="Camera Management" description="Multi-camera deployment and health monitoring" />
 
-      <div className="stat-grid">
-        <div className="stat-card">
-          <span className="stat-label">Total cameras</span>
-          <span className="stat-value">{cameras.length}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Online</span>
-          <span className="stat-value">{cameras.filter(isOnline).length}</span>
-        </div>
+      <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+        <StatCard label="Total cameras" value={cameras.length} />
+        <StatCard label="Online" value={cameras.filter(isOnline).length} />
       </div>
 
-      <div className="card table-card">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Device ID</th>
-              <th>Location</th>
-              <th>Direction</th>
-              <th>Status</th>
-              <th>Last heartbeat</th>
+      <TableShell>
+        <TableHead>
+          <Th>Name</Th>
+          <Th>Device ID</Th>
+          <Th>Location</Th>
+          <Th>Direction</Th>
+          <Th>Status</Th>
+          <Th>Last heartbeat</Th>
+        </TableHead>
+        <TableBody>
+          {cameras.map((c) => (
+            <tr key={c.id}>
+              <Td>{c.name}</Td>
+              <Td>{c.device_id}</Td>
+              <Td>{c.location?.name ?? '—'}</Td>
+              <Td>{c.direction}</Td>
+              <Td>
+                <Badge tone={isOnline(c) ? 'ok' : 'warn'}>
+                  {isOnline(c) ? 'Online' : 'Offline'}
+                </Badge>
+              </Td>
+              <Td>{c.last_heartbeat_at ? new Date(c.last_heartbeat_at).toLocaleString() : '—'}</Td>
             </tr>
-          </thead>
-          <tbody>
-            {cameras.map((c) => (
-              <tr key={c.id}>
-                <td>{c.name}</td>
-                <td>{c.device_id}</td>
-                <td>{c.location?.name ?? '—'}</td>
-                <td>{c.direction}</td>
-                <td>
-                  <span className={isOnline(c) ? 'badge badge-ok' : 'badge badge-warn'}>
-                    {isOnline(c) ? 'Online' : 'Offline'}
-                  </span>
-                </td>
-                <td>{c.last_heartbeat_at ? new Date(c.last_heartbeat_at).toLocaleString() : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </TableBody>
+      </TableShell>
     </div>
   )
 }

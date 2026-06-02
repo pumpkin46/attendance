@@ -28,5 +28,14 @@ class Settings(BaseSettings):
     antispoof_require_both: bool = True
     antispoof_fail_without_model: bool = False
 
+    # FR-006 / FR-007 enrollment quality
+    enrollment_min_images: int = 10
+    enrollment_max_images: int = 50
+    quality_min_det_score: float = 0.5
+    quality_min_blur_score: float = 0.35
+    quality_min_occlusion_score: float = 0.4
+    quality_min_overall_score: float = 0.45
+    quality_blur_variance_ref: float = 120.0
+
 
 settings = Settings()

@@ -23,6 +23,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
 
         Route::apiResource('employees', EmployeeController::class);
+        Route::get('enrollment/config', [FaceEnrollmentController::class, 'config']);
+        Route::post('enrollment/validate-image', [FaceEnrollmentController::class, 'validateImage']);
+        Route::post('employees/{employee}/enroll-face-batch', [FaceEnrollmentController::class, 'enrollBatch']);
         Route::post('employees/{employee}/enroll-face', [FaceEnrollmentController::class, 'enroll']);
         Route::get('employees/{employee}/face-status', [FaceEnrollmentController::class, 'status']);
 

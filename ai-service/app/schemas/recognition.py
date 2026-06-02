@@ -57,3 +57,35 @@ class DetectResponse(BaseModel):
     processing_ms: int = 0
     image_width: int | None = None
     image_height: int | None = None
+
+
+class ValidateImageRequest(BaseModel):
+    image: str
+
+
+class ValidateImageResponse(BaseModel):
+    accepted: bool
+    reason: str | None = None
+    quality_score: float = 0.0
+    checks: dict[str, Any] = Field(default_factory=dict)
+    bbox: list[float] | None = None
+    processing_ms: int = 0
+
+
+class EnrollBatchRequest(BaseModel):
+    employee_id: str
+    images: list[str] = Field(..., min_length=1, description="10–50 base64 images")
+
+
+class EnrollBatchResponse(BaseModel):
+    success: bool
+    employee_id: str | None = None
+    embeddings_stored: int | None = None
+    faiss_ids: list[str] | None = None
+    average_quality_score: float | None = None
+    accepted: list[dict[str, Any]] | None = None
+    rejected: list[dict[str, Any]] | None = None
+    rejected_count: int | None = None
+    accepted_count: int | None = None
+    error: str | None = None
+    processing_ms: int | None = None

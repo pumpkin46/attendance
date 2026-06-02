@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { useWebcam } from '../hooks/useWebcam'
+import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { Input } from '../components/ui/Input'
+import { cn } from '../lib/cn'
 
 interface FaceBox {
   bbox: [number, number, number, number]
@@ -28,6 +32,16 @@ type KioskStatus = 'idle' | 'scanning' | 'face_detected' | 'recognized' | 'unkno
 
 const DETECT_MS = 400
 const IDENTIFY_MS = 1500
+
+const statusBarStyles: Record<KioskStatus, string> = {
+  idle: 'bg-slate-700 text-slate-300',
+  scanning: 'bg-blue-600/90 text-white',
+  face_detected: 'bg-blue-600/90 text-white',
+  recognized: 'bg-green-600/90 text-white',
+  unknown: 'bg-amber-600/90 text-white',
+  spoof: 'bg-red-600/90 text-white',
+  duplicate: 'bg-amber-600/90 text-white',
+}
 
 interface LiveKioskPageProps {
   fullscreen?: boolean
@@ -201,112 +215,115 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
     duplicate: 'Already checked in (duplicate ignored)',
   }
 
-  const statusClass: Record<KioskStatus, string> = {
-    idle: 'kiosk-status-idle',
-    scanning: 'kiosk-status-scan',
-    face_detected: 'kiosk-status-scan',
-    recognized: 'kiosk-status-ok',
-    unknown: 'kiosk-status-warn',
-    spoof: 'kiosk-status-danger',
-    duplicate: 'kiosk-status-warn',
-  }
-
-  const content = (
-    <div className={fullscreen ? 'kiosk-fullscreen' : 'kiosk-page'}>
-      <div className="kiosk-header">
+  return (
+    <div className={cn(fullscreen && 'fixed inset-0 z-50 overflow-auto bg-slate-950 p-6')}>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1>Live recognition</h1>
-          <p className="muted">Real-time face detection and attendance check-in/out</p>
+          <h1 className="text-2xl font-semibold">Live recognition</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Real-time face detection and attendance check-in/out
+          </p>
         </div>
-        <div className="kiosk-controls">
-          <input
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
             type="number"
             placeholder="Camera ID"
             value={cameraId}
             onChange={(e) => setCameraId(e.target.value)}
-            className="kiosk-input"
+            className="w-32"
           />
-          <label className="checkbox-row kiosk-check">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
+              className="rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
               checked={requireLiveness}
               onChange={(e) => setRequireLiveness(e.target.checked)}
             />
             Anti-spoof
           </label>
           {!active ? (
-            <button type="button" className="btn btn-primary" onClick={handleStart}>
+            <Button type="button" onClick={handleStart}>
               Start camera
-            </button>
+            </Button>
           ) : (
-            <button type="button" className="btn btn-ghost" onClick={handleStop}>
+            <Button type="button" variant="ghost" onClick={handleStop}>
               Stop
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
-      {camError && <p className="text-danger">{camError}</p>}
+      {camError && <p className="mb-4 text-sm text-red-400">{camError}</p>}
 
-      <div className="kiosk-layout">
-        <div className="kiosk-video-wrap">
-          <video ref={videoRef} className="kiosk-video" playsInline muted autoPlay />
-          <canvas ref={overlayRef} className="kiosk-overlay" />
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="relative overflow-hidden rounded-xl bg-black">
+          <video ref={videoRef} className="block w-full" playsInline muted autoPlay />
+          <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
           <canvas ref={canvasRef} hidden />
-          <div className={`kiosk-status-bar ${statusClass[status]}`}>{statusLabel[status]}</div>
+          <div
+            className={cn(
+              'absolute bottom-0 left-0 right-0 px-4 py-3 text-center text-sm font-medium',
+              statusBarStyles[status]
+            )}
+          >
+            {statusLabel[status]}
+          </div>
         </div>
 
-        <div className="kiosk-panel card">
-          <h2>Live stats</h2>
-          <ul className="kiosk-stats">
-            <li>
-              <span>Status</span>
-              <strong>{statusLabel[status]}</strong>
+        <Card>
+          <h2 className="mb-4 text-lg font-medium">Live stats</h2>
+          <ul className="divide-y divide-slate-800 text-sm">
+            <li className="flex justify-between py-3">
+              <span className="text-slate-400">Status</span>
+              <strong className="text-right">{statusLabel[status]}</strong>
             </li>
-            <li>
-              <span>Faces in frame</span>
+            <li className="flex justify-between py-3">
+              <span className="text-slate-400">Faces in frame</span>
               <strong>{faces.length}</strong>
             </li>
-            <li>
-              <span>Detect latency</span>
+            <li className="flex justify-between py-3">
+              <span className="text-slate-400">Detect latency</span>
               <strong>{detectMs ? `${detectMs} ms` : '—'}</strong>
             </li>
-            <li>
-              <span>Recognize latency</span>
+            <li className="flex justify-between py-3">
+              <span className="text-slate-400">Recognize latency</span>
               <strong>{identifyMs ? `${identifyMs} ms` : '—'}</strong>
             </li>
-            <li>
-              <span>Throughput</span>
+            <li className="flex justify-between py-3">
+              <span className="text-slate-400">Throughput</span>
               <strong>{fpsHint || '—'}</strong>
             </li>
           </ul>
 
           {lastMatch?.matched && lastMatch.employee && (
-            <div className="kiosk-match">
-              <p className="text-ok">
-                <strong>
-                  {lastMatch.employee.first_name} {lastMatch.employee.last_name}
-                </strong>
+            <div className="mt-4 rounded-lg border border-green-500/30 bg-green-500/10 p-4">
+              <p className="font-medium text-green-400">
+                {lastMatch.employee.first_name} {lastMatch.employee.last_name}
               </p>
-              <p className="muted">{lastMatch.employee.employee_code}</p>
+              <p className="text-sm text-slate-400">{lastMatch.employee.employee_code}</p>
               {lastMatch.confidence != null && (
-                <p>Confidence: {(lastMatch.confidence * 100).toFixed(1)}%</p>
+                <p className="mt-1 text-sm">
+                  Confidence: {(lastMatch.confidence * 100).toFixed(1)}%
+                </p>
               )}
               {lastMatch.attendance?.action && (
-                <p>
-                  Attendance: <code>{lastMatch.attendance.action}</code>
+                <p className="mt-1 text-sm">
+                  Attendance:{' '}
+                  <code className="rounded bg-slate-800 px-1.5 py-0.5 text-xs">
+                    {lastMatch.attendance.action}
+                  </code>
                 </p>
               )}
             </div>
           )}
 
           {!lastMatch?.matched && status === 'unknown' && (
-            <p className="text-danger">Face not enrolled. Add under Face Enrollment.</p>
+            <p className="mt-4 text-sm text-red-400">
+              Face not enrolled. Add under Face Enrollment.
+            </p>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   )
-
-  return content
 }

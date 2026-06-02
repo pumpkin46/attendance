@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 
 from app.core.config import settings
+from app.services.face_quality import validate_face_image
 from app.services.faiss_index import FaissIndex
 from app.services.liveness import verify_liveness
 
@@ -89,6 +90,142 @@ def _liveness_payload(result) -> dict:
         "face_count": result.face_count,
         "liveness_reason": result.reason,
         "liveness_checks": result.checks,
+    }
+
+
+def _get_faces(img: np.ndarray):
+    app = _get_face_app()
+    if app is None:
+        return None, []
+    return app, app.get(img)
+
+
+def validate_image(image_b64: str) -> dict:
+    """FR-007: Validate single image quality without storing."""
+    start = time.perf_counter()
+    img = _decode_image(image_b64)
+    if img is None:
+        return {
+            "accepted": False,
+            "reason": "invalid_image",
+            "quality_score": 0.0,
+            "checks": {},
+            "processing_ms": int((time.perf_counter() - start) * 1000),
+        }
+
+    _, faces = _get_faces(img)
+    if not faces and _get_face_app() is None:
+        return {
+            "accepted": True,
+            "reason": None,
+            "quality_score": 0.85,
+            "checks": {"mode": "mock"},
+            "processing_ms": int((time.perf_counter() - start) * 1000),
+        }
+
+    result = validate_face_image(img, faces)
+    result["processing_ms"] = int((time.perf_counter() - start) * 1000)
+    return result
+
+
+def enroll_batch(employee_id: str, images_b64: list[str]) -> dict:
+    """FR-006: Register face from 10–50 validated images, store multiple embeddings."""
+    start = time.perf_counter()
+    min_n = settings.enrollment_min_images
+    max_n = settings.enrollment_max_images
+
+    if len(images_b64) < min_n:
+        return {
+            "success": False,
+            "error": f"Minimum {min_n} images required, got {len(images_b64)}",
+        }
+    if len(images_b64) > max_n:
+        return {
+            "success": False,
+            "error": f"Maximum {max_n} images allowed, got {len(images_b64)}",
+        }
+
+    accepted: list[dict] = []
+    rejected: list[dict] = []
+    embeddings: list[np.ndarray] = []
+
+    for i, image_b64 in enumerate(images_b64):
+        img = _decode_image(image_b64)
+        app, faces = _get_faces(img) if img is not None else (None, [])
+
+        if app is None and img is not None:
+            seed = f"{employee_id}-{i}"
+            validation = {
+                "accepted": True,
+                "reason": None,
+                "quality_score": 0.85,
+                "checks": {"mode": "mock"},
+            }
+            embeddings.append(_mock_embedding(seed))
+            accepted.append({"index": i, **validation})
+            continue
+
+        validation = validate_face_image(img, faces) if img is not None else {
+            "accepted": False,
+            "reason": "invalid_image",
+            "quality_score": 0.0,
+            "checks": {},
+        }
+
+        if not validation["accepted"]:
+            rejected.append({"index": i, **validation})
+            continue
+
+        if settings.liveness_enabled and settings.antispoof_block_enrollment and faces:
+            face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            bbox = _bbox_from_face(face)
+            det = float(getattr(face, "det_score", 0.9))
+            liveness = verify_liveness(img, bbox, len(faces), det, True)
+            if not liveness.passed:
+                rejected.append({
+                    "index": i,
+                    "accepted": False,
+                    "reason": liveness.reason or "liveness_failed",
+                    "quality_score": validation["quality_score"],
+                    "checks": validation.get("checks", {}),
+                })
+                continue
+
+        face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+        emb = np.array(face.embedding, dtype=np.float32)
+        embeddings.append(emb)
+        accepted.append({"index": i, **validation})
+
+    if rejected:
+        return {
+            "success": False,
+            "error": f"{len(rejected)} image(s) failed quality validation",
+            "accepted_count": len(accepted),
+            "rejected_count": len(rejected),
+            "rejected": rejected,
+            "processing_ms": int((time.perf_counter() - start) * 1000),
+        }
+
+    if len(accepted) < min_n:
+        return {
+            "success": False,
+            "error": f"Only {len(accepted)} valid images; minimum {min_n} required",
+            "accepted_count": len(accepted),
+            "processing_ms": int((time.perf_counter() - start) * 1000),
+        }
+
+    faiss_ids = get_index().add_batch(employee_id, embeddings)
+    processing_ms = int((time.perf_counter() - start) * 1000)
+    avg_quality = sum(a["quality_score"] for a in accepted) / len(accepted)
+
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "embeddings_stored": len(faiss_ids),
+        "faiss_ids": [str(i) for i in faiss_ids],
+        "average_quality_score": round(avg_quality, 4),
+        "accepted": accepted,
+        "processing_ms": processing_ms,
     }
 
 
