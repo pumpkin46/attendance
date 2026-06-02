@@ -17,10 +17,15 @@ from app.schemas.recognition import (
     EmbeddingExportResponse,
     EmbeddingImportRequest,
     EmbeddingImportResponse,
+    AnomalyAnalyzeRequest,
+    AnomalyAnalyzeResponse,
     ValidateImageRequest,
     ValidateImageResponse,
+    EnrollStructuredRequest,
+    EnrollStructuredResponse,
 )
 from app.services import face_service
+from app.services.anomaly_detector import analyze_records
 from app.services.stream_capture import capture_stream_frame
 
 router = APIRouter(prefix="/api/v1")
@@ -36,7 +41,17 @@ def enroll(req: EnrollRequest):
 
 @router.post("/validate-image", response_model=ValidateImageResponse)
 def validate_image(req: ValidateImageRequest):
-    return ValidateImageResponse(**face_service.validate_image(req.image))
+    return ValidateImageResponse(
+        **face_service.validate_image(req.image, req.expected_pose)
+    )
+
+
+@router.post("/enroll-structured", response_model=EnrollStructuredResponse)
+def enroll_structured(req: EnrollStructuredRequest):
+    result = face_service.enroll_structured(req.employee_id, req.poses)
+    if not result.get("success"):
+        return EnrollStructuredResponse(**result)
+    return EnrollStructuredResponse(**result)
 
 
 @router.post("/enroll-batch", response_model=EnrollBatchResponse)
@@ -91,6 +106,13 @@ def import_embeddings(req: EmbeddingImportRequest):
 @router.post("/embeddings/reload", response_model=EmbeddingImportResponse)
 def reload_embeddings():
     return EmbeddingImportResponse(**face_service.reload_embeddings())
+
+
+@router.post("/anomalies/analyze", response_model=AnomalyAnalyzeResponse)
+def analyze_anomalies(req: AnomalyAnalyzeRequest):
+    records = [r.model_dump() for r in req.records]
+    result = analyze_records(records, req.config)
+    return AnomalyAnalyzeResponse(**result)
 
 
 @router.post("/delete")

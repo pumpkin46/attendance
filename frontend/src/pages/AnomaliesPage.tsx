@@ -1,0 +1,210 @@
+import { useEffect, useState } from 'react'
+import { api } from '../api/client'
+import { Badge } from '../components/ui/Badge'
+import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { Input, Select } from '../components/ui/Input'
+import { PageHeader } from '../components/ui/PageHeader'
+import { StatCard } from '../components/ui/StatCard'
+import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
+import type { AttendanceAnomaly, AnomalySummary, Paginated } from '../types'
+
+const SEVERITY_TONE: Record<string, 'danger' | 'warn' | 'neutral' | 'ok'> = {
+  critical: 'danger',
+  high: 'danger',
+  medium: 'warn',
+  low: 'neutral',
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  missing_check_out: 'Missing check-out',
+  excessive_overtime: 'Excessive overtime',
+  unusual_check_in_time: 'Unusual check-in',
+  weekend_work: 'Weekend work',
+  short_work_day: 'Short work day',
+  rapid_recheck: 'High recheck frequency',
+  statistical_outlier: 'Statistical outlier',
+  absence_pattern: 'Absence pattern',
+}
+
+export default function AnomaliesPage() {
+  const [anomalies, setAnomalies] = useState<AttendanceAnomaly[]>([])
+  const [summary, setSummary] = useState<AnomalySummary | null>(null)
+  const [statusFilter, setStatusFilter] = useState('open')
+  const [severityFilter, setSeverityFilter] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [detecting, setDetecting] = useState(false)
+  const [detectResult, setDetectResult] = useState<string | null>(null)
+
+  const load = () => {
+    setLoading(true)
+    Promise.all([
+      api.get<AnomalySummary>('/anomalies/summary'),
+      api.get<Paginated<AttendanceAnomaly>>('/anomalies', {
+        params: {
+          status: statusFilter || undefined,
+          severity: severityFilter || undefined,
+          per_page: 50,
+        },
+      }),
+    ])
+      .then(([summaryRes, listRes]) => {
+        setSummary(summaryRes.data)
+        setAnomalies(listRes.data.data)
+      })
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
+  }, [statusFilter, severityFilter])
+
+  const runDetection = async () => {
+    setDetecting(true)
+    setDetectResult(null)
+    try {
+      const { data } = await api.post<{
+        anomalies_found: number
+        records_analyzed: number
+        processing_ms: number
+      }>('/anomalies/detect', { lookback_days: 30 })
+      setDetectResult(
+        `Analyzed ${data.records_analyzed} records — ${data.anomalies_found} anomalies found (${data.processing_ms}ms)`
+      )
+      load()
+    } finally {
+      setDetecting(false)
+    }
+  }
+
+  const updateStatus = async (id: number, status: 'acknowledged' | 'resolved' | 'false_positive') => {
+    await api.patch(`/anomalies/${id}`, { status })
+    load()
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title="Attendance Anomalies"
+        description="AI-powered detection of unusual patterns — rules plus Isolation Forest ML"
+        actions={
+          <Button onClick={runDetection} disabled={detecting}>
+            {detecting ? 'Analyzing…' : 'Run detection'}
+          </Button>
+        }
+      />
+
+      {detectResult && (
+        <Card className="mb-6">
+          <p className="text-sm text-slate-300">{detectResult}</p>
+        </Card>
+      )}
+
+      {summary && (
+        <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
+          <StatCard label="Open" value={summary.open_total} tone="warn" />
+          <StatCard label="Critical" value={summary.critical} tone="danger" />
+          <StatCard label="High" value={summary.high} tone="danger" />
+          <StatCard label="Medium" value={summary.medium} tone="warn" />
+          <StatCard label="Low" value={summary.low} />
+        </div>
+      )}
+
+      <Card className="mb-6">
+        <div className="flex flex-wrap gap-4">
+          <Select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="min-w-40"
+          >
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="acknowledged">Acknowledged</option>
+            <option value="resolved">Resolved</option>
+            <option value="false_positive">False positive</option>
+          </Select>
+          <Select
+            value={severityFilter}
+            onChange={(e) => setSeverityFilter(e.target.value)}
+            className="min-w-40"
+          >
+            <option value="">All severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </Select>
+        </div>
+      </Card>
+
+      <TableShell>
+        <TableHead>
+          <Th>Detected</Th>
+          <Th>Employee</Th>
+          <Th>Type</Th>
+          <Th>Severity</Th>
+          <Th>Score</Th>
+          <Th>Description</Th>
+          <Th>Status</Th>
+          <Th>Actions</Th>
+        </TableHead>
+        <TableBody>
+          {loading ? (
+            <tr>
+              <Td colSpan={8} className="text-slate-400">
+                Loading…
+              </Td>
+            </tr>
+          ) : anomalies.length === 0 ? (
+            <tr>
+              <Td colSpan={8} className="text-slate-400">
+                No anomalies found — run detection to scan recent attendance
+              </Td>
+            </tr>
+          ) : (
+            anomalies.map((a) => (
+              <tr key={a.id}>
+                <Td className="whitespace-nowrap text-xs">
+                  {new Date(a.detected_at).toLocaleString()}
+                </Td>
+                <Td>
+                  {a.employee
+                    ? `${a.employee.first_name} ${a.employee.last_name}`
+                    : `#${a.employee_id}`}
+                </Td>
+                <Td>{TYPE_LABELS[a.anomaly_type] ?? a.anomaly_type}</Td>
+                <Td>
+                  <Badge tone={SEVERITY_TONE[a.severity] ?? 'neutral'}>{a.severity}</Badge>
+                </Td>
+                <Td>{(a.score * 100).toFixed(0)}%</Td>
+                <Td className="max-w-xs text-xs text-slate-400">{a.description}</Td>
+                <Td>
+                  <Badge tone={a.status === 'open' ? 'warn' : 'ok'}>{a.status}</Badge>
+                </Td>
+                <Td>
+                  <div className="flex gap-1">
+                    {a.status === 'open' && (
+                      <Button variant="ghost" onClick={() => updateStatus(a.id, 'acknowledged')}>
+                        Ack
+                      </Button>
+                    )}
+                    {a.status !== 'resolved' && a.status !== 'false_positive' && (
+                      <>
+                        <Button variant="ghost" onClick={() => updateStatus(a.id, 'resolved')}>
+                          Resolve
+                        </Button>
+                        <Button variant="ghost" onClick={() => updateStatus(a.id, 'false_positive')}>
+                          Dismiss
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </Td>
+              </tr>
+            ))
+          )}
+        </TableBody>
+      </TableShell>
+    </div>
+  )
+}

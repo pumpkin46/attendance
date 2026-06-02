@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AttendanceAnomalyController;
 use App\Http\Controllers\Api\AttendanceController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
@@ -49,12 +50,18 @@ Route::prefix('v1')->group(function () {
         Route::get('enrollment/config', [FaceEnrollmentController::class, 'config']);
         Route::post('enrollment/validate-image', [FaceEnrollmentController::class, 'validateImage']);
         Route::post('employees/{employee}/enroll-face-batch', [FaceEnrollmentController::class, 'enrollBatch']);
+        Route::post('employees/{employee}/enroll-face-structured', [FaceEnrollmentController::class, 'enrollStructured']);
         Route::post('employees/{employee}/enroll-face', [FaceEnrollmentController::class, 'enroll']);
         Route::get('employees/{employee}/face-status', [FaceEnrollmentController::class, 'status']);
 
         Route::get('attendance', [AttendanceController::class, 'index']);
         Route::get('attendance/today', [AttendanceController::class, 'today']);
         Route::post('attendance/manual', [AttendanceController::class, 'manual'])->middleware('permission:attendance.manage');
+
+        Route::get('anomalies/summary', [AttendanceAnomalyController::class, 'summary'])->middleware('permission:reports.view');
+        Route::get('anomalies', [AttendanceAnomalyController::class, 'index'])->middleware('permission:reports.view');
+        Route::post('anomalies/detect', [AttendanceAnomalyController::class, 'detect'])->middleware('permission:attendance.manage');
+        Route::patch('anomalies/{attendance_anomaly}', [AttendanceAnomalyController::class, 'update'])->middleware('permission:attendance.manage');
 
         Route::apiResource('shifts', ShiftController::class)->middleware('permission:shifts.manage');
         Route::post('shifts/{shift}/assign', [ShiftController::class, 'assign'])->middleware('permission:shifts.manage');

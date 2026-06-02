@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './contexts/AuthContext'
 import AppLayout from './layouts/AppLayout'
+import AnomaliesPage from './pages/AnomaliesPage'
 import AttendancePage from './pages/AttendancePage'
 import AuditLogsPage from './pages/AuditLogsPage'
 import CamerasPage from './pages/CamerasPage'
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="liveness-test" element={<LivenessTestPage />} />
             <Route path="recognition-test" element={<RecognitionTestPage />} />
             <Route path="attendance" element={<AttendancePage />} />
+            <Route path="anomalies" element={<AnomaliesPage />} />
             <Route path="shifts" element={<ShiftsPage />} />
             <Route path="cameras" element={<CamerasPage />} />
             <Route path="edge-devices" element={<EdgeDevicesPage />} />

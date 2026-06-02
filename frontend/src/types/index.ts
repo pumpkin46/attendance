@@ -132,3 +132,27 @@ export interface Paginated<T> {
   last_page: number
   total: number
 }
+
+export interface AttendanceAnomaly {
+  id: number
+  employee_id: number
+  attendance_record_id?: number
+  anomaly_type: string
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  score: number
+  title: string
+  description: string
+  status: 'open' | 'acknowledged' | 'resolved' | 'false_positive'
+  detected_at: string
+  evidence?: Record<string, unknown>
+  employee?: { id: number; first_name: string; last_name: string; employee_code: string }
+}
+
+export interface AnomalySummary {
+  open_total: number
+  critical: number
+  high: number
+  medium: number
+  low: number
+  by_type: Record<string, number>
+}

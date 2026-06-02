@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from app.core.config import settings
+from app.services.face_pose import analyze_face_metadata, pose_matches_expected
 
 
 def _blur_score(gray_crop: np.ndarray) -> float:
@@ -13,6 +14,22 @@ def _blur_score(gray_crop: np.ndarray) -> float:
         return 0.0
     variance = cv2.Laplacian(gray_crop, cv2.CV_64F).var()
     return float(min(1.0, variance / settings.quality_blur_variance_ref))
+
+
+def _brightness_score(gray_crop: np.ndarray) -> float:
+    if gray_crop.size == 0:
+        return 0.0
+    mean = float(np.mean(gray_crop))
+    # Map 40–180 mean luminance to 0–1
+    return float(np.clip((mean - 40.0) / 140.0, 0.0, 1.0))
+
+
+def _resolution_score(face, img_shape: tuple[int, int, int]) -> float:
+    bb = face.bbox
+    face_w = float(bb[2] - bb[0])
+    face_h = float(bb[3] - bb[1])
+    min_dim = min(face_w, face_h)
+    return float(min(1.0, min_dim / settings.quality_min_face_pixels))
 
 
 def _occlusion_score(face, img_shape: tuple[int, int, int]) -> float:
@@ -48,7 +65,11 @@ def _occlusion_score(face, img_shape: tuple[int, int, int]) -> float:
     return min(1.0, 0.5 + ratio)
 
 
-def validate_face_image(img: np.ndarray, faces: list) -> dict:
+def validate_face_image(
+    img: np.ndarray,
+    faces: list,
+    expected_pose: str | None = None,
+) -> dict:
     """
     Validate a single image for enrollment (FR-007).
     Returns accepted flag, reason, quality_score, and check details.
@@ -73,13 +94,19 @@ def validate_face_image(img: np.ndarray, faces: list) -> dict:
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.size else np.array([])
 
     blur = _blur_score(gray)
+    brightness = _brightness_score(gray)
     occlusion = _occlusion_score(face, img.shape)
+    resolution = _resolution_score(face, img.shape)
 
     checks = {
         "face_count": 1,
         "det_score": round(det_score, 4),
         "blur_score": round(blur, 4),
+        "brightness_score": round(brightness, 4),
         "occlusion_score": round(occlusion, 4),
+        "resolution_score": round(resolution, 4),
+        "image_width": img.shape[1],
+        "image_height": img.shape[0],
     }
 
     if det_score < settings.quality_min_det_score:
@@ -88,12 +115,33 @@ def validate_face_image(img: np.ndarray, faces: list) -> dict:
     if blur < settings.quality_min_blur_score:
         return _reject("blurry", blur, checks)
 
-    if occlusion < settings.quality_min_occlusion_score:
-        return _reject("covered_face", occlusion, checks)
+    if brightness < settings.quality_min_brightness_score:
+        return _reject("too_dark", brightness, checks)
 
-    quality_score = round(0.4 * det_score + 0.35 * blur + 0.25 * occlusion, 4)
+    if resolution < settings.quality_min_resolution_score:
+        return _reject("low_resolution", resolution, checks)
+
+    if occlusion < settings.quality_min_occlusion_score:
+        return _reject("occluded_face", occlusion, checks)
+
+    quality_score = round(
+        0.30 * det_score
+        + 0.25 * blur
+        + 0.15 * brightness
+        + 0.15 * resolution
+        + 0.15 * occlusion,
+        4,
+    )
     if quality_score < settings.quality_min_overall_score:
         return _reject("low_quality", quality_score, checks)
+
+    metadata = analyze_face_metadata(face, img)
+    checks["face_metadata"] = metadata
+
+    if expected_pose:
+        ok, pose_reason = pose_matches_expected(expected_pose, metadata)
+        if not ok:
+            return _reject(pose_reason or "wrong_pose", quality_score, checks)
 
     return {
         "accepted": True,
@@ -101,6 +149,7 @@ def validate_face_image(img: np.ndarray, faces: list) -> dict:
         "quality_score": quality_score,
         "checks": checks,
         "bbox": [float(v) for v in face.bbox],
+        "face_metadata": metadata,
     }
 
 

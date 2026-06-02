@@ -8,6 +8,11 @@ import { StatCard } from '../components/ui/StatCard'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
 import type { CameraMonitoringSummary } from '../types'
 
+interface AnomalySummary {
+  open_total: number
+  critical: number
+}
+
 interface TodaySummary {
   date: string
   present: number
@@ -35,6 +40,7 @@ interface AppNotification {
 
 export default function DashboardPage() {
   const [summary, setSummary] = useState<TodaySummary | null>(null)
+  const [anomalySummary, setAnomalySummary] = useState<AnomalySummary | null>(null)
   const [unknown, setUnknown] = useState<UnknownSummary | null>(null)
   const [cameraMonitoring, setCameraMonitoring] = useState<CameraMonitoringSummary | null>(null)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -43,6 +49,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     api.get<TodaySummary>('/attendance/today').then((r) => setSummary(r.data)).catch(() => {})
+    api.get<AnomalySummary>('/anomalies/summary').then((r) => setAnomalySummary(r.data)).catch(() => {})
     api.get<UnknownSummary>('/recognition/unknown-summary').then((r) => setUnknown(r.data)).catch(() => {})
     api.get<CameraMonitoringSummary>('/cameras/monitoring').then((r) => setCameraMonitoring(r.data)).catch(() => {})
     api.get<Record<string, unknown>>('/health').then((r) => setPlatformHealth(r.data)).catch(() => {})
@@ -75,6 +82,11 @@ export default function DashboardPage() {
         <StatCard label="Absent" value={summary?.absent ?? '—'} tone="danger" />
         <StatCard label="On leave" value={summary?.on_leave ?? '—'} />
         <StatCard label="Unknown faces today" value={unknown?.today ?? '—'} tone="danger" />
+        <StatCard
+          label="Open anomalies"
+          value={anomalySummary?.open_total ?? '—'}
+          tone={(anomalySummary?.critical ?? 0) > 0 ? 'danger' : 'warn'}
+        />
       </div>
 
       <Card className="mb-6">

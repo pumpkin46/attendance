@@ -83,6 +83,10 @@ class DetectResponse(BaseModel):
 
 class ValidateImageRequest(BaseModel):
     image: str
+    expected_pose: str | None = Field(
+        default=None,
+        description="Guided pose slot: front, left, right, up, down, smiling, neutral, glasses, without_glasses",
+    )
 
 
 class ValidateImageResponse(BaseModel):
@@ -91,7 +95,31 @@ class ValidateImageResponse(BaseModel):
     quality_score: float = 0.0
     checks: dict[str, Any] = Field(default_factory=dict)
     bbox: list[float] | None = None
+    face_metadata: dict[str, Any] | None = None
     processing_ms: int = 0
+
+
+class EnrollStructuredRequest(BaseModel):
+    employee_id: str
+    poses: dict[str, str] = Field(
+        ...,
+        description="Map of pose_type -> base64 image (9 required slots)",
+    )
+
+
+class EnrollStructuredResponse(BaseModel):
+    success: bool
+    employee_id: str | None = None
+    embeddings_stored: int | None = None
+    faiss_ids: list[str] | None = None
+    average_quality_score: float | None = None
+    enrollment_score: float | None = None
+    accepted: list[dict[str, Any]] | None = None
+    rejected: list[dict[str, Any]] | None = None
+    missing_poses: list[str] | None = None
+    required_poses: list[str] | None = None
+    error: str | None = None
+    processing_ms: int | None = None
 
 
 class EnrollBatchRequest(BaseModel):
@@ -143,3 +171,44 @@ class EmbeddingImportResponse(BaseModel):
     success: bool = True
     embedding_count: int = 0
     version: str | None = None
+
+
+class AnomalyRecordInput(BaseModel):
+    record_id: int | None = None
+    employee_id: int
+    work_date: str
+    check_in_at: str | None = None
+    check_out_at: str | None = None
+    check_in_hour: float | None = None
+    shift_start_hour: float | None = None
+    worked_minutes: int = 0
+    overtime_minutes: int = 0
+    status: str = "absent"
+    check_in_method: str | None = None
+    day_of_week: int = 1
+    recognition_events_count: int = 0
+
+
+class AnomalyAnalyzeRequest(BaseModel):
+    records: list[AnomalyRecordInput] = Field(default_factory=list)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnomalyItem(BaseModel):
+    record_id: int | None = None
+    employee_id: int
+    anomaly_type: str
+    score: float
+    severity: str
+    title: str
+    description: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnomalyAnalyzeResponse(BaseModel):
+    success: bool = True
+    anomalies: list[AnomalyItem] = Field(default_factory=list)
+    records_analyzed: int = 0
+    anomaly_count: int = 0
+    processing_ms: int = 0
+    error: str | None = None

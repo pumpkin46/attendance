@@ -45,9 +45,15 @@ class Settings(BaseSettings):
     enrollment_max_images: int = 50
     quality_min_det_score: float = 0.5
     quality_min_blur_score: float = 0.35
+    quality_min_brightness_score: float = 0.35
     quality_min_occlusion_score: float = 0.4
+    quality_min_resolution_score: float = 0.5
     quality_min_overall_score: float = 0.45
     quality_blur_variance_ref: float = 120.0
+    quality_min_face_pixels: float = 80.0
+    enrollment_structured_poses: str = (
+        "front,left,right,up,down,smiling,neutral,glasses,without_glasses"
+    )
 
 
 settings = Settings()

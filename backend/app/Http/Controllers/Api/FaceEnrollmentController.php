@@ -22,18 +22,80 @@ class FaceEnrollmentController extends Controller
 
     public function config(): JsonResponse
     {
+        $poses = config('enrollment.required_poses', []);
+        $labels = config('enrollment.pose_labels', []);
+        $poseLabels = [];
+        foreach ($poses as $pose) {
+            $poseLabels[$pose] = $labels[$pose] ?? str_replace('_', ' ', ucfirst($pose));
+        }
+
         return response()->json([
+            'mode' => config('enrollment.mode', 'structured'),
+            'required_poses' => $poses,
+            'pose_labels' => $poseLabels,
             'min_images' => config('enrollment.min_images', 10),
             'max_images' => config('enrollment.max_images', 50),
             'retain_raw_images' => config('enrollment.retain_raw_images', false),
+            'quality_rules' => [
+                'reject_blurry' => true,
+                'reject_dark' => true,
+                'reject_occluded' => true,
+                'reject_multiple_faces' => true,
+                'reject_low_resolution' => true,
+            ],
         ]);
     }
 
     public function validateImage(Request $request): JsonResponse
     {
-        $request->validate(['image' => 'required|string']);
+        $rules = ['image' => 'required|string'];
+        $allowed = config('enrollment.required_poses', []);
+        if ($allowed !== []) {
+            $rules['expected_pose'] = 'nullable|string|in:'.implode(',', $allowed);
+        }
+        $request->validate($rules);
 
-        return response()->json($this->enrollment->validateImage($request->image));
+        return response()->json(
+            $this->enrollment->validateImage($request->image, $request->expected_pose)
+        );
+    }
+
+    public function enrollStructured(Request $request, Employee $employee): JsonResponse
+    {
+        $required = config('enrollment.required_poses', []);
+        $request->validate([
+            'poses' => 'required|array',
+            'poses.*' => 'required|string',
+        ]);
+
+        foreach ($required as $pose) {
+            if (empty($request->input("poses.{$pose}"))) {
+                return response()->json([
+                    'success' => false,
+                    'error' => "Missing required pose: {$pose}",
+                    'missing_poses' => array_values(array_diff(
+                        $required,
+                        array_keys(array_filter($request->poses ?? []))
+                    )),
+                ], 422);
+            }
+        }
+
+        $result = $this->enrollment->enrollStructured($employee, $request->poses);
+
+        if (! ($result['success'] ?? false)) {
+            return response()->json($result, 422);
+        }
+
+        return response()->json([
+            'message' => 'Face enrollment completed',
+            'employee' => $employee->fresh(),
+            'embeddings_stored' => $result['embeddings_stored'],
+            'average_quality_score' => $result['average_quality_score'],
+            'enrollment_score' => $result['enrollment_score'],
+            'session_id' => $result['session_id'],
+            'accepted' => $result['accepted'] ?? [],
+        ], 201);
     }
 
     public function enrollBatch(Request $request, Employee $employee): JsonResponse
@@ -106,7 +168,10 @@ class FaceEnrollmentController extends Controller
                 'id' => $session->id,
                 'image_count' => $session->image_count,
                 'average_quality_score' => $session->average_quality_score,
+                'enrollment_score' => $session->enrollment_score,
+                'enrollment_mode' => $session->enrollment_mode ?? 'batch',
                 'raw_images_retained' => $session->raw_images_retained,
+                'poses' => $session->images()->whereNotNull('pose_type')->pluck('pose_type')->values(),
                 'created_at' => $session->created_at,
             ] : null,
         ]);

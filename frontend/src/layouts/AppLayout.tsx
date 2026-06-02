@@ -11,6 +11,7 @@ const nav = [
   { to: '/liveness-test', label: 'Liveness Test' },
   { to: '/recognition-test', label: 'Test Recognition' },
   { to: '/attendance', label: 'Attendance' },
+  { to: '/anomalies', label: 'Anomalies' },
   { to: '/shifts', label: 'Shifts' },
   { to: '/cameras', label: 'Cameras' },
   { to: '/edge-devices', label: 'Edge AI' },

@@ -11,38 +11,49 @@ import { cn } from '../lib/cn'
 import type { Employee, Paginated } from '../types'
 
 interface EnrollmentConfig {
+  mode: string
+  required_poses: string[]
+  pose_labels: Record<string, string>
   min_images: number
   max_images: number
   retain_raw_images: boolean
+  quality_rules: Record<string, boolean>
 }
 
-interface CapturedImage {
-  id: string
+interface PoseCapture {
+  pose_type: string
   dataUrl: string
-  accepted: boolean | null
+  accepted: boolean
   reason?: string
   quality_score?: number
+  face_metadata?: Record<string, unknown>
 }
 
 const REASON_LABELS: Record<string, string> = {
   blurry: 'Too blurry',
-  multiple_faces: 'Multiple faces',
+  too_dark: 'Image too dark',
+  low_resolution: 'Face too small / low resolution',
+  multiple_faces: 'Multiple faces detected',
   no_face: 'No face detected',
+  occluded_face: 'Face occluded or partial',
   covered_face: 'Face covered or partial',
   low_detection_score: 'Face not clear enough',
   low_quality: 'Overall quality too low',
   invalid_image: 'Invalid image',
+  not_smiling: 'Please smile',
+  not_neutral: 'Please use a neutral expression',
+  glasses_not_detected: 'Glasses not visible',
+  glasses_detected: 'Remove glasses for this step',
+  wrong_pose: 'Pose does not match instruction',
+  validation_error: 'Validation failed',
 }
 
 export default function EnrollmentPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [employeeId, setEmployeeId] = useState('')
-  const [config, setConfig] = useState<EnrollmentConfig>({
-    min_images: 10,
-    max_images: 50,
-    retain_raw_images: false,
-  })
-  const [captured, setCaptured] = useState<CapturedImage[]>([])
+  const [config, setConfig] = useState<EnrollmentConfig | null>(null)
+  const [poses, setPoses] = useState<Record<string, PoseCapture>>({})
+  const [stepIndex, setStepIndex] = useState(0)
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [useCamera, setUseCamera] = useState(true)
@@ -50,92 +61,129 @@ export default function EnrollmentPage() {
 
   const { videoRef, canvasRef, active, error: camError, start, stop, captureFrame } = useWebcam()
 
+  const requiredPoses = config?.required_poses ?? []
+  const currentPose = requiredPoses[stepIndex] ?? requiredPoses[0]
+  const currentLabel = config?.pose_labels[currentPose] ?? currentPose
+
   useEffect(() => {
     api.get<Paginated<Employee>>('/employees', { params: { per_page: 100, is_active: true } })
       .then((r) => setEmployees(r.data.data))
     api.get<EnrollmentConfig>('/enrollment/config').then((r) => setConfig(r.data))
   }, [])
 
-  const validateAndAdd = useCallback(async (dataUrl: string) => {
-    if (captured.length >= config.max_images) {
-      setMessage(`Maximum ${config.max_images} images reached`)
-      return
-    }
+  const validateAndSetPose = useCallback(
+    async (poseType: string, dataUrl: string) => {
+      try {
+        const { data } = await api.post<{
+          accepted: boolean
+          reason?: string
+          quality_score?: number
+          face_metadata?: Record<string, unknown>
+        }>('/enrollment/validate-image', {
+          image: dataUrl,
+          expected_pose: poseType,
+        })
 
-    try {
-      const { data } = await api.post<{
-        accepted: boolean
-        reason?: string
-        quality_score?: number
-      }>('/enrollment/validate-image', { image: dataUrl })
+        setPoses((prev) => ({
+          ...prev,
+          [poseType]: {
+            pose_type: poseType,
+            dataUrl,
+            accepted: data.accepted,
+            reason: data.reason,
+            quality_score: data.quality_score,
+            face_metadata: data.face_metadata,
+          },
+        }))
 
-      setCaptured((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          dataUrl,
-          accepted: data.accepted,
-          reason: data.reason,
-          quality_score: data.quality_score,
-        },
-      ])
-    } catch {
-      setCaptured((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), dataUrl, accepted: false, reason: 'validation_error' },
-      ])
-    }
-  }, [captured.length, config.max_images])
+        if (data.accepted && stepIndex < requiredPoses.length - 1) {
+          setStepIndex((i) => i + 1)
+        }
+
+        return data.accepted
+      } catch {
+        setPoses((prev) => ({
+          ...prev,
+          [poseType]: {
+            pose_type: poseType,
+            dataUrl,
+            accepted: false,
+            reason: 'validation_error',
+          },
+        }))
+        return false
+      }
+    },
+    [requiredPoses.length, stepIndex]
+  )
 
   const captureFromCamera = async () => {
+    if (!currentPose) return
     const frame = captureFrame(640)
-    if (frame) await validateAndAdd(frame)
+    if (frame) await validateAndSetPose(currentPose, frame)
   }
 
-  const onFiles = async (files: FileList) => {
-    for (const file of Array.from(files)) {
-      if (captured.length >= config.max_images) break
-      const dataUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
-        reader.readAsDataURL(file)
-      })
-      await validateAndAdd(dataUrl)
-    }
+  const onFile = async (file: File) => {
+    if (!currentPose) return
+    const dataUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.readAsDataURL(file)
+    })
+    await validateAndSetPose(currentPose, dataUrl)
   }
 
-  const removeImage = (id: string) => {
-    setCaptured((prev) => prev.filter((c) => c.id !== id))
+  const clearPose = (poseType: string) => {
+    setPoses((prev) => {
+      const next = { ...prev }
+      delete next[poseType]
+      return next
+    })
+    const idx = requiredPoses.indexOf(poseType)
+    if (idx >= 0) setStepIndex(idx)
   }
 
-  const acceptedCount = captured.filter((c) => c.accepted).length
-  const canSubmit = acceptedCount >= config.min_images && employeeId && !submitting
+  const completedCount = requiredPoses.filter((p) => poses[p]?.accepted).length
+  const allComplete = requiredPoses.length > 0 && completedCount === requiredPoses.length
+  const canSubmit = allComplete && employeeId && !submitting
   const successMessage = message.includes('completed') || message.includes('stored')
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
 
-    const images = captured.filter((c) => c.accepted).map((c) => c.dataUrl)
+    const posePayload: Record<string, string> = {}
+    for (const p of requiredPoses) {
+      if (poses[p]?.accepted) posePayload[p] = poses[p].dataUrl
+    }
+
     setSubmitting(true)
     setMessage('')
     try {
-      const { data } = await api.post<{ message: string; embeddings_stored: number }>(
-        `/employees/${employeeId}/enroll-face-batch`,
-        { images }
-      )
+      const { data } = await api.post<{
+        message: string
+        embeddings_stored: number
+        enrollment_score?: number
+        average_quality_score?: number
+      }>(`/employees/${employeeId}/enroll-face-structured`, { poses: posePayload })
+
       setMessage(
-        `${data.message} — ${data.embeddings_stored} embeddings stored (FR-006/FR-008)`
+        `${data.message} — ${data.embeddings_stored} embeddings, ` +
+          `enrollment score ${((data.enrollment_score ?? 0) * 100).toFixed(0)}%, ` +
+          `avg quality ${((data.average_quality_score ?? 0) * 100).toFixed(0)}%`
       )
-      setCaptured([])
+      setPoses({})
+      setStepIndex(0)
       stop()
     } catch (err: unknown) {
-      const rejected = (err as { response?: { data?: { rejected?: { reason: string }[] } } })
-        ?.response?.data?.rejected
-      if (rejected?.length) {
-        setMessage(`${rejected.length} image(s) rejected: ${rejected.map((r) => r.reason).join(', ')}`)
+      const body = (err as { response?: { data?: { error?: string; rejected?: { pose_type: string; reason: string }[] } } })
+        ?.response?.data
+      if (body?.rejected?.length) {
+        setMessage(
+          body.rejected.map((r) => `${r.pose_type}: ${REASON_LABELS[r.reason] ?? r.reason}`).join('; ')
+        )
       } else {
-        setMessage('Enrollment failed — ensure 10–50 valid face images')
+        setMessage(body?.error ?? 'Enrollment failed')
       }
     } finally {
       setSubmitting(false)
@@ -146,7 +194,7 @@ export default function EnrollmentPage() {
     <div>
       <PageHeader
         title="Face Enrollment"
-        description={`Capture ${config.min_images}–${config.max_images} images. Blur, covered face, and multiple-face images are rejected automatically.`}
+        description="Capture all required angles and expressions. Blurry, dark, occluded, multi-face, and low-resolution images are rejected automatically."
       />
 
       <Card>
@@ -164,6 +212,38 @@ export default function EnrollmentPage() {
             </Select>
           </Label>
 
+          {config && (
+            <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+              <p className="text-sm font-medium text-slate-200">
+                Step {Math.min(stepIndex + 1, requiredPoses.length)} of {requiredPoses.length}:{' '}
+                {currentLabel}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {requiredPoses.map((pose, i) => {
+                  const cap = poses[pose]
+                  const done = cap?.accepted
+                  const failed = cap && !cap.accepted
+                  return (
+                    <button
+                      key={pose}
+                      type="button"
+                      className={cn(
+                        'rounded-full px-3 py-1 text-xs capitalize',
+                        i === stepIndex && 'ring-2 ring-blue-400',
+                        done && 'bg-green-900/60 text-green-300',
+                        failed && 'bg-red-900/60 text-red-300',
+                        !cap && 'bg-slate-800 text-slate-400'
+                      )}
+                      onClick={() => setStepIndex(i)}
+                    >
+                      {pose.replace(/_/g, ' ')}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2">
             <Button type="button" variant={useCamera ? 'primary' : 'ghost'} onClick={() => setUseCamera(true)}>
               Webcam
@@ -176,7 +256,7 @@ export default function EnrollmentPage() {
                 stop()
               }}
             >
-              Upload files
+              Upload file
             </Button>
           </div>
 
@@ -193,8 +273,8 @@ export default function EnrollmentPage() {
                     <canvas ref={canvasRef} hidden />
                   </div>
                   <div className="flex gap-2">
-                    <Button type="button" onClick={captureFromCamera}>
-                      Capture frame
+                    <Button type="button" onClick={captureFromCamera} disabled={!currentPose}>
+                      Capture {currentPose?.replace(/_/g, ' ') ?? 'pose'}
                     </Button>
                     <Button type="button" variant="ghost" onClick={stop}>
                       Stop camera
@@ -206,58 +286,62 @@ export default function EnrollmentPage() {
             </div>
           ) : (
             <Label>
-              Select multiple images
+              Image for current step
               <Input
                 ref={fileRef}
                 type="file"
                 accept="image/*"
-                multiple
-                onChange={(e) => e.target.files && onFiles(e.target.files)}
+                onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
               />
             </Label>
           )}
 
-          <div className="flex flex-wrap items-baseline gap-2">
-            <strong className="text-sm">
-              Valid images: {acceptedCount} / {config.min_images} minimum
-            </strong>
-            <span className="text-sm text-slate-400">
-              ({captured.length} total, max {config.max_images})
-            </span>
-          </div>
-
-          {captured.length > 0 && (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-3">
-              {captured.map((img) => (
-                <div
-                  key={img.id}
-                  className={cn(
-                    'relative overflow-hidden rounded-lg border-2',
-                    img.accepted ? 'border-green-500' : 'border-red-500'
-                  )}
-                >
-                  <img src={img.dataUrl} alt="" className="aspect-square w-full object-cover" />
-                  <span className="block bg-slate-900/90 px-1 py-0.5 text-center text-[10px] leading-tight">
-                    {img.accepted
-                      ? `OK ${img.quality_score != null ? (img.quality_score * 100).toFixed(0) + '%' : ''}`
-                      : REASON_LABELS[img.reason ?? ''] ?? img.reason}
+          {currentPose && poses[currentPose] && (
+            <div
+              className={cn(
+                'flex max-w-xs items-start gap-3 rounded-lg border p-3',
+                poses[currentPose].accepted ? 'border-green-600' : 'border-red-600'
+              )}
+            >
+              <img
+                src={poses[currentPose].dataUrl}
+                alt=""
+                className="h-20 w-20 rounded object-cover"
+              />
+              <div className="text-sm">
+                {poses[currentPose].accepted ? (
+                  <>
+                    <span className="text-green-400">Accepted</span>
+                    {poses[currentPose].quality_score != null && (
+                      <p className="text-slate-400">
+                        Quality: {(poses[currentPose].quality_score! * 100).toFixed(0)}%
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-red-400">
+                    {REASON_LABELS[poses[currentPose].reason ?? ''] ?? poses[currentPose].reason}
                   </span>
-                  <button
-                    type="button"
-                    className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-black/70 text-xs hover:bg-red-600"
-                    onClick={() => removeImage(img.id)}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+                )}
+                <button
+                  type="button"
+                  className="mt-2 text-xs text-slate-400 underline"
+                  onClick={() => clearPose(currentPose)}
+                >
+                  Retake
+                </button>
+              </div>
             </div>
           )}
+
+          <div className="text-sm text-slate-300">
+            Progress: {completedCount} / {requiredPoses.length} poses validated
+          </div>
 
           <Button type="submit" disabled={!canSubmit}>
             {submitting
               ? 'Registering…'
-              : `Register face (${acceptedCount}/${config.min_images} min)`}
+              : `Complete enrollment (${completedCount}/${requiredPoses.length})`}
           </Button>
 
           {message && (

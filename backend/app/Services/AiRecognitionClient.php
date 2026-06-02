@@ -18,9 +18,20 @@ class AiRecognitionClient
         ]);
     }
 
-    public function validateImage(string $imageBase64): array
+    public function validateImage(string $imageBase64, ?string $expectedPose = null): array
     {
-        return $this->post('/api/v1/validate-image', ['image' => $imageBase64]);
+        return $this->post('/api/v1/validate-image', array_filter([
+            'image' => $imageBase64,
+            'expected_pose' => $expectedPose,
+        ], fn ($v) => $v !== null));
+    }
+
+    public function enrollStructured(string $employeeId, array $poses): array
+    {
+        return $this->post('/api/v1/enroll-structured', [
+            'employee_id' => $employeeId,
+            'poses' => $poses,
+        ], max(config('services.ai.timeout', 2), 60));
     }
 
     public function enrollBatch(string $employeeId, array $images): array
@@ -64,6 +75,14 @@ class AiRecognitionClient
         return $this->post('/api/v1/delete', ['employee_id' => $employeeId]);
     }
 
+    public function analyzeAnomalies(array $records, array $config = []): array
+    {
+        return $this->post('/api/v1/anomalies/analyze', [
+            'records' => $records,
+            'config' => $config,
+        ], max(config('services.ai.timeout', 2), 30));
+    }
+
     public function health(): array
     {
         try {
@@ -90,10 +109,10 @@ class AiRecognitionClient
         return rtrim($nodes[$index], '/');
     }
 
-    private function post(string $path, array $payload): array
+    private function post(string $path, array $payload, ?int $timeout = null): array
     {
         $url = $this->baseUrl().$path;
-        $timeout = config('services.ai.timeout', 2);
+        $timeout ??= config('services.ai.timeout', 2);
 
         try {
             $response = Http::timeout($timeout)

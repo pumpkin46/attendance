@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 
 from app.core.config import settings
+from app.services.face_pose import ENROLLMENT_POSE_TYPES
 from app.services.face_quality import validate_face_image
 from app.services.faiss_index import FaissIndex
 from app.services.liveness import verify_liveness
@@ -101,7 +102,22 @@ def _get_faces(img: np.ndarray):
     return app, app.get(img)
 
 
-def validate_image(image_b64: str) -> dict:
+def _required_poses() -> list[str]:
+    raw = settings.enrollment_structured_poses.strip()
+    if not raw:
+        return list(ENROLLMENT_POSE_TYPES)
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _enrollment_score(accepted: list[dict], required_count: int) -> float:
+    if not accepted:
+        return 0.0
+    completeness = len(accepted) / max(required_count, 1)
+    avg_quality = sum(a.get("quality_score", 0) for a in accepted) / len(accepted)
+    return round(min(1.0, 0.55 * completeness + 0.45 * avg_quality), 4)
+
+
+def validate_image(image_b64: str, expected_pose: str | None = None) -> dict:
     """FR-007: Validate single image quality without storing."""
     start = time.perf_counter()
     img = _decode_image(image_b64)
@@ -111,6 +127,7 @@ def validate_image(image_b64: str) -> dict:
             "reason": "invalid_image",
             "quality_score": 0.0,
             "checks": {},
+            "face_metadata": None,
             "processing_ms": int((time.perf_counter() - start) * 1000),
         }
 
@@ -121,12 +138,124 @@ def validate_image(image_b64: str) -> dict:
             "reason": None,
             "quality_score": 0.85,
             "checks": {"mode": "mock"},
+            "face_metadata": {"detected_pose": expected_pose, "mode": "mock"},
             "processing_ms": int((time.perf_counter() - start) * 1000),
         }
 
-    result = validate_face_image(img, faces)
+    result = validate_face_image(img, faces, expected_pose=expected_pose)
+    result["face_metadata"] = result.get("face_metadata") or result.get("checks", {}).get(
+        "face_metadata"
+    )
     result["processing_ms"] = int((time.perf_counter() - start) * 1000)
     return result
+
+
+def enroll_structured(employee_id: str, poses: dict[str, str]) -> dict:
+    """
+    Register one embedding per required pose slot (front, left, right, …).
+    Each value is a base64 image keyed by pose type.
+    """
+    start = time.perf_counter()
+    required = _required_poses()
+    missing = [p for p in required if p not in poses or not poses[p]]
+    if missing:
+        return {
+            "success": False,
+            "error": f"Missing required poses: {', '.join(missing)}",
+            "missing_poses": missing,
+        }
+
+    accepted: list[dict] = []
+    rejected: list[dict] = []
+    embeddings: list[np.ndarray] = []
+
+    for pose_type in required:
+        image_b64 = poses[pose_type]
+        img = _decode_image(image_b64)
+        app, faces = _get_faces(img) if img is not None else (None, [])
+
+        if app is None and img is not None:
+            seed = f"{employee_id}-{pose_type}"
+            validation = {
+                "accepted": True,
+                "reason": None,
+                "quality_score": 0.85,
+                "checks": {"mode": "mock"},
+                "face_metadata": {"pose_type": pose_type, "mode": "mock"},
+            }
+            embeddings.append(_mock_embedding(seed))
+            accepted.append({"pose_type": pose_type, **validation})
+            continue
+
+        validation = (
+            validate_face_image(img, faces, expected_pose=pose_type)
+            if img is not None
+            else {
+                "accepted": False,
+                "reason": "invalid_image",
+                "quality_score": 0.0,
+                "checks": {},
+            }
+        )
+
+        if not validation["accepted"]:
+            rejected.append({"pose_type": pose_type, **validation})
+            continue
+
+        if settings.liveness_enabled and settings.antispoof_block_enrollment and faces:
+            face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            bbox = _bbox_from_face(face)
+            det = float(getattr(face, "det_score", 0.9))
+            liveness = verify_liveness(img, bbox, len(faces), det, True)
+            if not liveness.passed:
+                rejected.append({
+                    "pose_type": pose_type,
+                    "accepted": False,
+                    "reason": liveness.reason or "liveness_failed",
+                    "quality_score": validation["quality_score"],
+                    "checks": validation.get("checks", {}),
+                })
+                continue
+
+        face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+        emb = np.array(face.embedding, dtype=np.float32)
+        embeddings.append(emb)
+        meta = validation.get("face_metadata") or {}
+        meta["pose_type"] = pose_type
+        accepted.append({
+            "pose_type": pose_type,
+            "quality_score": validation["quality_score"],
+            "checks": validation.get("checks", {}),
+            "face_metadata": meta,
+            "embedding_dim": int(emb.shape[0]),
+        })
+
+    if rejected:
+        return {
+            "success": False,
+            "error": f"{len(rejected)} pose(s) failed validation",
+            "rejected": rejected,
+            "accepted_count": len(accepted),
+            "rejected_count": len(rejected),
+            "processing_ms": int((time.perf_counter() - start) * 1000),
+        }
+
+    faiss_ids = get_index().add_batch(employee_id, embeddings)
+    processing_ms = int((time.perf_counter() - start) * 1000)
+    avg_quality = sum(a["quality_score"] for a in accepted) / len(accepted)
+    enrollment_score = _enrollment_score(accepted, len(required))
+
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "embeddings_stored": len(faiss_ids),
+        "faiss_ids": [str(i) for i in faiss_ids],
+        "average_quality_score": round(avg_quality, 4),
+        "enrollment_score": enrollment_score,
+        "accepted": accepted,
+        "required_poses": required,
+        "processing_ms": processing_ms,
+    }
 
 
 def enroll_batch(employee_id: str, images_b64: list[str]) -> dict:

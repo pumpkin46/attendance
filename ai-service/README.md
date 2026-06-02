@@ -21,6 +21,7 @@ This service does **not** implement attendance (check-in/out, shifts, overtime, 
 | GET | `/api/v1/embeddings/export` | Export FAISS index for edge sync |
 | POST | `/api/v1/embeddings/import` | Import index on edge device |
 | POST | `/api/v1/embeddings/reload` | Reload index from disk |
+| POST | `/api/v1/anomalies/analyze` | Detect attendance anomalies (rules + ML) |
 
 ## How attendance works
 

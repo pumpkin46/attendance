@@ -95,6 +95,7 @@ UI runs at **http://127.0.0.1:5173**
 | Face Recognition | Identify + liveness → auto attendance |
 | RFID Integration | Card tap at readers → auto check-in/out |
 | Attendance Engine | Check-in/out, duplicate prevention, overtime |
+| Anomaly Detection | AI rules + Isolation Forest on attendance patterns |
 | Shift Management | Schedules, grace periods, assignments |
 | Reporting | Summary, overtime, CSV export |
 | Camera Management | Multi-camera, heartbeat monitoring |
@@ -130,6 +131,20 @@ IP Camera → edge-agent → local ai-service → Laravel API (match results onl
 3. Agent syncs FAISS embeddings from central server and runs local identify
 4. Only match results are POSTed to `/api/v1/edge/report` — no images leave the device
 5. Cloud-mode cameras continue using `php artisan cameras:poll-streams`
+
+## Anomaly detection
+
+AI-powered scan for suspicious attendance patterns:
+
+1. Laravel gathers attendance features (check-in time, overtime, recognition frequency, etc.)
+2. AI service applies **rule-based checks** + **Isolation Forest** ML outlier detection
+3. Anomalies stored in `attendance_anomalies` for HR review
+
+```bash
+php artisan attendance:detect-anomalies --days=30
+```
+
+Detected types: missing check-out, excessive overtime, unusual check-in time, weekend work, short work day, high recheck frequency, statistical outliers, absence patterns.
 
 ## Security notes
 

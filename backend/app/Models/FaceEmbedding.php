@@ -9,7 +9,8 @@ class FaceEmbedding extends Model
 {
     protected $fillable = [
         'employee_id', 'face_enrollment_session_id', 'faiss_id',
-        'quality_score', 'image_index', 'version', 'is_primary',
+        'quality_score', 'image_index', 'pose_type', 'face_metadata',
+        'version', 'is_primary',
     ];
 
     protected function casts(): array
@@ -17,6 +18,7 @@ class FaceEmbedding extends Model
         return [
             'is_primary' => 'boolean',
             'quality_score' => 'decimal:4',
+            'face_metadata' => 'array',
         ];
     }
 
