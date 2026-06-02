@@ -80,12 +80,16 @@ export default function DashboardPage() {
               </Badge>
             </li>
             <li className="flex items-center justify-between py-3">
-              <span>Recognition threshold</span>
-              <span className="text-slate-300">≥ 95%</span>
+              <span>Liveness (FR-017/018)</span>
+              <Badge tone={aiHealth?.antispoof_model_loaded ? 'ok' : 'warn'}>
+                {aiHealth?.antispoof_model_loaded ? 'Anti-spoof active' : 'Model missing'}
+              </Badge>
             </li>
             <li className="flex items-center justify-between py-3">
-              <span>Face matching (FR-010)</span>
-              <Badge tone="ok">FAISS embeddings</Badge>
+              <span>Active liveness</span>
+              <Badge tone={aiHealth?.active_liveness_enabled ? 'ok' : 'neutral'}>
+                {aiHealth?.active_liveness_enabled ? 'Blink + movement' : 'Off'}
+              </Badge>
             </li>
           </ul>
         </Card>

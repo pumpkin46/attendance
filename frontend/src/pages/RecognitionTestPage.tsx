@@ -9,6 +9,7 @@ import { PageHeader } from '../components/ui/PageHeader'
 interface IdentifyResult {
   matched: boolean
   reason?: string
+  spoof_type?: string
   confidence?: number
   processing_ms?: number
   liveness_score?: number
@@ -61,10 +62,21 @@ export default function RecognitionTestPage() {
     heuristic_failed: 'Image quality too low for liveness. Improve lighting and focus.',
     antispoof_model_unavailable:
       'Anti-spoof model not loaded. Run: python scripts/download_antispoof_model.py',
+    blink_not_detected: 'Active liveness failed: no blink detected in the frame sequence.',
+    head_movement_not_detected: 'Active liveness failed: insufficient head movement.',
+    active_liveness_failed: 'Active liveness verification failed.',
+    liveness_frames_required: 'Multi-frame liveness required — use Live Kiosk or Liveness Test.',
     multiple_or_no_face: 'Exactly one face must be visible in the frame.',
     low_detection_score: 'Face not clear enough — move closer to the camera.',
     unknown: 'No matching enrolled face. Enroll this person under Face Enrollment first.',
     low_confidence: 'Face found but similarity below threshold. Re-enroll with a clearer photo.',
+  }
+
+  const spoofLabels: Record<string, string> = {
+    printed_photo: 'Printed photo attack detected (FR-017).',
+    mobile_screen: 'Mobile screen replay detected (FR-017).',
+    video_replay: 'Video replay detected (FR-017).',
+    deepfake: 'Deepfake attempt detected (FR-017).',
   }
 
   return (
@@ -128,8 +140,10 @@ export default function RecognitionTestPage() {
           )}
           {!result.matched && (
             <p className="mt-4 text-sm text-red-400">
-              {reasonHelp[result.reason ?? ''] ??
-                `No match. Reason: ${result.reason ?? 'unknown'}`}
+              {result.spoof_type && spoofLabels[result.spoof_type]
+                ? spoofLabels[result.spoof_type]
+                : reasonHelp[result.reason ?? ''] ??
+                  `No match. Reason: ${result.reason ?? 'unknown'}`}
             </p>
           )}
         </Card>

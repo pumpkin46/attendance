@@ -15,15 +15,16 @@ interface DetectResponse {
   faces: FaceBox[]
   face_count: number
   processing_ms: number
-  image_width?: number
-  image_height?: number
 }
 
 interface IdentifyResult {
   matched: boolean
   reason?: string
+  spoof_type?: string
   confidence?: number
   processing_ms?: number
+  liveness_score?: number
+  liveness_checks?: Record<string, unknown>
   employee?: { id: number; employee_code: string; first_name: string; last_name: string }
   attendance?: { action: string }
 }
@@ -32,6 +33,8 @@ type KioskStatus = 'idle' | 'scanning' | 'face_detected' | 'recognized' | 'unkno
 
 const DETECT_MS = 400
 const IDENTIFY_MS = 1500
+const FRAME_BUFFER_MS = 300
+const MAX_LIVENESS_FRAMES = 20
 
 const statusBarStyles: Record<KioskStatus, string> = {
   idle: 'bg-slate-700 text-slate-300',
@@ -43,6 +46,17 @@ const statusBarStyles: Record<KioskStatus, string> = {
   duplicate: 'bg-amber-600/90 text-white',
 }
 
+const SPOOF_REASONS = new Set([
+  'spoof_detected',
+  'liveness_failed',
+  'heuristic_failed',
+  'blink_not_detected',
+  'head_movement_not_detected',
+  'active_liveness_failed',
+  'liveness_frames_required',
+  'antispoof_model_unavailable',
+])
+
 interface LiveKioskPageProps {
   fullscreen?: boolean
 }
@@ -50,9 +64,12 @@ interface LiveKioskPageProps {
 export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps) {
   const { videoRef, canvasRef, active, error: camError, start, stop, captureFrame } = useWebcam()
   const overlayRef = useRef<HTMLCanvasElement>(null)
+  const frameBufferRef = useRef<string[]>([])
   const [running, setRunning] = useState(false)
   const [cameraId, setCameraId] = useState('')
   const [requireLiveness, setRequireLiveness] = useState(true)
+  const [activeLiveness, setActiveLiveness] = useState(true)
+  const [bufferCount, setBufferCount] = useState(0)
   const [faces, setFaces] = useState<FaceBox[]>([])
   const [status, setStatus] = useState<KioskStatus>('idle')
   const [lastMatch, setLastMatch] = useState<IdentifyResult | null>(null)
@@ -63,6 +80,14 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
   const inFlightDetect = useRef(false)
   const inFlightIdentify = useRef(false)
   const faceCountRef = useRef(0)
+
+  const pushFrame = useCallback(
+    (frame: string) => {
+      frameBufferRef.current = [...frameBufferRef.current, frame].slice(-MAX_LIVENESS_FRAMES)
+      setBufferCount(frameBufferRef.current.length)
+    },
+    []
+  )
 
   const drawOverlay = useCallback(
     (boxes: FaceBox[], matched: boolean | null) => {
@@ -113,6 +138,7 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
 
     let detectTimer: ReturnType<typeof setInterval>
     let identifyTimer: ReturnType<typeof setInterval>
+    let bufferTimer: ReturnType<typeof setInterval>
     let frames = 0
     let lastFps = performance.now()
 
@@ -140,10 +166,16 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           lastFps = now
         }
       } catch {
-        /* skip frame on error */
+        /* skip */
       } finally {
         inFlightDetect.current = false
       }
+    }
+
+    const sampleForLiveness = () => {
+      if (!activeLiveness || faceCountRef.current < 1) return
+      const frame = captureFrame(480)
+      if (frame) pushFrame(frame)
     }
 
     const runIdentify = async () => {
@@ -152,23 +184,24 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
       if (!frame) return
       inFlightIdentify.current = true
       try {
-        const { data } = await api.post<IdentifyResult>('/recognition/identify', {
+        const payload: Record<string, unknown> = {
           image: frame,
           camera_id: cameraId ? Number(cameraId) : undefined,
           require_liveness: requireLiveness,
           source: 'webcam',
-        })
+        }
+        if (requireLiveness && activeLiveness && frameBufferRef.current.length >= 5) {
+          payload.liveness_frames = frameBufferRef.current
+        }
+
+        const { data } = await api.post<IdentifyResult>('/recognition/identify', payload)
         setIdentifyMs(data.processing_ms ?? 0)
         setLastMatch(data)
 
         if (data.matched) {
           const action = data.attendance?.action
           setStatus(action === 'duplicate_ignored' ? 'duplicate' : 'recognized')
-        } else if (
-          data.reason === 'spoof_detected' ||
-          data.reason === 'liveness_failed' ||
-          data.reason === 'heuristic_failed'
-        ) {
+        } else if (data.reason && SPOOF_REASONS.has(data.reason)) {
           setStatus('spoof')
         } else {
           setStatus('unknown')
@@ -182,15 +215,19 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
 
     detectTimer = setInterval(runDetect, DETECT_MS)
     identifyTimer = setInterval(runIdentify, IDENTIFY_MS)
+    bufferTimer = setInterval(sampleForLiveness, FRAME_BUFFER_MS)
     runDetect()
 
     return () => {
       clearInterval(detectTimer)
       clearInterval(identifyTimer)
+      clearInterval(bufferTimer)
     }
-  }, [running, active, captureFrame, cameraId, requireLiveness])
+  }, [running, active, captureFrame, cameraId, requireLiveness, activeLiveness, pushFrame])
 
   const handleStart = async () => {
+    frameBufferRef.current = []
+    setBufferCount(0)
     await start()
     setRunning(true)
     setStatus('scanning')
@@ -202,17 +239,29 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
     setStatus('idle')
     setFaces([])
     setLastMatch(null)
+    frameBufferRef.current = []
+    setBufferCount(0)
+  }
+
+  const spoofLabel = (match: IdentifyResult | null) => {
+    const type = match?.spoof_type
+    if (type === 'printed_photo') return 'Printed photo detected'
+    if (type === 'mobile_screen') return 'Mobile screen detected'
+    if (type === 'video_replay') return 'Video replay detected'
+    if (type === 'deepfake') return 'Deepfake attempt detected'
+    if (match?.reason === 'blink_not_detected') return 'Blink not detected — look at camera naturally'
+    return 'Spoof detected — use live face'
   }
 
   const statusLabel: Record<KioskStatus, string> = {
     idle: 'Camera off',
-    scanning: 'Scanning for faces…',
-    face_detected: 'Face detected — recognizing…',
+    scanning: activeLiveness ? 'Scanning — blink naturally…' : 'Scanning for faces…',
+    face_detected: 'Face detected — verifying liveness…',
     recognized: lastMatch?.employee
       ? `Welcome, ${lastMatch.employee.first_name} ${lastMatch.employee.last_name}`
       : 'Recognized',
     unknown: 'Unknown person',
-    spoof: 'Spoof detected — use live face',
+    spoof: spoofLabel(lastMatch),
     duplicate: 'Already checked in (duplicate ignored)',
   }
 
@@ -222,7 +271,7 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
         <div>
           <h1 className="text-2xl font-semibold">Live recognition</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Real-time face detection and attendance check-in/out
+            FR-017 anti-spoof + FR-018 blink/head-movement active liveness
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -240,7 +289,16 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
               checked={requireLiveness}
               onChange={(e) => setRequireLiveness(e.target.checked)}
             />
-            Anti-spoof
+            Anti-spoof (AI model)
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              className="rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
+              checked={activeLiveness}
+              onChange={(e) => setActiveLiveness(e.target.checked)}
+            />
+            Blink / movement
           </label>
           {!active ? (
             <Button type="button" onClick={handleStart}>
@@ -276,7 +334,11 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           <ul className="divide-y divide-slate-800 text-sm">
             <li className="flex justify-between py-3">
               <span className="text-slate-400">Status</span>
-              <strong className="text-right">{statusLabel[status]}</strong>
+              <strong className="max-w-[160px] text-right">{statusLabel[status]}</strong>
+            </li>
+            <li className="flex justify-between py-3">
+              <span className="text-slate-400">Liveness frames</span>
+              <strong>{bufferCount}</strong>
             </li>
             <li className="flex justify-between py-3">
               <span className="text-slate-400">Faces in frame</span>
@@ -318,8 +380,12 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
             </div>
           )}
 
+          {status === 'spoof' && (
+            <p className="mt-4 text-sm text-red-400">{spoofLabel(lastMatch)}</p>
+          )}
+
           {!lastMatch?.matched && status === 'unknown' && (
-            <p className="mt-4 text-sm text-red-400">
+            <p className="mt-4 text-sm text-amber-400">
               Face not enrolled. Add under Face Enrollment.
             </p>
           )}

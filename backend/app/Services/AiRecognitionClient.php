@@ -29,11 +29,19 @@ class AiRecognitionClient
         ]);
     }
 
-    public function identify(string $imageBase64, bool $requireLiveness = true): array
+    public function identify(string $imageBase64, bool $requireLiveness = true, ?array $livenessFrames = null): array
     {
-        return $this->post('/api/v1/identify', [
+        return $this->post('/api/v1/identify', array_filter([
             'image' => $imageBase64,
             'require_liveness' => $requireLiveness,
+            'liveness_frames' => $livenessFrames,
+        ], fn ($v) => $v !== null));
+    }
+
+    public function verifyLiveness(array $frames): array
+    {
+        return $this->post('/api/v1/liveness/verify', [
+            'frames' => $frames,
         ]);
     }
 

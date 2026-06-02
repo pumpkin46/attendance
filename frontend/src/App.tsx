@@ -10,6 +10,7 @@ import EmployeesPage from './pages/EmployeesPage'
 import EnrollmentPage from './pages/EnrollmentPage'
 import LiveKioskPage from './pages/LiveKioskPage'
 import RecognitionTestPage from './pages/RecognitionTestPage'
+import LivenessTestPage from './pages/LivenessTestPage'
 import LoginPage from './pages/LoginPage'
 import ReportsPage from './pages/ReportsPage'
 import ShiftsPage from './pages/ShiftsPage'
@@ -32,8 +33,9 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="employees" element={<EmployeesPage />} />
             <Route path="enrollment" element={<EnrollmentPage />} />
-            <Route path="recognition-test" element={<RecognitionTestPage />} />
             <Route path="live-kiosk" element={<LiveKioskPage />} />
+            <Route path="liveness-test" element={<LivenessTestPage />} />
+            <Route path="recognition-test" element={<RecognitionTestPage />} />
             <Route path="attendance" element={<AttendancePage />} />
             <Route path="shifts" element={<ShiftsPage />} />
             <Route path="cameras" element={<CamerasPage />} />

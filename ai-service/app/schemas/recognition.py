@@ -11,6 +11,26 @@ class EnrollRequest(BaseModel):
 class IdentifyRequest(BaseModel):
     image: str
     require_liveness: bool = True
+    liveness_frames: list[str] | None = Field(
+        default=None,
+        description="Optional frame sequence for blink/head-movement verification (FR-018)",
+    )
+
+
+class LivenessVerifyRequest(BaseModel):
+    frames: list[str] = Field(..., min_length=1, description="Webcam frame sequence (base64 JPEG)")
+
+
+class LivenessVerifyResponse(BaseModel):
+    success: bool = True
+    passed: bool = False
+    score: float = 0.0
+    blink_detected: bool = False
+    head_movement_detected: bool = False
+    frame_count: int = 0
+    reason: str | None = None
+    checks: dict[str, Any] = Field(default_factory=dict)
+    processing_ms: int = 0
 
 
 class DeleteRequest(BaseModel):
@@ -27,6 +47,7 @@ class EnrollResponse(BaseModel):
     liveness_score: float | None = None
     liveness_reason: str | None = None
     liveness_checks: dict[str, Any] | None = None
+    spoof_type: str | None = None
 
 
 class IdentifyResponse(BaseModel):
@@ -39,6 +60,7 @@ class IdentifyResponse(BaseModel):
     face_count: int | None = None
     liveness_reason: str | None = None
     liveness_checks: dict[str, Any] | None = None
+    spoof_type: str | None = None
 
 
 class FaceBox(BaseModel):

@@ -28,7 +28,16 @@ class Settings(BaseSettings):
     antispoof_require_both: bool = True
     antispoof_fail_without_model: bool = False
 
-    # FR-006 / FR-007 enrollment quality
+    # FR-018 Active liveness (blink + head movement)
+    active_liveness_enabled: bool = True
+    active_liveness_min_frames: int = 5
+    active_liveness_max_frames: int = 24
+    active_liveness_require_blink: bool = True
+    active_liveness_require_head_movement: bool = False
+    active_liveness_require_frames: bool = False
+    active_liveness_blink_variance_drop: float = 0.35
+    active_liveness_head_yaw_range: float = 0.06
+    active_liveness_head_pitch_range: float = 0.05
     enrollment_min_images: int = 10
     enrollment_max_images: int = 50
     quality_min_det_score: float = 0.5

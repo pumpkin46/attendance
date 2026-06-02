@@ -45,6 +45,8 @@ class RecognitionController extends Controller
             'image' => 'required|string',
             'camera_id' => 'nullable|exists:cameras,id',
             'require_liveness' => 'boolean',
+            'liveness_frames' => 'nullable|array|max:30',
+            'liveness_frames.*' => 'string',
             'source' => 'nullable|string|in:webcam,upload,rtsp,ip_camera',
         ]);
 
@@ -52,8 +54,9 @@ class RecognitionController extends Controller
         $threshold = config('services.ai.threshold', 0.95);
         $requireLiveness = $data['require_liveness'] ?? true;
         $source = $data['source'] ?? ($camera?->stream_url ? 'rtsp' : 'upload');
+        $livenessFrames = $data['liveness_frames'] ?? null;
 
-        $result = $this->ai->identify($data['image'], $requireLiveness);
+        $result = $this->ai->identify($data['image'], $requireLiveness, $livenessFrames);
 
         if (! ($result['success'] ?? false)) {
             return response()->json(['message' => $result['error'] ?? 'Recognition failed'], 503);
@@ -75,6 +78,7 @@ class RecognitionController extends Controller
                 'metadata' => [
                     'liveness_reason' => $result['liveness_reason'] ?? 'liveness_failed',
                     'liveness_checks' => $result['liveness_checks'] ?? null,
+                    'spoof_type' => $result['spoof_type'] ?? null,
                     'source' => $source,
                 ],
                 'recognized_at' => now(),
@@ -83,6 +87,7 @@ class RecognitionController extends Controller
             return response()->json([
                 'matched' => false,
                 'reason' => $result['liveness_reason'] ?? 'liveness_failed',
+                'spoof_type' => $result['spoof_type'] ?? null,
                 'processing_ms' => $processingMs,
                 'liveness_score' => $result['liveness_score'] ?? null,
                 'liveness_checks' => $result['liveness_checks'] ?? null,
@@ -165,6 +170,22 @@ class RecognitionController extends Controller
         $events->getCollection()->transform(fn (RecognitionEvent $e) => $this->formatEvent($e));
 
         return response()->json($events);
+    }
+
+    public function verifyLiveness(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'frames' => 'required|array|min:1|max:30',
+            'frames.*' => 'string',
+        ]);
+
+        $result = $this->ai->verifyLiveness($data['frames']);
+
+        if (! ($result['success'] ?? false)) {
+            return response()->json(['message' => $result['error'] ?? 'Liveness verification failed'], 503);
+        }
+
+        return response()->json($result);
     }
 
     public function snapshot(RecognitionEvent $event): StreamedResponse|JsonResponse

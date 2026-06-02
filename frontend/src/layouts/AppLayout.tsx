@@ -8,6 +8,7 @@ const nav = [
   { to: '/employees', label: 'Employees' },
   { to: '/enrollment', label: 'Face Enrollment' },
   { to: '/live-kiosk', label: 'Live Kiosk' },
+  { to: '/liveness-test', label: 'Liveness Test' },
   { to: '/recognition-test', label: 'Test Recognition' },
   { to: '/attendance', label: 'Attendance' },
   { to: '/shifts', label: 'Shifts' },

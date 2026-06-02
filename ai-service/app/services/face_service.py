@@ -90,6 +90,7 @@ def _liveness_payload(result) -> dict:
         "face_count": result.face_count,
         "liveness_reason": result.reason,
         "liveness_checks": result.checks,
+        "spoof_type": getattr(result, "spoof_type", None),
     }
 
 
@@ -262,11 +263,17 @@ def enroll(employee_id: str, image_b64: str) -> dict:
     }
 
 
-def identify(image_b64: str, require_liveness: bool = True) -> dict:
+def identify(
+    image_b64: str,
+    require_liveness: bool = True,
+    liveness_frames: list[str] | None = None,
+) -> dict:
     start = time.perf_counter()
     img, embedding, det_score, face_count, insightface_ok, bbox = _analyze_image(image_b64)
 
-    liveness = verify_liveness(img, bbox, face_count, det_score, insightface_ok)
+    liveness = verify_liveness(
+        img, bbox, face_count, det_score, insightface_ok, liveness_frames
+    )
     liveness_block = require_liveness and settings.liveness_enabled and not liveness.passed
 
     if liveness_block:
@@ -308,6 +315,27 @@ def identify(image_b64: str, require_liveness: bool = True) -> dict:
 def delete_employee(employee_id: str) -> dict:
     get_index().remove_employee(employee_id)
     return {"success": True, "employee_id": employee_id}
+
+
+def verify_liveness_sequence(frames_b64: list[str]) -> dict:
+    """Standalone FR-018 active liveness check."""
+    from app.services.active_liveness import verify_active_liveness
+
+    start = time.perf_counter()
+    result = verify_active_liveness(frames_b64)
+    processing_ms = int((time.perf_counter() - start) * 1000)
+
+    return {
+        "success": True,
+        "passed": result.passed,
+        "score": round(result.score, 4),
+        "blink_detected": result.blink_detected,
+        "head_movement_detected": result.head_movement_detected,
+        "frame_count": result.frame_count,
+        "reason": result.reason,
+        "checks": result.checks,
+        "processing_ms": processing_ms,
+    }
 
 
 def detect_faces(image_b64: str) -> dict:

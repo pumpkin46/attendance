@@ -8,6 +8,8 @@ from app.schemas.recognition import (
     EnrollBatchResponse,
     EnrollRequest,
     EnrollResponse,
+    LivenessVerifyRequest,
+    LivenessVerifyResponse,
     IdentifyRequest,
     IdentifyResponse,
     StreamCaptureRequest,
@@ -44,8 +46,18 @@ def enroll_batch(req: EnrollBatchRequest):
 
 @router.post("/identify", response_model=IdentifyResponse)
 def identify(req: IdentifyRequest):
-    result = face_service.identify(req.image, req.require_liveness)
+    result = face_service.identify(
+        req.image,
+        req.require_liveness,
+        req.liveness_frames,
+    )
     return IdentifyResponse(**result)
+
+
+@router.post("/liveness/verify", response_model=LivenessVerifyResponse)
+def liveness_verify(req: LivenessVerifyRequest):
+    result = face_service.verify_liveness_sequence(req.frames)
+    return LivenessVerifyResponse(**result)
 
 
 @router.post("/detect", response_model=DetectResponse)

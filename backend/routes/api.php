@@ -53,6 +53,7 @@ Route::prefix('v1')->group(function () {
 
         Route::post('recognition/detect', [RecognitionController::class, 'detect']);
         Route::post('recognition/identify', [RecognitionController::class, 'identify']);
+        Route::post('recognition/liveness/verify', [RecognitionController::class, 'verifyLiveness']);
         Route::get('recognition/events', [RecognitionController::class, 'events'])->middleware('permission:recognition.view');
         Route::get('recognition/events/{event}/snapshot', [RecognitionController::class, 'snapshot'])->middleware('permission:recognition.view');
         Route::get('recognition/unknown-summary', [RecognitionController::class, 'unknownSummary'])->middleware('permission:recognition.view');

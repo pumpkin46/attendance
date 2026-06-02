@@ -32,5 +32,12 @@ def health():
         "antispoof_enabled": settings.antispoof_enabled,
         "antispoof_model_loaded": antispoof_path.is_file(),
         "liveness_enabled": settings.liveness_enabled,
+        "active_liveness_enabled": settings.active_liveness_enabled,
+        "liveness_methods": {
+            "ai_model": "MiniFASNetV2",
+            "blink_detection": settings.active_liveness_enabled,
+            "head_movement": settings.active_liveness_enabled,
+            "spoof_types": ["printed_photo", "mobile_screen", "video_replay", "deepfake"],
+        },
         "recognition_threshold": settings.recognition_threshold,
     }

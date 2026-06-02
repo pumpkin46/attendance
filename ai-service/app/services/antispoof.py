@@ -13,6 +13,8 @@ import onnxruntime as ort
 
 from app.core.config import settings
 
+from app.services.spoof_classifier import classify_spoof_type
+
 logger = logging.getLogger(__name__)
 
 _verifier: AntiSpoofVerifier | None = None
@@ -24,8 +26,9 @@ class AntiSpoofResult:
     live_score: float
     model_score: float | None
     heuristic_score: float
-    checks: dict[str, bool | float] = field(default_factory=dict)
+    checks: dict[str, bool | float | str | None] = field(default_factory=dict)
     reason: str | None = None
+    spoof_type: str | None = None
 
 
 class AntiSpoofVerifier:
@@ -182,6 +185,9 @@ class AntiSpoofVerifier:
             heuristic_score=heuristic_score,
             checks=checks,
             reason=reason,
+            spoof_type=classify_spoof_type(
+                image, bbox_xyxy, model_score, heuristic_detail, passed
+            ),
         )
 
 
