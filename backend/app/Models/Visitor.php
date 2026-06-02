@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Visitor extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = [
         'organization_id', 'host_employee_id', 'name', 'company', 'phone', 'purpose',
         'visit_start_at', 'visit_end_at', 'status', 'face_registered',

@@ -13,8 +13,8 @@ class User extends Authenticatable
     use HasApiTokens, Notifiable;
 
     protected $fillable = [
-        'organization_id', 'name', 'email', 'password',
-        'oauth_provider', 'oauth_id', 'is_active',
+        'organization_id', 'branch_id', 'department_id', 'name', 'email', 'password',
+        'oauth_provider', 'oauth_id', 'auth_provider', 'external_id', 'is_active',
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -38,8 +38,17 @@ class User extends Authenticatable
         return $this->belongsToMany(Role::class, 'role_user');
     }
 
+    public function isSuperAdmin(): bool
+    {
+        return $this->hasRole(config('tenancy.super_admin_role', 'super_admin'));
+    }
+
     public function hasPermission(string $permission): bool
     {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
         return $this->roles()
             ->whereHas('permissions', fn ($q) => $q->where('name', $permission))
             ->exists();

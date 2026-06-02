@@ -7,11 +7,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Location extends Model
+class Department extends Model
 {
     use BelongsToTenant;
 
-    protected $fillable = ['organization_id', 'branch_id', 'name', 'address', 'timezone', 'is_active'];
+    protected $fillable = [
+        'organization_id', 'branch_id', 'name', 'code', 'is_active',
+    ];
 
     protected function casts(): array
     {
@@ -28,8 +30,8 @@ class Location extends Model
         return $this->belongsTo(Branch::class);
     }
 
-    public function cameras(): HasMany
+    public function employees(): HasMany
     {
-        return $this->hasMany(Camera::class);
+        return $this->hasMany(Employee::class);
     }
 }

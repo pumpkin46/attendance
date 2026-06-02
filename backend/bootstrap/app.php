@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([
             'permission' => CheckPermission::class,
+            'tenant' => \App\Http\Middleware\EnforceTenantIsolation::class,
             'rfid.reader' => \App\Http\Middleware\AuthenticateRfidReader::class,
             'edge.device' => \App\Http\Middleware\AuthenticateEdgeDevice::class,
         ]);

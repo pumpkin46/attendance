@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AccessPoint extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = [
         'organization_id', 'location_id', 'camera_id', 'name', 'device_type',
         'default_action', 'controller_url', 'require_liveness', 'min_confidence', 'is_active',

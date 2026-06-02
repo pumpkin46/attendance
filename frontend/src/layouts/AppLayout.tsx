@@ -21,6 +21,7 @@ const nav = [
   { to: '/unknown-faces', label: 'Unknown Faces' },
   { to: '/reports', label: 'Reports' },
   { to: '/audit-logs', label: 'Audit Logs' },
+  { to: '/security', label: 'Security & Tenancy' },
 ]
 
 export default function AppLayout() {

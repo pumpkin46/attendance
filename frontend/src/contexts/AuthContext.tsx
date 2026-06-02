@@ -16,6 +16,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
   hasPermission: (name: string) => boolean
+  isSuperAdmin: () => boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -63,14 +64,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const hasPermission = useCallback(
-    (name: string) =>
-      user?.roles?.some((r) => r.permissions?.some((p) => p.name === name)) ?? false,
+    (name: string) => {
+      if (user?.roles?.some((r) => r.name === 'super_admin')) return true
+      return user?.roles?.some((r) => r.permissions?.some((p) => p.name === name)) ?? false
+    },
+    [user]
+  )
+
+  const isSuperAdmin = useCallback(
+    () => user?.roles?.some((r) => r.name === 'super_admin') ?? false,
     [user]
   )
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, hasPermission }),
-    [user, loading, login, logout, hasPermission]
+    () => ({ user, loading, login, logout, hasPermission, isSuperAdmin }),
+    [user, loading, login, logout, hasPermission, isSuperAdmin]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

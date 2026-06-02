@@ -21,6 +21,7 @@ import ReportsPage from './pages/ReportsPage'
 import RfidPage from './pages/RfidPage'
 import ShiftsPage from './pages/ShiftsPage'
 import UnknownFacesPage from './pages/UnknownFacesPage'
+import SecurityTenancyPage from './pages/SecurityTenancyPage'
 
 export default function App() {
   return (
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="reports" element={<ReportsPage />} />
             <Route path="unknown-faces" element={<UnknownFacesPage />} />
             <Route path="audit-logs" element={<AuditLogsPage />} />
+            <Route path="security" element={<SecurityTenancyPage />} />
           </Route>
           <Route
             path="/kiosk"

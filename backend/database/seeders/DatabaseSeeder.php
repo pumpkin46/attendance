@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Models\Branch;
+use App\Models\Department;
 use App\Models\Employee;
 use App\Models\Location;
 use App\Models\Organization;
@@ -23,8 +25,24 @@ class DatabaseSeeder extends Seeder
             'timezone' => 'UTC',
         ]);
 
+        $branch = Branch::create([
+            'organization_id' => $org->id,
+            'name' => 'Head Office Branch',
+            'code' => 'HQ',
+            'address' => '100 Main Street',
+            'timezone' => 'UTC',
+        ]);
+
+        $department = Department::create([
+            'organization_id' => $org->id,
+            'branch_id' => $branch->id,
+            'name' => 'Operations',
+            'code' => 'OPS',
+        ]);
+
         $location = Location::create([
             'organization_id' => $org->id,
+            'branch_id' => $branch->id,
             'name' => 'Head Office',
             'address' => '100 Main Street',
             'timezone' => 'UTC',
@@ -43,31 +61,63 @@ class DatabaseSeeder extends Seeder
             ['name' => 'reports.view', 'label' => 'View Reports'],
             ['name' => 'reports.export', 'label' => 'Export Reports'],
             ['name' => 'audit.view', 'label' => 'View Audit Logs'],
+            ['name' => 'organizations.manage', 'label' => 'Manage Organizations'],
+            ['name' => 'branches.manage', 'label' => 'Manage Branches'],
+            ['name' => 'departments.manage', 'label' => 'Manage Departments'],
+            ['name' => 'security.view', 'label' => 'View Security Configuration'],
         ];
 
         foreach ($permissions as $perm) {
             Permission::create($perm);
         }
 
-        $adminRole = Role::create(['name' => 'admin', 'label' => 'Administrator']);
-        $adminRole->permissions()->sync(Permission::pluck('id'));
+        $allExceptOrgManage = Permission::where('name', '!=', 'organizations.manage')->pluck('id');
 
-        $hrRole = Role::create(['name' => 'hr', 'label' => 'HR Manager']);
-        $hrRole->permissions()->sync(
-            Permission::whereIn('name', [
-                'employees.manage', 'attendance.manage', 'shifts.manage',
-                'holidays.manage', 'leave.approve', 'reports.view', 'reports.export',
-            ])->pluck('id')
-        );
+        $roles = [
+            'super_admin' => ['label' => 'Super Admin', 'permissions' => []],
+            'org_admin' => ['label' => 'Organization Admin', 'permissions' => $allExceptOrgManage],
+            'hr_manager' => ['label' => 'HR Manager', 'permissions' => Permission::whereIn('name', [
+                'employees.manage', 'attendance.manage', 'shifts.manage', 'holidays.manage',
+                'leave.approve', 'reports.view', 'reports.export', 'branches.manage', 'departments.manage',
+            ])->pluck('id')],
+            'supervisor' => ['label' => 'Supervisor', 'permissions' => Permission::whereIn('name', [
+                'attendance.manage', 'reports.view', 'leave.approve',
+            ])->pluck('id')],
+            'employee' => ['label' => 'Employee', 'permissions' => collect()],
+            'security_officer' => ['label' => 'Security Officer', 'permissions' => Permission::whereIn('name', [
+                'cameras.manage', 'edge.manage', 'rfid.manage', 'recognition.view',
+                'reports.view', 'security.view',
+            ])->pluck('id')],
+        ];
+
+        $roleModels = [];
+        foreach ($roles as $name => $meta) {
+            $role = Role::create(['name' => $name, 'label' => $meta['label']]);
+            if ($meta['permissions']->isNotEmpty()) {
+                $role->permissions()->sync($meta['permissions']);
+            }
+            $roleModels[$name] = $role;
+        }
+
+        $superAdmin = User::create([
+            'organization_id' => null,
+            'name' => 'Platform Super Admin',
+            'email' => 'superadmin@attendance.local',
+            'password' => Hash::make('password'),
+            'email_verified_at' => now(),
+        ]);
+        $superAdmin->roles()->attach($roleModels['super_admin']);
 
         $admin = User::create([
             'organization_id' => $org->id,
-            'name' => 'System Admin',
+            'branch_id' => $branch->id,
+            'department_id' => $department->id,
+            'name' => 'Organization Admin',
             'email' => 'admin@attendance.local',
             'password' => Hash::make('password'),
             'email_verified_at' => now(),
         ]);
-        $admin->roles()->attach($adminRole);
+        $admin->roles()->attach($roleModels['org_admin']);
 
         $policy = AttendancePolicy::create([
             'organization_id' => $org->id,
@@ -126,6 +176,8 @@ class DatabaseSeeder extends Seeder
             Employee::create([
                 'organization_id' => $org->id,
                 'location_id' => $location->id,
+                'branch_id' => $branch->id,
+                'department_id' => $department->id,
                 'employee_code' => sprintf('EMP%04d', $i),
                 'first_name' => "Employee{$i}",
                 'last_name' => 'Demo',

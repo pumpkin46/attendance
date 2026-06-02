@@ -25,6 +25,10 @@ use App\Http\Controllers\Api\RfidCardController;
 use App\Http\Controllers\Api\RfidEventController;
 use App\Http\Controllers\Api\RfidReaderController;
 use App\Http\Controllers\Api\RfidTapController;
+use App\Http\Controllers\Api\BranchController;
+use App\Http\Controllers\Api\DepartmentController;
+use App\Http\Controllers\Api\OrganizationController;
+use App\Http\Controllers\Api\SecurityController;
 use App\Http\Controllers\Api\ShiftController;
 use Illuminate\Support\Facades\Route;
 
@@ -32,7 +36,10 @@ Route::prefix('v1')->group(function () {
     Route::get('/health', HealthController::class);
     Route::get('/privacy/policy', [PrivacyController::class, 'policy']);
 
+    Route::get('/auth/config', [AuthController::class, 'config']);
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/auth/ldap', [AuthController::class, 'ldapLogin']);
+    Route::post('/auth/saml/callback', [AuthController::class, 'samlCallback']);
     Route::get('/auth/oauth/{provider}/redirect', [AuthController::class, 'oauthRedirect']);
     Route::get('/auth/oauth/{provider}/callback', [AuthController::class, 'oauthCallback']);
 
@@ -46,9 +53,21 @@ Route::prefix('v1')->group(function () {
         Route::post('/report', [EdgeDeviceApiController::class, 'report']);
     });
 
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::get('/auth/me', [AuthController::class, 'me']);
+
+        Route::get('security/config', [SecurityController::class, 'config'])->middleware('permission:security.view');
+
+        Route::get('organizations', [OrganizationController::class, 'index']);
+        Route::post('organizations', [OrganizationController::class, 'store']);
+        Route::get('organizations/{organization}', [OrganizationController::class, 'show']);
+
+        Route::get('branches', [BranchController::class, 'index']);
+        Route::post('branches', [BranchController::class, 'store'])->middleware('permission:branches.manage');
+
+        Route::get('departments', [DepartmentController::class, 'index']);
+        Route::post('departments', [DepartmentController::class, 'store'])->middleware('permission:departments.manage');
 
         Route::apiResource('employees', EmployeeController::class);
         Route::get('enrollment/config', [FaceEnrollmentController::class, 'config']);

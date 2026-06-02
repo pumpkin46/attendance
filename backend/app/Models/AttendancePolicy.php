@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AttendancePolicy extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = [
         'organization_id', 'name', 'grace_minutes', 'min_work_minutes', 'max_work_minutes',
         'break_minutes', 'overtime_after_minutes', 'overtime_multiplier',
