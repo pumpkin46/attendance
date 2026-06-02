@@ -4,6 +4,7 @@
     "description": "Enterprise AI attendance platform API",
     "require": {
         "php": "^8.2",
+        "dompdf/dompdf": "^3.1",
         "laravel/framework": "^11.0",
         "laravel/sanctum": "^4.0",
         "laravel/socialite": "^5.16",

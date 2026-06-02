@@ -64,6 +64,8 @@ Route::prefix('v1')->group(function () {
         Route::post('notifications/{id}/read', [NotificationController::class, 'markRead']);
         Route::post('notifications/read-all', [NotificationController::class, 'markAllRead']);
 
+        Route::get('reports/daily', [ReportController::class, 'daily'])->middleware('permission:reports.view');
+        Route::get('reports/monthly', [ReportController::class, 'monthly'])->middleware('permission:reports.view');
         Route::get('reports/attendance-summary', [ReportController::class, 'attendanceSummary'])->middleware('permission:reports.view');
         Route::get('reports/overtime', [ReportController::class, 'overtime'])->middleware('permission:reports.view');
         Route::get('reports/unknown-persons', [ReportController::class, 'unknownPersons'])->middleware('permission:reports.view');

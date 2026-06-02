@@ -3,14 +3,48 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\AttendanceRecord;
 use App\Models\RecognitionEvent;
+use App\Services\AttendanceReportService;
+use App\Services\ReportExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\Response;
 
 class ReportController extends Controller
 {
+    public function __construct(
+        private readonly AttendanceReportService $reports,
+        private readonly ReportExportService $export,
+    ) {}
+
+    /** FR-021 Daily attendance report */
+    public function daily(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'date' => 'nullable|date',
+            'location_id' => 'nullable|exists:locations,id',
+        ]);
+
+        $date = $data['date'] ?? now()->toDateString();
+
+        return response()->json($this->reports->daily($date, $data['location_id'] ?? null));
+    }
+
+    /** FR-022 Monthly attendance report */
+    public function monthly(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'year' => 'nullable|integer|min:2000|max:2100',
+            'month' => 'nullable|integer|min:1|max:12',
+            'location_id' => 'nullable|exists:locations,id',
+        ]);
+
+        $year = (int) ($data['year'] ?? now()->year);
+        $month = (int) ($data['month'] ?? now()->month);
+
+        return response()->json($this->reports->monthly($year, $month, $data['location_id'] ?? null));
+    }
+
     public function attendanceSummary(Request $request): JsonResponse
     {
         $request->validate([
@@ -18,29 +52,22 @@ class ReportController extends Controller
             'date_to' => 'required|date|after_or_equal:date_from',
         ]);
 
-        $summary = AttendanceRecord::query()
-            ->whereBetween('work_date', [$request->date_from, $request->date_to])
-            ->select('status', DB::raw('count(*) as count'))
-            ->groupBy('status')
-            ->pluck('count', 'status');
-
-        $daily = AttendanceRecord::query()
-            ->whereBetween('work_date', [$request->date_from, $request->date_to])
-            ->select('work_date', DB::raw('count(*) as total'), DB::raw("sum(case when status in ('present','late') then 1 else 0 end) as present"))
-            ->groupBy('work_date')
-            ->orderBy('work_date')
-            ->get();
+        $daily = $this->reports->daily($request->date_from);
+        $monthly = $this->reports->monthly(
+            (int) date('Y', strtotime($request->date_from)),
+            (int) date('m', strtotime($request->date_from)),
+        );
 
         return response()->json([
             'period' => ['from' => $request->date_from, 'to' => $request->date_to],
-            'by_status' => $summary,
             'daily' => $daily,
+            'monthly_summary' => $monthly['summary'],
         ]);
     }
 
     public function overtime(Request $request): JsonResponse
     {
-        $records = AttendanceRecord::with('employee')
+        $records = \App\Models\AttendanceRecord::with('employee')
             ->where('overtime_minutes', '>', 0)
             ->when($request->date_from, fn ($q, $d) => $q->where('work_date', '>=', $d))
             ->when($request->date_to, fn ($q, $d) => $q->where('work_date', '<=', $d))
@@ -69,38 +96,29 @@ class ReportController extends Controller
         return response()->json($events);
     }
 
-    public function export(Request $request): JsonResponse
+    /** FR-023 Export reports — CSV, Excel (.xls), PDF */
+    public function export(Request $request): Response
     {
-        $request->validate([
-            'date_from' => 'required|date',
-            'date_to' => 'required|date',
-            'format' => 'in:json,csv',
+        $data = $request->validate([
+            'format' => 'required|in:csv,xlsx,excel,pdf',
+            'report_type' => 'required|in:daily,monthly,detail',
+            'date' => 'nullable|date',
+            'date_from' => 'nullable|date',
+            'date_to' => 'nullable|date|after_or_equal:date_from',
+            'year' => 'nullable|integer|min:2000|max:2100',
+            'month' => 'nullable|integer|min:1|max:12',
+            'location_id' => 'nullable|exists:locations,id',
         ]);
 
-        $records = AttendanceRecord::with('employee')
-            ->whereBetween('work_date', [$request->date_from, $request->date_to])
-            ->orderBy('work_date')
-            ->get()
-            ->map(fn ($r) => [
-                'work_date' => $r->work_date->toDateString(),
-                'employee_code' => $r->employee->employee_code,
-                'employee_name' => $r->employee->full_name,
-                'check_in' => $r->check_in_at?->toIso8601String(),
-                'check_out' => $r->check_out_at?->toIso8601String(),
-                'worked_minutes' => $r->worked_minutes,
-                'overtime_minutes' => $r->overtime_minutes,
-                'status' => $r->status,
-            ]);
+        $file = $this->export->export(
+            $data['format'],
+            $data['report_type'],
+            $data,
+        );
 
-        if ($request->format === 'csv') {
-            $csv = "work_date,employee_code,employee_name,check_in,check_out,worked_minutes,overtime_minutes,status\n";
-            foreach ($records as $row) {
-                $csv .= implode(',', array_map(fn ($v) => '"'.str_replace('"', '""', (string) $v).'"', $row))."\n";
-            }
-
-            return response()->json(['format' => 'csv', 'content' => $csv]);
-        }
-
-        return response()->json(['format' => 'json', 'records' => $records]);
+        return response($file['content'], 200, [
+            'Content-Type' => $file['mime'],
+            'Content-Disposition' => 'attachment; filename="'.$file['filename'].'"',
+        ]);
     }
 }
