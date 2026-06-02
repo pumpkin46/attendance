@@ -40,4 +40,9 @@ def health():
             "spoof_types": ["printed_photo", "mobile_screen", "video_replay", "deepfake"],
         },
         "recognition_threshold": settings.recognition_threshold,
+        "nfr": {
+            "NFR-001_recognition_sla_ms": settings.recognition_sla_ms,
+            "NFR-002_max_employees": settings.max_employees,
+            "NFR-003_max_cameras": settings.max_cameras,
+        },
     }

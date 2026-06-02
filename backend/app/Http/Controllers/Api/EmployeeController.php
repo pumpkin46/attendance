@@ -42,6 +42,13 @@ class EmployeeController extends Controller
             'hire_date' => 'nullable|date',
         ]);
 
+        $maxEmployees = config('nfr.max_employees', 10_000);
+        if (Employee::count() >= $maxEmployees) {
+            return response()->json([
+                'message' => "Maximum employee capacity reached (NFR-002: {$maxEmployees})",
+            ], 422);
+        }
+
         $employee = Employee::create($data);
         $this->audit->log('employee.created', $employee, null, $employee->toArray());
 

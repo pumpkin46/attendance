@@ -53,6 +53,13 @@ class CameraController extends Controller
         $data['status'] ??= Camera::STATUS_ACTIVE;
         $data['direction'] ??= 'both';
 
+        $maxCameras = config('nfr.max_cameras', 100);
+        if (Camera::where('status', Camera::STATUS_ACTIVE)->count() >= $maxCameras) {
+            return response()->json([
+                'message' => "Maximum active camera limit reached (NFR-003: {$maxCameras})",
+            ], 422);
+        }
+
         $camera = Camera::create($data);
         $this->audit->log('camera.created', $camera);
 

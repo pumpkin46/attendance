@@ -39,11 +39,13 @@ export default function DashboardPage() {
   const [cameraMonitoring, setCameraMonitoring] = useState<CameraMonitoringSummary | null>(null)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [aiHealth, setAiHealth] = useState<Record<string, unknown> | null>(null)
+  const [platformHealth, setPlatformHealth] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
     api.get<TodaySummary>('/attendance/today').then((r) => setSummary(r.data)).catch(() => {})
     api.get<UnknownSummary>('/recognition/unknown-summary').then((r) => setUnknown(r.data)).catch(() => {})
     api.get<CameraMonitoringSummary>('/cameras/monitoring').then((r) => setCameraMonitoring(r.data)).catch(() => {})
+    api.get<Record<string, unknown>>('/health').then((r) => setPlatformHealth(r.data)).catch(() => {})
     api
       .get<{ data: AppNotification[] }>('/notifications', { params: { unread_only: true, per_page: 5 } })
       .then((r) => setNotifications(r.data.data))
@@ -145,9 +147,42 @@ export default function DashboardPage() {
               </Badge>
             </li>
             <li className="flex items-center justify-between py-3">
-              <span>Active liveness</span>
-              <Badge tone={aiHealth?.active_liveness_enabled ? 'ok' : 'neutral'}>
-                {aiHealth?.active_liveness_enabled ? 'Blink + movement' : 'Off'}
+              <span>Recognition SLA (NFR-001)</span>
+              <Badge tone="ok">&lt; 500 ms target</Badge>
+            </li>
+            <li className="flex items-center justify-between py-3">
+              <span>Password hashing (NFR-007)</span>
+              <Badge
+                tone={
+                  (platformHealth?.nfr_compliance as { nfr?: { 'NFR-007'?: { argon2_compliant?: boolean } } })
+                    ?.nfr?.['NFR-007']?.argon2_compliant
+                    ? 'ok'
+                    : 'warn'
+                }
+              >
+                {String(
+                  (platformHealth?.nfr_compliance as { nfr?: { 'NFR-007'?: { hasher?: string } } })?.nfr?.[
+                    'NFR-007'
+                  ]?.hasher ?? 'argon2id'
+                )}
+              </Badge>
+            </li>
+            <li className="flex items-center justify-between py-3">
+              <span>GDPR (NFR-008)</span>
+              <Badge
+                tone={
+                  (platformHealth?.nfr_compliance as { nfr?: { 'NFR-008'?: { enabled?: boolean } } })?.nfr?.[
+                    'NFR-008'
+                  ]?.enabled
+                    ? 'ok'
+                    : 'neutral'
+                }
+              >
+                {(
+                  platformHealth?.nfr_compliance as { nfr?: { 'NFR-008'?: { enabled?: boolean } } }
+                )?.nfr?.['NFR-008']?.enabled
+                  ? 'Enabled'
+                  : 'Off'}
               </Badge>
             </li>
           </ul>

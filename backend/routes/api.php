@@ -6,16 +6,21 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CameraController;
 use App\Http\Controllers\Api\EmployeeController;
 use App\Http\Controllers\Api\FaceEnrollmentController;
+use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\HolidayController;
 use App\Http\Controllers\Api\LeaveRequestController;
 use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\PrivacyController;
 use App\Http\Controllers\Api\RecognitionController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ShiftController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
+    Route::get('/health', HealthController::class);
+    Route::get('/privacy/policy', [PrivacyController::class, 'policy']);
+
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::get('/auth/oauth/{provider}/redirect', [AuthController::class, 'oauthRedirect']);
     Route::get('/auth/oauth/{provider}/callback', [AuthController::class, 'oauthCallback']);
@@ -72,5 +77,9 @@ Route::prefix('v1')->group(function () {
         Route::get('reports/export', [ReportController::class, 'export'])->middleware('permission:reports.export');
 
         Route::get('audit-logs', [AuditLogController::class, 'index'])->middleware('permission:audit.view');
+
+        Route::get('privacy/my-data', [PrivacyController::class, 'exportMyData']);
+        Route::post('employees/{employee}/privacy/erase', [PrivacyController::class, 'eraseEmployee'])
+            ->middleware('permission:employees.manage');
     });
 });

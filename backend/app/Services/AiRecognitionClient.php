@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Log;
 
 class AiRecognitionClient
 {
+    private static int $nodeIndex = 0;
+
     public function enroll(string $employeeId, string $imageBase64): array
     {
         return $this->post('/api/v1/enroll', [
@@ -65,8 +67,7 @@ class AiRecognitionClient
     public function health(): array
     {
         try {
-            $response = Http::timeout(2)
-                ->get(config('services.ai.url').'/health');
+            $response = Http::timeout(2)->get($this->baseUrl().'/health');
 
             return $response->json() ?? ['status' => 'unknown'];
         } catch (ConnectionException $e) {
@@ -74,10 +75,25 @@ class AiRecognitionClient
         }
     }
 
+    /** NFR-005: Round-robin across recognition nodes */
+    private function baseUrl(): string
+    {
+        $nodes = config('scaling.recognition_nodes', []);
+
+        if (count($nodes) <= 1) {
+            return rtrim($nodes[0] ?? config('services.ai.url'), '/');
+        }
+
+        $index = self::$nodeIndex % count($nodes);
+        self::$nodeIndex++;
+
+        return rtrim($nodes[$index], '/');
+    }
+
     private function post(string $path, array $payload): array
     {
-        $url = rtrim(config('services.ai.url'), '/').$path;
-        $timeout = config('services.ai.timeout', 5);
+        $url = $this->baseUrl().$path;
+        $timeout = config('services.ai.timeout', 2);
 
         try {
             $response = Http::timeout($timeout)
@@ -98,7 +114,19 @@ class AiRecognitionClient
                 ];
             }
 
-            return array_merge(['success' => true], $response->json());
+            $data = array_merge(['success' => true], $response->json());
+            $processingMs = (int) ($data['processing_ms'] ?? 0);
+            $slaMs = config('nfr.recognition_sla_ms', 500);
+
+            if ($processingMs > $slaMs) {
+                Log::notice('NFR-001 SLA exceeded', [
+                    'path' => $path,
+                    'processing_ms' => $processingMs,
+                    'sla_ms' => $slaMs,
+                ]);
+            }
+
+            return $data;
         } catch (ConnectionException $e) {
             Log::error('AI service unreachable', ['path' => $path, 'error' => $e->getMessage()]);
 

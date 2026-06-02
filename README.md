@@ -109,10 +109,46 @@ UI runs at **http://127.0.0.1:5173**
 
 ## Security notes
 
-- Use **TLS 1.3** in production (reverse proxy: nginx, Caddy, or IIS)
-- Set `APP_DEBUG=false` in production
+- Use **TLS 1.3** in production (reverse proxy: nginx, Caddy, or IIS); set `FORCE_HTTPS=true`
+- Set `APP_DEBUG=false` and `APP_ENV=production` in production
+- **NFR-007**: Passwords hashed with **Argon2id** (`HASH_DRIVER=argon2id`, requires PHP `ext-sodium`)
+- **NFR-006**: Laravel encrypts data at rest with **AES-256-CBC** (`APP_KEY`)
 - Configure OAuth providers in `.env` for SSO (Google, Microsoft via Socialite)
 - Rotate `APP_KEY` per environment; enable PostgreSQL SSL (`DB_SSLMODE=require`)
+
+## Non-functional requirements (NFR)
+
+| ID | Requirement | Implementation |
+|----|-------------|----------------|
+| **NFR-001** | Recognition < 500 ms/face | `NFR_RECOGNITION_SLA_MS=500`; AI `max_processing_ms=500`; API returns `sla_met` |
+| **NFR-002** | 10,000 employees | `NFR_MAX_EMPLOYEES=10000`; FAISS flat index; capacity enforced on create |
+| **NFR-003** | 100 cameras | `NFR_MAX_CAMERAS=100`; stream poll + heartbeat monitoring |
+| **NFR-004** | 99.9% uptime | `GET /api/v1/health` + Laravel `/up`; component health checks |
+| **NFR-005** | Horizontal scaling | `AI_SERVICE_URLS` round-robin; stateless API; Redis queues in production |
+| **NFR-006** | TLS 1.3 + AES-256 | HTTPS middleware; Laravel `APP_KEY` encryption |
+| **NFR-007** | Argon2 passwords | `config/hashing.php` → `argon2id` |
+| **NFR-008** | GDPR compliance | Retention purge (`php artisan privacy:purge-retention`); privacy API |
+
+Check compliance: `GET http://127.0.0.1:8000/api/v1/health`
+
+### Production scaling (NFR-005)
+
+```
+                    ┌─────────────┐
+   Load balancer ──►│ API servers │ (stateless, Sanctum tokens)
+                    └──────┬──────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+        PostgreSQL    Redis queue   AI nodes (FAISS on shared storage)
+```
+
+Set in `.env`:
+```env
+AI_SERVICE_URLS=http://ai1:8001,http://ai2:8001
+QUEUE_CONNECTION=redis
+CACHE_STORE=redis
+```
 
 ## Acceptance criteria
 

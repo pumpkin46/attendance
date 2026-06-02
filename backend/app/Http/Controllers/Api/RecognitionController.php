@@ -8,6 +8,7 @@ use App\Models\Employee;
 use App\Models\RecognitionEvent;
 use App\Services\AiRecognitionClient;
 use App\Services\AttendanceService;
+use App\Services\NfrComplianceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -17,7 +18,8 @@ class RecognitionController extends Controller
 {
     public function __construct(
         private readonly AiRecognitionClient $ai,
-        private readonly AttendanceService $attendance
+        private readonly AttendanceService $attendance,
+        private readonly NfrComplianceService $nfr,
     ) {}
 
     public function detect(Request $request): JsonResponse
@@ -84,14 +86,13 @@ class RecognitionController extends Controller
                 'recognized_at' => now(),
             ]);
 
-            return response()->json([
+            return response()->json(array_merge([
                 'matched' => false,
                 'reason' => $result['liveness_reason'] ?? 'liveness_failed',
                 'spoof_type' => $result['spoof_type'] ?? null,
-                'processing_ms' => $processingMs,
                 'liveness_score' => $result['liveness_score'] ?? null,
                 'liveness_checks' => $result['liveness_checks'] ?? null,
-            ]);
+            ], $this->slaMeta($processingMs)));
         }
 
         $employeeId = $result['employee_id'] ?? null;
@@ -107,14 +108,13 @@ class RecognitionController extends Controller
                 $source,
             );
 
-            return response()->json([
+            return response()->json(array_merge([
                 'matched' => false,
                 'reason' => $employeeId ? 'low_confidence' : 'unknown',
                 'confidence' => $confidence,
-                'processing_ms' => $processingMs,
                 'event_id' => $event->id,
                 'snapshot_url' => $event->snapshotUrl(),
-            ]);
+            ], $this->slaMeta($processingMs)));
         }
 
         $employee = Employee::where('id', $employeeId)->where('is_active', true)->first();
@@ -130,12 +130,12 @@ class RecognitionController extends Controller
                 $source,
             );
 
-            return response()->json([
+            return response()->json(array_merge([
                 'matched' => false,
                 'reason' => 'unknown',
                 'event_id' => $event->id,
                 'snapshot_url' => $event->snapshotUrl(),
-            ]);
+            ], $this->slaMeta($processingMs)));
         }
 
         $attendanceResult = $this->attendance->processRecognition(
@@ -147,15 +147,14 @@ class RecognitionController extends Controller
             $imageHash
         );
 
-        return response()->json([
+        return response()->json(array_merge([
             'matched' => true,
             'employee' => $employee->only(['id', 'employee_code', 'first_name', 'last_name']),
             'confidence' => $confidence,
-            'processing_ms' => $processingMs,
             'liveness_passed' => $livenessPassed,
             'liveness_score' => $result['liveness_score'] ?? null,
             'attendance' => $attendanceResult,
-        ]);
+        ], $this->slaMeta($processingMs)));
     }
 
     public function events(Request $request): JsonResponse
@@ -219,5 +218,15 @@ class RecognitionController extends Controller
         $data['snapshot_url'] = $event->snapshotUrl();
 
         return $data;
+    }
+
+    /** NFR-001: Recognition speed SLA metadata */
+    private function slaMeta(int $processingMs): array
+    {
+        return [
+            'processing_ms' => $processingMs,
+            'sla_ms' => config('nfr.recognition_sla_ms', 500),
+            'sla_met' => $this->nfr->recognitionSlaMet($processingMs),
+        ];
     }
 }

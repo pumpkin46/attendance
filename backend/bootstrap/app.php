@@ -15,6 +15,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'permission' => CheckPermission::class,
         ]);
+        if (env('FORCE_HTTPS', false)) {
+            $middleware->append(\App\Http\Middleware\ForceHttps::class);
+        }
         // Token-based API (Bearer); no stateful Sanctum cookies / CSRF required.
     })
     ->withExceptions(function (Exceptions $exceptions) {
