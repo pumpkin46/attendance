@@ -43,40 +43,25 @@ try {
   # Always point AI service to local instance
   $envText = Set-OrReplaceEnvLine $envText "AI_SERVICE_URL" "http://127.0.0.1:8001"
 
-  # PostgreSQL is optional. Default to SQLite if Postgres isn't reachable.
+  # PostgreSQL required: fail fast if not reachable.
   $pgReachable = Test-TcpPort "127.0.0.1" 5432
   if (-not $pgReachable) {
-    Write-Step "PostgreSQL not detected on 127.0.0.1:5432 -> using SQLite (recommended default)"
-    $sqliteDir = Join-Path $backend "database"
-    if (-not (Test-Path $sqliteDir)) { New-Item -ItemType Directory -Path $sqliteDir | Out-Null }
-    $sqlitePath = Join-Path $sqliteDir "database.sqlite"
-    if (-not (Test-Path $sqlitePath)) { New-Item -ItemType File -Path $sqlitePath | Out-Null }
-    $envText = Set-OrReplaceEnvLine $envText "DB_CONNECTION" "sqlite"
-    $envText = Set-OrReplaceEnvLine $envText "DB_DATABASE" $sqlitePath
-    # Best-effort: clear fields that confuse sqlite
-    $envText = Set-OrReplaceEnvLine $envText "DB_HOST" "127.0.0.1"
-    $envText = Set-OrReplaceEnvLine $envText "DB_PORT" "5432"
-    $envText = Set-OrReplaceEnvLine $envText "DB_USERNAME" "postgres"
-    $envText = Set-OrReplaceEnvLine $envText "DB_PASSWORD" ""
-  } else {
-    Write-Step "PostgreSQL detected on 127.0.0.1:5432 -> keeping PostgreSQL config from .env"
+    throw "PostgreSQL is required but was not detected on 127.0.0.1:5432. Install it (or select it in the installer UI) and re-run setup."
   }
+  Write-Step "PostgreSQL detected on 127.0.0.1:5432"
+  $envText = Set-OrReplaceEnvLine $envText "DB_CONNECTION" "pgsql"
 
-  # Redis is optional. Default to file/sync drivers if Redis isn't reachable.
+  # Redis required: fail fast if not reachable.
   $redisReachable = Test-TcpPort "127.0.0.1" 6379
   if (-not $redisReachable) {
-    Write-Step "Redis not detected on 127.0.0.1:6379 -> using file/sync drivers"
-    $envText = Set-OrReplaceEnvLine $envText "CACHE_STORE" "file"
-    $envText = Set-OrReplaceEnvLine $envText "QUEUE_CONNECTION" "sync"
-    $envText = Set-OrReplaceEnvLine $envText "SESSION_DRIVER" "file"
-  } else {
-    Write-Step "Redis detected on 127.0.0.1:6379 -> enabling redis cache/queue/session"
-    $envText = Set-OrReplaceEnvLine $envText "CACHE_STORE" "redis"
-    $envText = Set-OrReplaceEnvLine $envText "QUEUE_CONNECTION" "redis"
-    $envText = Set-OrReplaceEnvLine $envText "SESSION_DRIVER" "redis"
-    $envText = Set-OrReplaceEnvLine $envText "REDIS_HOST" "127.0.0.1"
-    $envText = Set-OrReplaceEnvLine $envText "REDIS_PORT" "6379"
+    throw "Redis is required but was not detected on 127.0.0.1:6379. Install it (or select it in the installer UI) and re-run setup."
   }
+  Write-Step "Redis detected on 127.0.0.1:6379 -> enabling redis cache/queue/session"
+  $envText = Set-OrReplaceEnvLine $envText "CACHE_STORE" "redis"
+  $envText = Set-OrReplaceEnvLine $envText "QUEUE_CONNECTION" "redis"
+  $envText = Set-OrReplaceEnvLine $envText "SESSION_DRIVER" "redis"
+  $envText = Set-OrReplaceEnvLine $envText "REDIS_HOST" "127.0.0.1"
+  $envText = Set-OrReplaceEnvLine $envText "REDIS_PORT" "6379"
 
   Set-Content ".\.env" $envText -NoNewline
 

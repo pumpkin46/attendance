@@ -72,11 +72,15 @@ internal static class Program
 
     private static string InstallRoot()
     {
-        // If run from install dir: ...\windows\launcher\...\bin\Release\net8.0-windows\
-        // We want repository root at runtime bundle: two levels up from exe folder in packaged build.
-        // For now (dev), assume this executable is placed under: <install>\launcher\AttendanceLauncher.exe
+        // Installed layout:
+        //   <install>\backend
+        //   <install>\frontend
+        //   <install>\ai-service
+        //   <install>\launcher\AttendanceLauncher.exe
+        //
+        // So the install root is the parent of the executable folder.
         var exeDir = AppContext.BaseDirectory;
-        return Path.GetFullPath(Path.Combine(exeDir, "..", "..", "..", "..", "..", "..", ".."));
+        return Path.GetFullPath(Path.Combine(exeDir, ".."));
     }
 
     private static string LogsDir()
@@ -118,13 +122,20 @@ internal static class Program
         var root = InstallRoot();
         var logs = LogsDir();
 
+        var pythonExe = Path.Combine(root, "ai-service", ".venv", "Scripts", "python.exe");
+        if (!File.Exists(pythonExe))
+        {
+            SetStatus("error (python venv missing)");
+            return;
+        }
+
         // Start AI first
         if (_aiProc == null || _aiProc.HasExited)
         {
             _aiProc = StartProcess(
                 workingDir: Path.Combine(root, "ai-service"),
-                fileName: "cmd.exe",
-                arguments: $"/c \"call .venv\\Scripts\\activate.bat && uvicorn main:app --host 127.0.0.1 --port {AiPort}\"",
+                fileName: pythonExe,
+                arguments: $"-m uvicorn main:app --host 127.0.0.1 --port {AiPort}",
                 stdoutPath: Path.Combine(logs, "ai-service.stdout.log"),
                 stderrPath: Path.Combine(logs, "ai-service.stderr.log")
             );
@@ -148,9 +159,9 @@ internal static class Program
         {
             var dist = Path.Combine(root, "frontend", "dist");
             _uiProc = StartProcess(
-                workingDir: root,
-                fileName: "cmd.exe",
-                arguments: $"/c \"call ai-service\\.venv\\Scripts\\activate.bat && python -m http.server {UiPort} --bind 127.0.0.1 --directory \\\"{dist}\\\"\"",
+                workingDir: dist,
+                fileName: pythonExe,
+                arguments: $"-m http.server {UiPort} --bind 127.0.0.1",
                 stdoutPath: Path.Combine(logs, "ui.stdout.log"),
                 stderrPath: Path.Combine(logs, "ui.stderr.log")
             );

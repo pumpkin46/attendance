@@ -38,7 +38,7 @@ Logs are written to:
      - PHP + Composer
      - Python
      - Node.js (build-time)
-   - PostgreSQL and Redis are **optional** (not required).
+   - PostgreSQL and Redis are **required**, but the installer UI can optionally install them for you.
 2. `build_app.ps1`
    - `backend`: `composer install`
    - `frontend`: `npm ci && npm run build` (creates `frontend/dist`)
@@ -46,8 +46,7 @@ Logs are written to:
 3. `configure_and_migrate.ps1`
    - creates/updates `backend/.env` from `backend/.env.example`
    - ensures `AI_SERVICE_URL=http://127.0.0.1:8001`
-   - defaults to **SQLite** if PostgreSQL isn’t reachable
-   - enables Redis drivers if Redis is reachable; otherwise uses file/sync
+   - requires PostgreSQL + Redis to be running on localhost
    - `php artisan key:generate` (if missing)
    - `php artisan migrate --seed --force`
 4. `prewarm_models.ps1` (best-effort)
@@ -69,4 +68,18 @@ Launch **Attendance Platform** from the Start Menu. The tray app will:
    - `dotnet build -c Release windows/launcher/AttendanceLauncher.sln`
 2. Open `windows/installer/inno/attendance.iss` in **Inno Setup Compiler**
 3. Compile → produces `AttendancePlatformSetup.exe`
+
+## One-command build
+
+If you have Inno Setup installed (so `ISCC.exe` is available), run from repo root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File windows/build-installer.ps1
+```
+
+If `ISCC.exe` is not on PATH, pass it explicitly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File windows/build-installer.ps1 -InnoSetupIsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+```
 

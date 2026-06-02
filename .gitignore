@@ -141,3 +141,14 @@ Desktop.ini
 *.tmp
 *.temp
 .cache/
+
+# -----------------------------------------------------------------------------
+# Windows installer outputs (generated)
+# -----------------------------------------------------------------------------
+# Inno Setup common output folders
+windows/installer/inno/Output/
+windows/installer/inno/Output/*
+windows/installer/inno/*.exe
+
+# Our default installer output name
+AttendancePlatformSetup*.exe

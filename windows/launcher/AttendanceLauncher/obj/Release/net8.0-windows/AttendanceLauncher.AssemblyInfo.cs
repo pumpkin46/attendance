@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AttendanceLauncher")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+32dd40b6f4e7699d98ec2af6dbeda717603e0847")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b191afa2134e8712b92a79d303dce1c61c8eaa39")]
 [assembly: System.Reflection.AssemblyProductAttribute("AttendanceLauncher")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AttendanceLauncher")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

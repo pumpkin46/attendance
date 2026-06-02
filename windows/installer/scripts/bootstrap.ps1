@@ -1,5 +1,7 @@
 param(
-  [Parameter(Mandatory=$true)][string]$InstallRoot
+  [Parameter(Mandatory=$true)][string]$InstallRoot,
+  [switch]$InstallPostgres,
+  [switch]$InstallRedis
 )
 
 Set-StrictMode -Version Latest
@@ -12,11 +14,13 @@ function Write-Step($msg) {
 
 Write-Step "Bootstrap start"
 Write-Host "InstallRoot: $InstallRoot"
+Write-Host "InstallPostgres: $InstallPostgres"
+Write-Host "InstallRedis: $InstallRedis"
 
 $scripts = Join-Path $InstallRoot "windows\scripts"
 
 Write-Step "Install runtimes and services"
-& (Join-Path $scripts "install_prereqs.ps1") -InstallRoot $InstallRoot
+& (Join-Path $scripts "install_prereqs.ps1") -InstallRoot $InstallRoot -InstallPostgres:$InstallPostgres -InstallRedis:$InstallRedis
 
 Write-Step "Install backend/frontend/ai-service dependencies and build UI"
 & (Join-Path $scripts "build_app.ps1") -InstallRoot $InstallRoot
