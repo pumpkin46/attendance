@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AttendanceAnomalyController;
 use App\Http\Controllers\Api\AttendanceController;
+use App\Http\Controllers\Api\AttendancePolicyController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CameraController;
@@ -54,8 +55,10 @@ Route::prefix('v1')->group(function () {
         Route::post('employees/{employee}/enroll-face', [FaceEnrollmentController::class, 'enroll']);
         Route::get('employees/{employee}/face-status', [FaceEnrollmentController::class, 'status']);
 
+        Route::get('attendance/config', [AttendanceController::class, 'config']);
         Route::get('attendance', [AttendanceController::class, 'index']);
         Route::get('attendance/today', [AttendanceController::class, 'today']);
+        Route::apiResource('attendance-policies', AttendancePolicyController::class)->middleware('permission:shifts.manage');
         Route::post('attendance/manual', [AttendanceController::class, 'manual'])->middleware('permission:attendance.manage');
 
         Route::get('anomalies/summary', [AttendanceAnomalyController::class, 'summary'])->middleware('permission:reports.view');

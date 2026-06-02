@@ -5,8 +5,6 @@ namespace App\Services;
 use App\Models\AttendanceRecord;
 use App\Models\Camera;
 use App\Models\Employee;
-use App\Models\Holiday;
-use App\Models\LeaveRequest;
 use App\Models\RecognitionEvent;
 use App\Models\RfidEvent;
 use App\Models\RfidReader;
@@ -19,6 +17,7 @@ class AttendanceService
     public function __construct(
         private readonly AuditService $audit,
         private readonly UnknownFaceService $unknownFaces,
+        private readonly AttendancePolicyService $policies,
     ) {}
 
     public function processRecognition(
@@ -42,10 +41,18 @@ class AttendanceService
 
         $now = now();
         $workDate = $now->toDateString();
-        $direction = $camera?->direction ?? 'both';
+        $requireLiveness = config('attendance.auto_check_in.requires_liveness_passed', true);
 
-        return DB::transaction(function () use ($employee, $camera, $confidence, $livenessPassed, $processingMs, $imageHash, $now, $workDate, $direction, $source, $extraMetadata) {
-            if ($this->isOnLeaveOrHoliday($employee, $workDate)) {
+        $checkInGate = $this->policies->canAutoCheckIn(
+            $employee,
+            $confidence,
+            $livenessPassed,
+            $requireLiveness,
+        );
+
+        return DB::transaction(function () use ($employee, $camera, $confidence, $livenessPassed, $processingMs, $imageHash, $now, $workDate, $source, $extraMetadata, $checkInGate) {
+            $attendanceType = $this->policies->resolveAttendanceType($employee, $now, 'check_in');
+            if (in_array($attendanceType, ['holiday', 'sick_leave', 'vacation', 'remote_work', 'on_leave'], true)) {
                 RecognitionEvent::create([
                     'camera_id' => $camera?->id,
                     'employee_id' => $employee->id,
@@ -54,39 +61,74 @@ class AttendanceService
                     'liveness_passed' => $livenessPassed,
                     'processing_ms' => $processingMs,
                     'image_hash' => $imageHash,
-                    'metadata' => array_merge(['skipped' => 'on_leave_or_holiday', 'source' => $source], $extraMetadata ?? []),
+                    'metadata' => array_merge([
+                        'skipped' => $attendanceType,
+                        'source' => $source,
+                    ], $extraMetadata ?? []),
                     'recognized_at' => $now,
                 ]);
 
-                return ['action' => 'skipped_leave_holiday', 'employee_id' => $employee->id];
+                return ['action' => 'skipped_'.$attendanceType, 'employee_id' => $employee->id];
             }
 
+            $shift = $this->policies->resolveShift($employee, $now);
             $record = AttendanceRecord::firstOrCreate(
                 ['employee_id' => $employee->id, 'work_date' => $workDate],
                 [
                     'location_id' => $employee->location_id ?? $camera?->location_id,
+                    'shift_id' => $shift?->id,
                     'status' => 'absent',
+                    'attendance_type' => $attendanceType,
                 ]
             );
 
             $action = 'none';
 
-            if (in_array($direction, ['in', 'both'], true) && ! $record->check_in_at) {
+            if (! $record->check_in_at && $this->policies->isEntryZone($camera)) {
+                if (! $checkInGate['allowed']) {
+                    RecognitionEvent::create([
+                        'camera_id' => $camera?->id,
+                        'employee_id' => $employee->id,
+                        'result' => 'matched',
+                        'confidence' => $confidence,
+                        'liveness_passed' => $livenessPassed,
+                        'processing_ms' => $processingMs,
+                        'image_hash' => $imageHash,
+                        'metadata' => array_merge([
+                            'check_in_denied' => $checkInGate['reason'],
+                            'source' => $source,
+                        ], $extraMetadata ?? []),
+                        'recognized_at' => $now,
+                    ]);
+
+                    return [
+                        'action' => 'check_in_denied',
+                        'reason' => $checkInGate['reason'],
+                        'employee_id' => $employee->id,
+                    ];
+                }
+
+                $status = $this->policies->resolveCheckInStatus($employee, $now);
                 $record->update([
                     'check_in_at' => $now,
                     'check_in_method' => 'face',
                     'camera_id' => $camera?->id,
+                    'shift_id' => $shift?->id,
                     'location_id' => $record->location_id ?? $camera?->location_id,
-                    'status' => $this->resolveCheckInStatus($employee, $now),
+                    'status' => $status,
+                    'attendance_type' => $status,
                 ]);
                 $action = 'check_in';
-            } elseif (in_array($direction, ['out', 'both'], true) && $record->check_in_at && ! $record->check_out_at) {
-                $record->update([
-                    'check_out_at' => $now,
-                    'check_out_method' => 'face',
-                ]);
-                $this->calculateWorkedTime($record);
-                $action = 'check_out';
+            } elseif ($record->check_in_at && ! $record->check_out_at) {
+                $checkOutGate = $this->policies->canAutoCheckOut($employee, $camera, $now, true);
+                if ($checkOutGate['allowed']) {
+                    $record->update([
+                        'check_out_at' => $now,
+                        'check_out_method' => 'face',
+                    ]);
+                    $this->calculateWorkedTime($record->fresh());
+                    $action = 'check_out';
+                }
             }
 
             RecognitionEvent::create([
@@ -132,42 +174,53 @@ class AttendanceService
 
         $now = $tappedAt ?? now();
         $workDate = $now->toDateString();
-        $direction = $reader->direction;
 
-        return DB::transaction(function () use ($employee, $reader, $uid, $now, $workDate, $direction) {
-            if ($this->isOnLeaveOrHoliday($employee, $workDate)) {
+        return DB::transaction(function () use ($employee, $reader, $uid, $now, $workDate) {
+            $attendanceType = $this->policies->resolveAttendanceType($employee, $now, 'check_in');
+            if (in_array($attendanceType, ['holiday', 'sick_leave', 'vacation', 'remote_work', 'on_leave'], true)) {
                 $this->recordRfidEvent($reader, $uid, 'matched', $employee, $now, [
-                    'skipped' => 'on_leave_or_holiday',
+                    'skipped' => $attendanceType,
                 ]);
 
-                return ['action' => 'skipped_leave_holiday', 'employee_id' => $employee->id];
+                return ['action' => 'skipped_'.$attendanceType, 'employee_id' => $employee->id];
             }
 
+            $shift = $this->policies->resolveShift($employee, $now);
             $record = AttendanceRecord::firstOrCreate(
                 ['employee_id' => $employee->id, 'work_date' => $workDate],
                 [
                     'location_id' => $employee->location_id ?? $reader->location_id,
+                    'shift_id' => $shift?->id,
                     'status' => 'absent',
                 ]
             );
 
             $action = 'none';
+            $isEntry = in_array($reader->direction, ['in', 'both'], true);
+            $isExit = in_array($reader->direction, ['out', 'both'], true);
 
-            if (in_array($direction, ['in', 'both'], true) && ! $record->check_in_at) {
+            if ($isEntry && ! $record->check_in_at) {
+                $status = $this->policies->resolveCheckInStatus($employee, $now);
                 $record->update([
                     'check_in_at' => $now,
                     'check_in_method' => 'rfid',
                     'location_id' => $record->location_id ?? $reader->location_id,
-                    'status' => $this->resolveCheckInStatus($employee, $now),
+                    'shift_id' => $shift?->id,
+                    'status' => $status,
+                    'attendance_type' => $status,
                 ]);
                 $action = 'check_in';
-            } elseif (in_array($direction, ['out', 'both'], true) && $record->check_in_at && ! $record->check_out_at) {
-                $record->update([
-                    'check_out_at' => $now,
-                    'check_out_method' => 'rfid',
-                ]);
-                $this->calculateWorkedTime($record);
-                $action = 'check_out';
+            } elseif ($isExit && $record->check_in_at && ! $record->check_out_at) {
+                $policy = $this->policies->forEmployee($employee);
+                $exitOk = in_array($reader->direction, ['out', 'both'], true);
+                if (! $policy->auto_checkout_exit_zone || $exitOk) {
+                    $record->update([
+                        'check_out_at' => $now,
+                        'check_out_method' => 'rfid',
+                    ]);
+                    $this->calculateWorkedTime($record->fresh());
+                    $action = 'check_out';
+                }
             }
 
             $this->recordRfidEvent($reader, $uid, 'matched', $employee, $now, [
@@ -276,54 +329,29 @@ class AttendanceService
             return;
         }
 
-        $worked = (int) round($record->check_in_at->diffInMinutes($record->check_out_at));
-        $overtimeThreshold = config('attendance.overtime_threshold_minutes', 480);
-        $overtime = max(0, $worked - $overtimeThreshold);
+        $employee = $record->employee ?? Employee::find($record->employee_id);
+        if (! $employee) {
+            return;
+        }
+
+        $times = $this->policies->calculateWorkedAndOvertime(
+            $employee,
+            $record->check_in_at,
+            $record->check_out_at,
+        );
+
+        $status = $this->policies->resolveCheckOutStatus(
+            $employee,
+            $record->check_in_at,
+            $record->check_out_at,
+            $times['worked_minutes'],
+        );
 
         $record->update([
-            'worked_minutes' => $worked,
-            'overtime_minutes' => (int) $overtime,
-            'status' => 'present',
+            'worked_minutes' => $times['worked_minutes'],
+            'overtime_minutes' => $times['overtime_minutes'],
+            'status' => $status,
+            'attendance_type' => $status,
         ]);
-    }
-
-    private function isOnLeaveOrHoliday(Employee $employee, string $workDate): bool
-    {
-        $onLeave = LeaveRequest::where('employee_id', $employee->id)
-            ->where('status', 'approved')
-            ->where('start_date', '<=', $workDate)
-            ->where('end_date', '>=', $workDate)
-            ->exists();
-
-        if ($onLeave) {
-            return true;
-        }
-
-        return Holiday::where('organization_id', $employee->organization_id)
-            ->where(function ($q) use ($employee) {
-                $q->whereNull('location_id')->orWhere('location_id', $employee->location_id);
-            })
-            ->where('date', $workDate)
-            ->exists();
-    }
-
-    private function resolveCheckInStatus(Employee $employee, Carbon $checkIn): string
-    {
-        $assignment = $employee->shiftAssignments()
-            ->where('effective_from', '<=', $checkIn->toDateString())
-            ->where(function ($q) use ($checkIn) {
-                $q->whereNull('effective_to')->orWhere('effective_to', '>=', $checkIn->toDateString());
-            })
-            ->with('shift')
-            ->first();
-
-        if (! $assignment?->shift) {
-            return 'present';
-        }
-
-        $shiftStart = Carbon::parse($checkIn->toDateString().' '.$assignment->shift->start_time);
-        $graceEnd = $shiftStart->copy()->addMinutes($assignment->shift->grace_minutes);
-
-        return $checkIn->gt($graceEnd) ? 'late' : 'present';
     }
 }

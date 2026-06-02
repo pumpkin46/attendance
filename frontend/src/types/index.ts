@@ -83,9 +83,22 @@ export interface AttendanceRecord {
   check_in_at?: string
   check_out_at?: string
   status: string
+  attendance_type?: string
   worked_minutes: number
   overtime_minutes: number
   employee?: Employee
+}
+
+export interface Shift {
+  id: number
+  name: string
+  type: 'fixed' | 'rotational' | 'flexible' | 'split'
+  rotation_slot?: string
+  start_time: string
+  end_time: string
+  segments?: { start: string; end: string }[]
+  grace_minutes: number
+  is_active: boolean
 }
 
 export interface Camera {

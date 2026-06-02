@@ -17,6 +17,17 @@ class AttendanceController extends Controller
         private readonly AuditService $audit
     ) {}
 
+    public function config(): JsonResponse
+    {
+        return response()->json([
+            'attendance_types' => config('attendance.attendance_types'),
+            'shift_types' => config('attendance.shift_types'),
+            'auto_check_in' => config('attendance.auto_check_in'),
+            'auto_check_out' => config('attendance.auto_check_out'),
+            'default_policy' => config('attendance.default_policy'),
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $records = AttendanceRecord::with(['employee', 'camera'])
@@ -44,7 +55,10 @@ class AttendanceController extends Controller
             'present' => $records->whereIn('status', ['present', 'late'])->count(),
             'absent' => $records->where('status', 'absent')->count(),
             'late' => $records->where('status', 'late')->count(),
-            'on_leave' => $records->where('status', 'on_leave')->count(),
+            'early_leave' => $records->where('status', 'early_leave')->count(),
+            'half_day' => $records->where('status', 'half_day')->count(),
+            'holiday' => $records->where('status', 'holiday')->count(),
+            'on_leave' => $records->whereIn('status', ['on_leave', 'sick_leave', 'vacation', 'remote_work'])->count(),
             'records' => $records,
         ];
 

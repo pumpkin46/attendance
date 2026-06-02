@@ -25,13 +25,22 @@ class ShiftController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $types = implode(',', array_keys(config('attendance.shift_types', [])));
         $data = $request->validate([
             'organization_id' => 'required|exists:organizations,id',
+            'attendance_policy_id' => 'nullable|exists:attendance_policies,id',
             'name' => 'required|string',
-            'start_time' => 'required|date_format:H:i',
-            'end_time' => 'required|date_format:H:i|after:start_time',
+            'type' => 'required|string|in:'.$types,
+            'rotation_slot' => 'nullable|string|in:morning,evening,night',
+            'start_time' => 'required_unless:type,split|nullable|date_format:H:i',
+            'end_time' => 'required_unless:type,split|nullable|date_format:H:i',
+            'segments' => 'required_if:type,split|nullable|array',
+            'segments.*.start' => 'required_with:segments|date_format:H:i',
+            'segments.*.end' => 'required_with:segments|date_format:H:i',
             'grace_minutes' => 'integer|min:0',
             'break_minutes' => 'integer|min:0',
+            'min_work_minutes' => 'nullable|integer|min:0',
+            'max_work_minutes' => 'nullable|integer|min:0',
             'days_of_week' => 'nullable|array',
         ]);
 
@@ -43,7 +52,7 @@ class ShiftController extends Controller
 
     public function show(Shift $shift): JsonResponse
     {
-        return response()->json($shift->load('assignments.employee'));
+        return response()->json($shift->load(['assignments.employee', 'attendancePolicy']));
     }
 
     public function update(Request $request, Shift $shift): JsonResponse
@@ -75,6 +84,7 @@ class ShiftController extends Controller
             'employee_id' => 'required|exists:employees,id',
             'effective_from' => 'required|date',
             'effective_to' => 'nullable|date|after_or_equal:effective_from',
+            'flex_start_time' => 'nullable|date_format:H:i',
         ]);
 
         $assignment = ShiftAssignment::create([

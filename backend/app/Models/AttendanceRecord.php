@@ -8,9 +8,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class AttendanceRecord extends Model
 {
     protected $fillable = [
-        'employee_id', 'location_id', 'camera_id', 'work_date',
+        'employee_id', 'location_id', 'camera_id', 'shift_id', 'work_date',
         'check_in_at', 'check_out_at', 'check_in_method', 'check_out_method',
-        'worked_minutes', 'overtime_minutes', 'status', 'notes',
+        'worked_minutes', 'overtime_minutes', 'status', 'attendance_type', 'notes',
     ];
 
     protected function casts(): array
@@ -30,5 +30,10 @@ class AttendanceRecord extends Model
     public function camera(): BelongsTo
     {
         return $this->belongsTo(Camera::class);
+    }
+
+    public function shift(): BelongsTo
+    {
+        return $this->belongsTo(Shift::class);
     }
 }

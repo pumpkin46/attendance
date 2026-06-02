@@ -6,28 +6,61 @@ import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataT
 interface Shift {
   id: number
   name: string
+  type: string
+  rotation_slot?: string
   start_time: string
   end_time: string
+  segments?: { start: string; end: string }[]
   grace_minutes: number
   is_active: boolean
 }
 
+interface AttendanceConfig {
+  shift_types: Record<string, { label: string; example?: string; slots?: string[] }>
+}
+
 export default function ShiftsPage() {
   const [shifts, setShifts] = useState<Shift[]>([])
+  const [config, setConfig] = useState<AttendanceConfig | null>(null)
 
   useEffect(() => {
     api.get<Shift[]>('/shifts').then((r) => setShifts(r.data))
+    api.get<AttendanceConfig>('/attendance/config').then((r) => setConfig(r.data))
   }, [])
+
+  const formatSchedule = (s: Shift) => {
+    if (s.type === 'split' && s.segments?.length) {
+      return s.segments.map((seg) => `${seg.start}–${seg.end}`).join(', ')
+    }
+    return `${s.start_time}–${s.end_time}`
+  }
 
   return (
     <div>
-      <PageHeader title="Shift Management" description="Define work schedules and grace periods" />
+      <PageHeader
+        title="Shift Management"
+        description="Fixed, rotational, flexible, and split shift schedules with policy-linked grace and work-hour rules."
+      />
+
+      {config && (
+        <div className="mb-6 flex flex-wrap gap-2">
+          {Object.entries(config.shift_types).map(([key, meta]) => (
+            <span
+              key={key}
+              className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300"
+              title={meta.example}
+            >
+              {meta.label}
+            </span>
+          ))}
+        </div>
+      )}
 
       <TableShell>
         <TableHead>
           <Th>Name</Th>
-          <Th>Start</Th>
-          <Th>End</Th>
+          <Th>Type</Th>
+          <Th>Schedule</Th>
           <Th>Grace (min)</Th>
           <Th>Status</Th>
         </TableHead>
@@ -35,8 +68,11 @@ export default function ShiftsPage() {
           {shifts.map((s) => (
             <tr key={s.id}>
               <Td>{s.name}</Td>
-              <Td>{s.start_time}</Td>
-              <Td>{s.end_time}</Td>
+              <Td className="capitalize">
+                {s.type.replace(/_/g, ' ')}
+                {s.rotation_slot ? ` (${s.rotation_slot})` : ''}
+              </Td>
+              <Td>{formatSchedule(s)}</Td>
               <Td>{s.grace_minutes}</Td>
               <Td>{s.is_active ? 'Active' : 'Inactive'}</Td>
             </tr>

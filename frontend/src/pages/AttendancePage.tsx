@@ -29,7 +29,7 @@ export default function AttendancePage() {
     <div>
       <PageHeader
         title="Attendance"
-        description="Automated check-in/out via face recognition"
+        description="Auto check-in when recognized with confidence and liveness; auto check-out at exit cameras per policy rules."
         actions={
           <>
             <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
@@ -61,7 +61,17 @@ export default function AttendancePage() {
               <Td>{r.worked_minutes}</Td>
               <Td>{r.overtime_minutes}</Td>
               <Td>
-                <Badge tone={r.status === 'late' ? 'warn' : 'neutral'}>{r.status}</Badge>
+                <Badge
+                  tone={
+                    r.status === 'late' || r.status === 'early_leave'
+                      ? 'warn'
+                      : r.status === 'present'
+                        ? 'ok'
+                        : 'neutral'
+                  }
+                >
+                  {(r.attendance_type ?? r.status).replace(/_/g, ' ')}
+                </Badge>
               </Td>
             </tr>
           ))}

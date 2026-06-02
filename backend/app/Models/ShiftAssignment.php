@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ShiftAssignment extends Model
 {
-    protected $fillable = ['employee_id', 'shift_id', 'effective_from', 'effective_to'];
+    protected $fillable = ['employee_id', 'shift_id', 'effective_from', 'effective_to', 'flex_start_time'];
 
     protected function casts(): array
     {
