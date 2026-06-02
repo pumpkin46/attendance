@@ -9,6 +9,8 @@ use App\Models\RecognitionEvent;
 use App\Services\AiRecognitionClient;
 use App\Services\AttendanceService;
 use App\Services\NfrComplianceService;
+use App\Services\RecognitionMetricsService;
+use App\Support\CameraSourceResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -20,7 +22,28 @@ class RecognitionController extends Controller
         private readonly AiRecognitionClient $ai,
         private readonly AttendanceService $attendance,
         private readonly NfrComplianceService $nfr,
+        private readonly RecognitionMetricsService $metrics,
     ) {}
+
+    public function config(): JsonResponse
+    {
+        return response()->json([
+            'pipeline_stages' => config('recognition.pipeline_stages'),
+            'supported_sources' => config('recognition.supported_sources'),
+            'metrics_targets' => config('recognition.metrics'),
+            'threshold' => config('services.ai.threshold', 0.95),
+        ]);
+    }
+
+    public function metrics(Request $request): JsonResponse
+    {
+        $days = $request->integer('window_days', config('recognition.metrics_window_days', 7));
+
+        return response()->json([
+            'summary' => $this->metrics->summary($days),
+            'by_source' => $this->metrics->bySource($days),
+        ]);
+    }
 
     public function detect(Request $request): JsonResponse
     {
@@ -43,22 +66,31 @@ class RecognitionController extends Controller
 
     public function identify(Request $request): JsonResponse
     {
+        $sources = implode(',', config('recognition.supported_sources', []));
         $data = $request->validate([
             'image' => 'required|string',
             'camera_id' => 'nullable|exists:cameras,id',
             'require_liveness' => 'boolean',
             'liveness_frames' => 'nullable|array|max:30',
             'liveness_frames.*' => 'string',
-            'source' => 'nullable|string|in:webcam,upload,rtsp,ip_camera',
+            'session_id' => 'nullable|string|max:128',
+            'source' => 'nullable|string|in:'.$sources,
         ]);
 
         $camera = isset($data['camera_id']) ? Camera::find($data['camera_id']) : null;
         $threshold = config('services.ai.threshold', 0.95);
         $requireLiveness = $data['require_liveness'] ?? true;
-        $source = $data['source'] ?? ($camera?->stream_url ? 'rtsp' : 'upload');
+        $source = $data['source'] ?? CameraSourceResolver::fromStreamUrl($camera?->stream_url);
         $livenessFrames = $data['liveness_frames'] ?? null;
+        $sessionId = $data['session_id'] ?? ($camera ? 'camera-'.$camera->id : null);
 
-        $result = $this->ai->identify($data['image'], $requireLiveness, $livenessFrames);
+        $result = $this->ai->identify(
+            $data['image'],
+            $requireLiveness,
+            $livenessFrames,
+            $sessionId,
+            $source,
+        );
 
         if (! ($result['success'] ?? false)) {
             return response()->json(['message' => $result['error'] ?? 'Recognition failed'], 503);
@@ -77,12 +109,7 @@ class RecognitionController extends Controller
                 'liveness_passed' => false,
                 'processing_ms' => $processingMs,
                 'image_hash' => $imageHash,
-                'metadata' => [
-                    'liveness_reason' => $result['liveness_reason'] ?? 'liveness_failed',
-                    'liveness_checks' => $result['liveness_checks'] ?? null,
-                    'spoof_type' => $result['spoof_type'] ?? null,
-                    'source' => $source,
-                ],
+                'metadata' => $this->eventMetadata($result, $source),
                 'recognized_at' => now(),
             ]);
 
@@ -144,7 +171,9 @@ class RecognitionController extends Controller
             $confidence,
             $livenessPassed,
             $processingMs,
-            $imageHash
+            $imageHash,
+            $source,
+            $this->eventMetadata($result, $source),
         );
 
         return response()->json(array_merge([
@@ -153,8 +182,92 @@ class RecognitionController extends Controller
             'confidence' => $confidence,
             'liveness_passed' => $livenessPassed,
             'liveness_score' => $result['liveness_score'] ?? null,
+            'track_id' => $result['track_id'] ?? null,
+            'quality_score' => $result['quality_score'] ?? null,
+            'pipeline' => $result['pipeline'] ?? null,
             'attendance' => $attendanceResult,
-        ], $this->slaMeta($processingMs)));
+        ], $this->slaMeta($processingMs, $result)));
+    }
+
+    public function recognize(Request $request): JsonResponse
+    {
+        $sources = implode(',', config('recognition.supported_sources', []));
+        $data = $request->validate([
+            'image' => 'required|string',
+            'camera_id' => 'nullable|exists:cameras,id',
+            'require_liveness' => 'boolean',
+            'liveness_frames' => 'nullable|array|max:30',
+            'liveness_frames.*' => 'string',
+            'session_id' => 'nullable|string|max:128',
+            'source' => 'nullable|string|in:'.$sources,
+        ]);
+
+        $camera = isset($data['camera_id']) ? Camera::find($data['camera_id']) : null;
+        $source = $data['source'] ?? CameraSourceResolver::fromStreamUrl($camera?->stream_url);
+        $sessionId = $data['session_id'] ?? ($camera ? 'camera-'.$camera->id : null);
+
+        $result = $this->ai->recognize(
+            $data['image'],
+            $data['require_liveness'] ?? true,
+            $data['liveness_frames'] ?? null,
+            $sessionId,
+            $source,
+        );
+
+        if (! ($result['success'] ?? false)) {
+            return response()->json(['message' => $result['error'] ?? 'Recognition failed'], 503);
+        }
+
+        return response()->json(array_merge($result, $this->slaMeta(
+            (int) ($result['processing_ms'] ?? 0),
+            $result
+        )));
+    }
+
+    public function recognizeStream(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'camera_id' => 'required|exists:cameras,id',
+            'require_liveness' => 'boolean',
+            'session_id' => 'nullable|string|max:128',
+        ]);
+
+        $camera = Camera::findOrFail($data['camera_id']);
+        if (! $camera->stream_url) {
+            return response()->json(['message' => 'Camera has no stream URL'], 422);
+        }
+
+        $source = CameraSourceResolver::fromStreamUrl($camera->stream_url);
+        $sessionId = $data['session_id'] ?? 'camera-'.$camera->id;
+
+        $result = $this->ai->recognizeStream(
+            $camera->stream_url,
+            $data['require_liveness'] ?? false,
+            $sessionId,
+            $source,
+        );
+
+        if (! ($result['success'] ?? false)) {
+            return response()->json(['message' => $result['error'] ?? 'Stream recognition failed'], 503);
+        }
+
+        if ($request->boolean('record_attendance', false) && ($result['employee_id'] ?? null)) {
+            $capture = $this->ai->captureStream($camera->stream_url);
+            if ($capture['success'] ?? false) {
+                return $this->identify(Request::create('', 'POST', [
+                    'image' => $capture['image'],
+                    'camera_id' => $camera->id,
+                    'require_liveness' => $data['require_liveness'] ?? false,
+                    'source' => $source,
+                    'session_id' => $sessionId,
+                ]));
+            }
+        }
+
+        return response()->json(array_merge([
+            'camera_id' => $camera->id,
+            'source' => $source,
+        ], $result, $this->slaMeta((int) ($result['processing_ms'] ?? 0), $result)));
     }
 
     public function events(Request $request): JsonResponse
@@ -221,12 +334,37 @@ class RecognitionController extends Controller
     }
 
     /** NFR-001: Recognition speed SLA metadata */
-    private function slaMeta(int $processingMs): array
+    private function slaMeta(int $processingMs, ?array $aiResult = null): array
     {
+        $recognitionMs = (int) ($aiResult['recognition_ms'] ?? $processingMs);
+        $livenessMs = isset($aiResult['liveness_ms']) ? (int) $aiResult['liveness_ms'] : null;
+
         return [
             'processing_ms' => $processingMs,
-            'sla_ms' => config('nfr.recognition_sla_ms', 500),
-            'sla_met' => $this->nfr->recognitionSlaMet($processingMs),
+            'recognition_ms' => $recognitionMs,
+            'liveness_ms' => $livenessMs,
+            'sla_ms' => config('nfr.recognition_sla_ms', 300),
+            'liveness_sla_ms' => config('nfr.liveness_sla_ms', 500),
+            'sla_met' => $this->nfr->recognitionSlaMet($recognitionMs),
+            'liveness_sla_met' => $livenessMs === null || $livenessMs <= config('nfr.liveness_sla_ms', 500),
+            'sla' => $aiResult['sla'] ?? null,
+        ];
+    }
+
+    private function eventMetadata(array $result, string $source): array
+    {
+        return [
+            'liveness_reason' => $result['liveness_reason'] ?? null,
+            'liveness_checks' => $result['liveness_checks'] ?? null,
+            'liveness_ms' => $result['liveness_ms'] ?? null,
+            'recognition_ms' => $result['recognition_ms'] ?? null,
+            'spoof_type' => $result['spoof_type'] ?? null,
+            'source' => $source,
+            'track_id' => $result['track_id'] ?? null,
+            'quality_score' => $result['quality_score'] ?? null,
+            'pipeline_stages' => isset($result['pipeline'])
+                ? array_column($result['pipeline'], 'stage')
+                : null,
         ];
     }
 }

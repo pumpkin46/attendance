@@ -23,9 +23,16 @@ class NfrComplianceService
             'nfr' => [
                 'NFR-001' => [
                     'name' => 'Recognition speed',
-                    'target' => '< '.config('nfr.recognition_sla_ms', 500).' ms per face',
-                    'sla_ms' => config('nfr.recognition_sla_ms', 500),
-                    'ai_max_processing_ms' => 500,
+                    'target' => '< '.config('nfr.recognition_sla_ms', 300).' ms recognition, '
+                        .'< '.config('nfr.liveness_sla_ms', 500).' ms liveness',
+                    'recognition_sla_ms' => config('nfr.recognition_sla_ms', 300),
+                    'liveness_sla_ms' => config('nfr.liveness_sla_ms', 500),
+                ],
+                'RECOGNITION-ACCURACY' => [
+                    'name' => 'Recognition accuracy',
+                    'target' => '≥ '.((config('recognition.metrics.target_accuracy', 0.99)) * 100).'%',
+                    'max_fpr' => config('recognition.metrics.max_false_positive_rate', 0.001),
+                    'max_fnr' => config('recognition.metrics.max_false_negative_rate', 0.01),
                 ],
                 'NFR-002' => [
                     'name' => 'Employee capacity',

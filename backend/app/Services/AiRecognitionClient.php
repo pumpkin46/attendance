@@ -42,13 +42,50 @@ class AiRecognitionClient
         ]);
     }
 
-    public function identify(string $imageBase64, bool $requireLiveness = true, ?array $livenessFrames = null): array
-    {
+    public function identify(
+        string $imageBase64,
+        bool $requireLiveness = true,
+        ?array $livenessFrames = null,
+        ?string $sessionId = null,
+        ?string $source = null,
+    ): array {
         return $this->post('/api/v1/identify', array_filter([
             'image' => $imageBase64,
             'require_liveness' => $requireLiveness,
             'liveness_frames' => $livenessFrames,
+            'session_id' => $sessionId,
+            'source' => $source,
         ], fn ($v) => $v !== null));
+    }
+
+    public function recognize(
+        string $imageBase64,
+        bool $requireLiveness = true,
+        ?array $livenessFrames = null,
+        ?string $sessionId = null,
+        ?string $source = null,
+    ): array {
+        return $this->post('/api/v1/recognize', array_filter([
+            'image' => $imageBase64,
+            'require_liveness' => $requireLiveness,
+            'liveness_frames' => $livenessFrames,
+            'session_id' => $sessionId,
+            'source' => $source,
+        ], fn ($v) => $v !== null));
+    }
+
+    public function recognizeStream(
+        string $streamUrl,
+        bool $requireLiveness = false,
+        ?string $sessionId = null,
+        ?string $source = null,
+    ): array {
+        return $this->post('/api/v1/recognize-stream', array_filter([
+            'stream_url' => $streamUrl,
+            'require_liveness' => $requireLiveness,
+            'session_id' => $sessionId,
+            'source' => $source,
+        ], fn ($v) => $v !== null), max(config('services.ai.timeout', 2), 30));
     }
 
     public function verifyLiveness(array $frames): array

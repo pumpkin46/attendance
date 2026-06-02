@@ -46,6 +46,16 @@ const statusBarStyles: Record<KioskStatus, string> = {
   duplicate: 'bg-amber-600/90 text-white',
 }
 
+const QUALITY_REASONS = new Set([
+  'blurry',
+  'too_dark',
+  'low_resolution',
+  'occluded_face',
+  'low_quality',
+  'no_face',
+  'multiple_faces',
+])
+
 const SPOOF_REASONS = new Set([
   'spoof_detected',
   'liveness_failed',
@@ -80,6 +90,11 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
   const inFlightDetect = useRef(false)
   const inFlightIdentify = useRef(false)
   const faceCountRef = useRef(0)
+  const sessionIdRef = useRef(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `kiosk-${Date.now()}`
+  )
 
   const pushFrame = useCallback(
     (frame: string) => {
@@ -189,6 +204,7 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           camera_id: cameraId ? Number(cameraId) : undefined,
           require_liveness: requireLiveness,
           source: 'webcam',
+          session_id: sessionIdRef.current,
         }
         if (requireLiveness && activeLiveness && frameBufferRef.current.length >= 5) {
           payload.liveness_frames = frameBufferRef.current

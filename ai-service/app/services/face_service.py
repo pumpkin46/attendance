@@ -392,52 +392,59 @@ def enroll(employee_id: str, image_b64: str) -> dict:
     }
 
 
+def recognize(
+    image_b64: str,
+    require_liveness: bool = True,
+    liveness_frames: list[str] | None = None,
+    session_id: str | None = None,
+    source: str | None = None,
+) -> dict:
+    """Full recognition pipeline with per-stage timings."""
+    from app.services.recognition_pipeline import recognize as run_pipeline
+
+    return run_pipeline(
+        image_b64,
+        require_liveness=require_liveness,
+        liveness_frames=liveness_frames,
+        session_id=session_id,
+        source=source,
+    )
+
+
 def identify(
     image_b64: str,
     require_liveness: bool = True,
     liveness_frames: list[str] | None = None,
+    session_id: str | None = None,
+    source: str | None = None,
 ) -> dict:
-    start = time.perf_counter()
-    img, embedding, det_score, face_count, insightface_ok, bbox = _analyze_image(image_b64)
-
-    liveness = verify_liveness(
-        img, bbox, face_count, det_score, insightface_ok, liveness_frames
+    """Backward-compatible identify — uses recognition pipeline."""
+    result = recognize(
+        image_b64,
+        require_liveness=require_liveness,
+        liveness_frames=liveness_frames,
+        session_id=session_id,
+        source=source,
     )
-    liveness_block = require_liveness and settings.liveness_enabled and not liveness.passed
-
-    if liveness_block:
-        processing_ms = int((time.perf_counter() - start) * 1000)
-        return {
-            "success": True,
-            "employee_id": None,
-            "confidence": 0.0,
-            "processing_ms": processing_ms,
-            **_liveness_payload(liveness),
-        }
-
-    processing_ms = int((time.perf_counter() - start) * 1000)
-
-    if embedding is None:
-        return {
-            "success": True,
-            "employee_id": None,
-            "confidence": 0.0,
-            "processing_ms": processing_ms,
-            **_liveness_payload(liveness),
-        }
-
-    employee_id, confidence = get_index().search(embedding)
-    threshold = settings.recognition_threshold
-
-    if confidence < threshold:
-        employee_id = None
-
+    reason = result.get("reason")
     return {
-        "success": True,
-        "employee_id": employee_id,
-        "confidence": confidence,
-        "processing_ms": processing_ms,
-        **_liveness_payload(liveness),
+        "success": result.get("success", True),
+        "employee_id": result.get("employee_id"),
+        "confidence": result.get("confidence", 0.0),
+        "processing_ms": result.get("processing_ms", 0),
+        "recognition_ms": result.get("recognition_ms"),
+        "liveness_ms": result.get("liveness_ms"),
+        "reason": reason,
+        "quality_score": result.get("quality_score"),
+        "track_id": result.get("track_id"),
+        "pipeline": result.get("pipeline"),
+        "sla": result.get("sla"),
+        "liveness_passed": result.get("liveness_passed"),
+        "liveness_score": result.get("liveness_score"),
+        "liveness_reason": result.get("liveness_reason"),
+        "liveness_checks": result.get("liveness_checks"),
+        "spoof_type": result.get("spoof_type"),
+        "face_count": result.get("face_count"),
     }
 
 

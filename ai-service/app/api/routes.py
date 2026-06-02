@@ -12,6 +12,9 @@ from app.schemas.recognition import (
     LivenessVerifyResponse,
     IdentifyRequest,
     IdentifyResponse,
+    RecognizeRequest,
+    RecognizeResponse,
+    RecognizeStreamRequest,
     StreamCaptureRequest,
     StreamCaptureResponse,
     EmbeddingExportResponse,
@@ -62,12 +65,42 @@ def enroll_batch(req: EnrollBatchRequest):
     return EnrollBatchResponse(**result)
 
 
+@router.post("/recognize", response_model=RecognizeResponse)
+def recognize(req: RecognizeRequest):
+    return RecognizeResponse(
+        **face_service.recognize(
+            req.image,
+            require_liveness=req.require_liveness,
+            liveness_frames=req.liveness_frames,
+            session_id=req.session_id,
+            source=req.source,
+        )
+    )
+
+
+@router.post("/recognize-stream", response_model=RecognizeResponse)
+def recognize_stream(req: RecognizeStreamRequest):
+    capture = capture_stream_frame(req.stream_url)
+    if not capture.get("success"):
+        raise HTTPException(422, detail=capture.get("error", "Stream capture failed"))
+    result = face_service.recognize(
+        capture["image"],
+        require_liveness=req.require_liveness,
+        session_id=req.session_id,
+        source=req.source or "rtsp",
+    )
+    result["capture_ms"] = capture.get("processing_ms")
+    return RecognizeResponse(**result)
+
+
 @router.post("/identify", response_model=IdentifyResponse)
 def identify(req: IdentifyRequest):
     result = face_service.identify(
         req.image,
         req.require_liveness,
         req.liveness_frames,
+        session_id=req.session_id,
+        source=req.source,
     )
     return IdentifyResponse(**result)
 

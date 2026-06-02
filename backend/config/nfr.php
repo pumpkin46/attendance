@@ -4,8 +4,9 @@
  * Non-functional requirements (NFR-001 – NFR-008) — targets and platform limits.
  */
 return [
-    // NFR-001 Recognition speed: < 500 ms per face
-    'recognition_sla_ms' => (int) env('NFR_RECOGNITION_SLA_MS', 500),
+    // NFR-001 Recognition speed: < 300 ms (embedding + search); liveness < 500 ms
+    'recognition_sla_ms' => (int) env('NFR_RECOGNITION_SLA_MS', 300),
+    'liveness_sla_ms' => (int) env('NFR_LIVENESS_SLA_MS', 500),
 
     // NFR-002 Concurrent users / employee capacity
     'max_employees' => (int) env('NFR_MAX_EMPLOYEES', 10_000),

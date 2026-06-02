@@ -98,7 +98,11 @@ Route::prefix('v1')->group(function () {
         Route::get('rfid-events', [RfidEventController::class, 'index'])->middleware('permission:rfid.manage');
         Route::post('rfid/simulate', [RfidTapController::class, 'simulate'])->middleware('permission:rfid.manage');
 
+        Route::get('recognition/config', [RecognitionController::class, 'config']);
+        Route::get('recognition/metrics', [RecognitionController::class, 'metrics'])->middleware('permission:recognition.view');
         Route::post('recognition/detect', [RecognitionController::class, 'detect']);
+        Route::post('recognition/recognize', [RecognitionController::class, 'recognize']);
+        Route::post('recognition/recognize-stream', [RecognitionController::class, 'recognizeStream']);
         Route::post('recognition/identify', [RecognitionController::class, 'identify']);
         Route::post('recognition/liveness/verify', [RecognitionController::class, 'verifyLiveness']);
         Route::get('recognition/events', [RecognitionController::class, 'events'])->middleware('permission:recognition.view');

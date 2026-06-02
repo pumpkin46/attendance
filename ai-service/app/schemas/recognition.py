@@ -15,6 +15,56 @@ class IdentifyRequest(BaseModel):
         default=None,
         description="Optional frame sequence for blink/head-movement verification (FR-018)",
     )
+    session_id: str | None = Field(
+        default=None,
+        description="Stable session for face tracking across frames",
+    )
+    source: str | None = Field(
+        default=None,
+        description="webcam, usb_camera, ip_camera, rtsp, nvr, cctv, mobile",
+    )
+
+
+class RecognizeRequest(IdentifyRequest):
+    """Full pipeline recognition request."""
+
+
+class PipelineStage(BaseModel):
+    stage: str
+    duration_ms: int = 0
+    status: str = "ok"
+
+
+class RecognizeResponse(BaseModel):
+    model_config = {"extra": "ignore"}
+
+    success: bool = True
+    employee_id: str | None = None
+    confidence: float = 0.0
+    matched: bool = False
+    reason: str | None = None
+    quality_score: float | None = None
+    track_id: int | None = None
+    face_count: int | None = None
+    bbox: list[float] | None = None
+    pipeline: list[dict[str, Any]] = Field(default_factory=list)
+    processing_ms: int = 0
+    recognition_ms: int | None = None
+    liveness_ms: int | None = None
+    sla: dict[str, Any] | None = None
+    source: str | None = None
+    liveness_passed: bool | None = None
+    liveness_score: float | None = None
+    liveness_reason: str | None = None
+    liveness_checks: dict[str, Any] | None = None
+    spoof_type: str | None = None
+
+
+class RecognizeStreamRequest(BaseModel):
+    stream_url: str
+    require_liveness: bool = False
+    source: str | None = "rtsp"
+    session_id: str | None = None
 
 
 class LivenessVerifyRequest(BaseModel):

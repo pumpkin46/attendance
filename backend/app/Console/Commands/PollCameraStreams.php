@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\RecognitionController;
 use App\Models\Camera;
 use App\Services\AiRecognitionClient;
 use App\Services\CameraMonitoringService;
+use App\Support\CameraSourceResolver;
 use Illuminate\Console\Command;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
@@ -56,6 +57,8 @@ class PollCameraStreams extends Command
                     'image' => $capture['image'],
                     'camera_id' => $camera->id,
                     'require_liveness' => false,
+                    'source' => CameraSourceResolver::fromStreamUrl($camera->stream_url),
+                    'session_id' => 'camera-'.$camera->id,
                 ]);
 
                 $response = $recognition->identify($request);

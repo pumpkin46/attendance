@@ -16,12 +16,39 @@ This service does **not** implement attendance (check-in/out, shifts, overtime, 
 |--------|------|---------|
 | GET | `/health` | Service status |
 | POST | `/api/v1/enroll` | Store face embedding for `employee_id` |
+| POST | `/api/v1/recognize` | Full pipeline + per-stage timings + SLA flags |
+| POST | `/api/v1/recognize-stream` | RTSP/IP/NVR frame capture → recognize |
 | POST | `/api/v1/identify` | Match face → returns `employee_id` + confidence |
 | POST | `/api/v1/delete` | Remove embeddings for employee |
 | GET | `/api/v1/embeddings/export` | Export FAISS index for edge sync |
 | POST | `/api/v1/embeddings/import` | Import index on edge device |
 | POST | `/api/v1/embeddings/reload` | Reload index from disk |
 | POST | `/api/v1/anomalies/analyze` | Detect attendance anomalies (rules + ML) |
+
+## Recognition pipeline
+
+```
+Video Stream → Face Detection → Face Tracking → Face Quality Check
+    → Liveness Detection → Embedding Generation → Vector Search → Identity Match
+```
+
+Attendance (`attendance_event`) is recorded by the **Laravel backend** after identity match.
+
+### Supported sources
+
+`webcam`, `usb_camera`, `ip_camera`, `rtsp`, `nvr`, `cctv`, `mobile`
+
+### Performance targets
+
+| Metric | Target |
+|--------|--------|
+| Recognition time | < 300 ms |
+| Liveness verification | < 500 ms |
+| Accuracy | ≥ 99% |
+| False positive rate | < 0.1% |
+| False negative rate | < 1% |
+
+Monitor via `GET /api/v1/recognition/metrics` (backend).
 
 ## How attendance works
 
