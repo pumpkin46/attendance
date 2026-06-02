@@ -50,9 +50,22 @@ export interface Camera {
   device_id: string
   stream_url?: string
   direction: string
+  status: 'active' | 'inactive' | 'maintenance'
   is_active: boolean
+  online?: boolean
+  frame_rate_fps?: number | null
   last_heartbeat_at?: string
+  last_frame_at?: string
+  recognition_count_today?: number
   location?: { id: number; name: string }
+}
+
+export interface CameraMonitoringSummary {
+  online: number
+  offline: number
+  total: number
+  recognition_count_today: number
+  cameras: Camera[]
 }
 
 export interface RecognitionEvent {

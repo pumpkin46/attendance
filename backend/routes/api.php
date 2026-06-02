@@ -47,6 +47,7 @@ Route::prefix('v1')->group(function () {
 
         Route::get('locations', [LocationController::class, 'index']);
 
+        Route::get('cameras/monitoring', [CameraController::class, 'monitoring']);
         Route::apiResource('cameras', CameraController::class)->middleware('permission:cameras.manage');
         Route::post('cameras/{camera}/heartbeat', [CameraController::class, 'heartbeat']);
         Route::post('cameras/{camera}/capture', [CameraController::class, 'capture'])->middleware('permission:cameras.manage');

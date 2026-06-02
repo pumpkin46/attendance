@@ -5,6 +5,8 @@ import { Badge } from '../components/ui/Badge'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
 import { StatCard } from '../components/ui/StatCard'
+import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
+import type { CameraMonitoringSummary } from '../types'
 
 interface TodaySummary {
   date: string
@@ -34,12 +36,14 @@ interface AppNotification {
 export default function DashboardPage() {
   const [summary, setSummary] = useState<TodaySummary | null>(null)
   const [unknown, setUnknown] = useState<UnknownSummary | null>(null)
+  const [cameraMonitoring, setCameraMonitoring] = useState<CameraMonitoringSummary | null>(null)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [aiHealth, setAiHealth] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
     api.get<TodaySummary>('/attendance/today').then((r) => setSummary(r.data)).catch(() => {})
     api.get<UnknownSummary>('/recognition/unknown-summary').then((r) => setUnknown(r.data)).catch(() => {})
+    api.get<CameraMonitoringSummary>('/cameras/monitoring').then((r) => setCameraMonitoring(r.data)).catch(() => {})
     api
       .get<{ data: AppNotification[] }>('/notifications', { params: { unread_only: true, per_page: 5 } })
       .then((r) => setNotifications(r.data.data))
@@ -48,13 +52,19 @@ export default function DashboardPage() {
       .then((r) => r.json())
       .then(setAiHealth)
       .catch(() => setAiHealth({ status: 'unavailable' }))
+
+    const timer = setInterval(() => {
+      api.get<CameraMonitoringSummary>('/cameras/monitoring').then((r) => setCameraMonitoring(r.data)).catch(() => {})
+    }, 30_000)
+
+    return () => clearInterval(timer)
   }, [])
 
   return (
     <div>
       <PageHeader
         title="Dashboard"
-        description="Real-time workforce attendance overview"
+        description="Real-time workforce attendance and camera monitoring"
       />
 
       <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
@@ -64,6 +74,55 @@ export default function DashboardPage() {
         <StatCard label="On leave" value={summary?.on_leave ?? '—'} />
         <StatCard label="Unknown faces today" value={unknown?.today ?? '—'} tone="danger" />
       </div>
+
+      <Card className="mb-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-medium">Camera monitoring (FR-020)</h2>
+          <Link to="/cameras" className="text-sm text-blue-400 hover:text-blue-300">
+            Manage cameras
+          </Link>
+        </div>
+
+        <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-4">
+          <StatCard label="Online" value={cameraMonitoring?.online ?? '—'} />
+          <StatCard label="Offline" value={cameraMonitoring?.offline ?? '—'} tone="warn" />
+          <StatCard
+            label="Recognition count"
+            value={cameraMonitoring?.recognition_count_today ?? '—'}
+          />
+        </div>
+
+        <TableShell>
+          <TableHead>
+            <Th>Camera</Th>
+            <Th>Location</Th>
+            <Th>Online</Th>
+            <Th>Frame rate</Th>
+            <Th>Recognitions today</Th>
+          </TableHead>
+          <TableBody>
+            {!cameraMonitoring?.cameras.length ? (
+              <tr>
+                <Td colSpan={5} className="text-slate-400">
+                  No cameras registered
+                </Td>
+              </tr>
+            ) : (
+              cameraMonitoring.cameras.map((c) => (
+                <tr key={c.id}>
+                  <Td>{c.name}</Td>
+                  <Td>{c.location?.name ?? '—'}</Td>
+                  <Td>
+                    <Badge tone={c.online ? 'ok' : 'warn'}>{c.online ? 'Online' : 'Offline'}</Badge>
+                  </Td>
+                  <Td>{c.frame_rate_fps != null ? `${c.frame_rate_fps} fps` : '—'}</Td>
+                  <Td>{c.recognition_count_today ?? 0}</Td>
+                </tr>
+              ))
+            )}
+          </TableBody>
+        </TableShell>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

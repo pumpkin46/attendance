@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Http\Controllers\Api\RecognitionController;
 use App\Models\Camera;
 use App\Services\AiRecognitionClient;
+use App\Services\CameraMonitoringService;
 use Illuminate\Console\Command;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
@@ -15,13 +16,13 @@ class PollCameraStreams extends Command
 
     protected $description = 'Capture frames from RTSP/IP cameras and run face recognition (FR-009)';
 
-    public function handle(AiRecognitionClient $ai): int
+    public function handle(AiRecognitionClient $ai, CameraMonitoringService $monitoring): int
     {
         $interval = config('attendance.camera_stream_poll_interval_seconds', 5);
 
         do {
             $cameras = Camera::query()
-                ->where('is_active', true)
+                ->where('status', Camera::STATUS_ACTIVE)
                 ->whereNotNull('stream_url')
                 ->where('stream_url', '!=', '')
                 ->get();
@@ -48,7 +49,7 @@ class PollCameraStreams extends Command
                     continue;
                 }
 
-                $camera->update(['last_heartbeat_at' => now()]);
+                $monitoring->recordFrame($camera, round(1 / max($interval, 1), 2));
 
                 $request = Request::create('/api/v1/recognition/identify', 'POST', [
                     'image' => $capture['image'],
