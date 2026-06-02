@@ -87,6 +87,10 @@ class EdgeDeviceApiController extends Controller
             'frame_rate_fps' => 'nullable|numeric|min:0|max:120',
             'software_version' => 'nullable|string|max:50',
             'metadata' => 'nullable|array',
+            'metadata.cpu_usage_percent' => 'nullable|numeric|min:0|max:100',
+            'metadata.gpu_usage_percent' => 'nullable|numeric|min:0|max:100',
+            'metadata.latency_ms' => 'nullable|integer|min:0',
+            'metadata.dropped_frames_delta' => 'nullable|integer|min:0',
         ]);
 
         $this->monitoring->recordHeartbeat($device, $data);

@@ -77,10 +77,16 @@ class EdgeDeviceMonitoringService
         ]);
 
         if ($device->camera) {
-            app(CameraMonitoringService::class)->recordFrame(
-                $device->camera,
-                isset($metrics['frame_rate_fps']) ? (float) $metrics['frame_rate_fps'] : null
-            );
+            $meta = $metrics['metadata'] ?? [];
+            app(CameraMonitoringService::class)->recordHealth($device->camera, [
+                'frame_rate_fps' => isset($metrics['frame_rate_fps'])
+                    ? (float) $metrics['frame_rate_fps'] : null,
+                'cpu_usage_percent' => $meta['cpu_usage_percent'] ?? null,
+                'gpu_usage_percent' => $meta['gpu_usage_percent'] ?? null,
+                'latency_ms' => $meta['latency_ms'] ?? null,
+                'dropped_frames_delta' => $meta['dropped_frames_delta'] ?? null,
+                'frame_received' => true,
+            ]);
         }
     }
 }

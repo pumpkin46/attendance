@@ -15,11 +15,19 @@ interface Location {
   name: string
 }
 
+interface CameraConfig {
+  camera_types: Record<string, string>
+  zones: Record<string, string>
+  statuses: string[]
+}
+
 interface CaptureResult {
   face_count: number
   detect_ms: number
   capture_ms: number
-  frame_rate_fps?: number
+  latency_ms?: number
+  bandwidth_kbps?: number
+  health?: Camera['health']
   identify?: { matched: boolean; reason?: string; employee?: { first_name: string; last_name: string } }
 }
 
@@ -32,14 +40,22 @@ const STATUS_LABELS: Record<Camera['status'], string> = {
 const emptyForm = {
   location_id: '',
   name: '',
+  camera_type: 'rtsp',
+  zone: '',
+  floor: '',
   stream_url: '',
+  target_fps: '15',
+  resolution_width: '1920',
+  resolution_height: '1080',
   status: 'active' as Camera['status'],
+  direction: 'both',
   deployment_mode: 'cloud' as Camera['deployment_mode'],
 }
 
 export default function CamerasPage() {
   const [cameras, setCameras] = useState<Camera[]>([])
   const [locations, setLocations] = useState<Location[]>([])
+  const [config, setConfig] = useState<CameraConfig | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [capturing, setCapturing] = useState<number | null>(null)
@@ -53,6 +69,7 @@ export default function CamerasPage() {
   useEffect(() => {
     load()
     api.get<Location[]>('/locations').then((r) => setLocations(r.data))
+    api.get<CameraConfig>('/cameras/config').then((r) => setConfig(r.data))
   }, [])
 
   const startEdit = (camera: Camera) => {
@@ -61,8 +78,15 @@ export default function CamerasPage() {
     setForm({
       location_id: String(camera.location?.id ?? ''),
       name: camera.name,
+      camera_type: camera.camera_type ?? 'rtsp',
+      zone: camera.zone ?? '',
+      floor: camera.floor ?? '',
       stream_url: camera.stream_url ?? '',
+      target_fps: String(camera.target_fps ?? 15),
+      resolution_width: String(camera.resolution_width ?? 1920),
+      resolution_height: String(camera.resolution_height ?? 1080),
       status: camera.status,
+      direction: camera.direction ?? 'both',
       deployment_mode: camera.deployment_mode ?? 'cloud',
     })
   }
@@ -78,8 +102,15 @@ export default function CamerasPage() {
     const payload = {
       location_id: Number(form.location_id),
       name: form.name,
+      camera_type: form.camera_type,
+      zone: form.zone || null,
+      floor: form.floor || null,
       stream_url: form.stream_url || null,
+      target_fps: form.target_fps ? Number(form.target_fps) : null,
+      resolution_width: form.resolution_width ? Number(form.resolution_width) : null,
+      resolution_height: form.resolution_height ? Number(form.resolution_height) : null,
       status: form.status,
+      direction: form.direction,
       deployment_mode: form.deployment_mode,
     }
 
@@ -108,13 +139,13 @@ export default function CamerasPage() {
     }
   }
 
-  const onlineCount = cameras.filter((c) => c.online).length
+  const onlineCount = cameras.filter((c) => c.health?.online ?? c.online).length
 
   return (
     <div>
       <PageHeader
         title="Camera Management"
-        description="FR-019: Register cameras with name, location, RTSP URL, and status"
+        description="Configure cameras and monitor stream health: online status, FPS, latency, bandwidth, CPU/GPU, and recognition events."
         actions={
           <Button
             onClick={() => {
@@ -132,15 +163,29 @@ export default function CamerasPage() {
           <h2 className="mb-4 text-lg font-medium">
             {editingId ? 'Edit camera' : 'Register camera'}
           </h2>
-          <form className="grid gap-4 sm:grid-cols-2" onSubmit={saveCamera}>
+          <form className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" onSubmit={saveCamera}>
             <Label>
-              Name *
+              Camera name *
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="Main entrance"
                 required
               />
+            </Label>
+            <Label>
+              Camera type *
+              <Select
+                value={form.camera_type}
+                onChange={(e) => setForm({ ...form, camera_type: e.target.value })}
+              >
+                {config &&
+                  Object.entries(config.camera_types).map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+              </Select>
             </Label>
             <Label>
               Location *
@@ -157,13 +202,73 @@ export default function CamerasPage() {
                 ))}
               </Select>
             </Label>
-            <Label className="sm:col-span-2">
+            <Label>
+              Zone
+              <Select
+                value={form.zone}
+                onChange={(e) => setForm({ ...form, zone: e.target.value })}
+              >
+                <option value="">—</option>
+                {config &&
+                  Object.entries(config.zones).map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+              </Select>
+            </Label>
+            <Label>
+              Floor
+              <Input
+                value={form.floor}
+                onChange={(e) => setForm({ ...form, floor: e.target.value })}
+                placeholder="Ground, L1, …"
+              />
+            </Label>
+            <Label className="sm:col-span-2 lg:col-span-3">
               RTSP URL
               <Input
                 placeholder="rtsp://user:pass@192.168.1.100:554/stream"
                 value={form.stream_url}
                 onChange={(e) => setForm({ ...form, stream_url: e.target.value })}
               />
+            </Label>
+            <Label>
+              Target FPS
+              <Input
+                type="number"
+                min={1}
+                max={120}
+                value={form.target_fps}
+                onChange={(e) => setForm({ ...form, target_fps: e.target.value })}
+              />
+            </Label>
+            <Label>
+              Resolution width
+              <Input
+                type="number"
+                value={form.resolution_width}
+                onChange={(e) => setForm({ ...form, resolution_width: e.target.value })}
+              />
+            </Label>
+            <Label>
+              Resolution height
+              <Input
+                type="number"
+                value={form.resolution_height}
+                onChange={(e) => setForm({ ...form, resolution_height: e.target.value })}
+              />
+            </Label>
+            <Label>
+              Direction
+              <Select
+                value={form.direction}
+                onChange={(e) => setForm({ ...form, direction: e.target.value })}
+              >
+                <option value="in">Entry (check-in)</option>
+                <option value="out">Exit (check-out)</option>
+                <option value="both">Both</option>
+              </Select>
             </Label>
             <Label>
               Status *
@@ -193,7 +298,7 @@ export default function CamerasPage() {
                 <option value="edge">Edge (on-device AI)</option>
               </Select>
             </Label>
-            <div className="flex items-end sm:col-span-2">
+            <div className="flex items-end sm:col-span-2 lg:col-span-3">
               <Button type="submit">{editingId ? 'Update camera' : 'Register camera'}</Button>
             </div>
           </form>
@@ -204,7 +309,10 @@ export default function CamerasPage() {
         <Card className="mb-6">
           <p className="text-sm">
             Stream test: {captureResult.face_count} face(s) in {captureResult.detect_ms}ms
-            {captureResult.frame_rate_fps != null && ` · ${captureResult.frame_rate_fps} FPS`}
+            {captureResult.health?.fps != null && ` · ${captureResult.health.fps} FPS`}
+            {captureResult.latency_ms != null && ` · ${captureResult.latency_ms}ms latency`}
+            {captureResult.bandwidth_kbps != null &&
+              ` · ${captureResult.bandwidth_kbps} kbps`}
           </p>
           {captureResult.identify && (
             <p className="mt-2 text-sm">
@@ -216,78 +324,104 @@ export default function CamerasPage() {
         </Card>
       )}
 
-      <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+      <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
         <StatCard label="Total cameras" value={cameras.length} />
         <StatCard label="Online" value={onlineCount} />
         <StatCard label="Offline" value={cameras.length - onlineCount} tone="warn" />
         <StatCard
           label="Recognitions today"
-          value={cameras.reduce((n, c) => n + (c.recognition_count_today ?? 0), 0)}
+          value={cameras.reduce((n, c) => n + (c.health?.recognition_events_today ?? c.recognition_count_today ?? 0), 0)}
         />
       </div>
 
       <TableShell>
         <TableHead>
           <Th>Name</Th>
-          <Th>Location</Th>
-          <Th>RTSP URL</Th>
+          <Th>Type</Th>
+          <Th>Location / Zone</Th>
+          <Th>Resolution</Th>
           <Th>Status</Th>
-          <Th>Deployment</Th>
           <Th>Online</Th>
-          <Th>Frame rate</Th>
-          <Th>Recognitions</Th>
+          <Th>FPS</Th>
+          <Th>Latency</Th>
+          <Th>Bandwidth</Th>
+          <Th>CPU</Th>
+          <Th>GPU</Th>
+          <Th>Dropped</Th>
+          <Th>Events</Th>
           <Th>Actions</Th>
         </TableHead>
         <TableBody>
           {cameras.length === 0 ? (
             <tr>
-              <Td colSpan={9} className="text-slate-400">
+              <Td colSpan={14} className="text-slate-400">
                 No cameras registered yet
               </Td>
             </tr>
           ) : (
-            cameras.map((c) => (
-              <tr key={c.id}>
-                <Td>{c.name}</Td>
-                <Td>{c.location?.name ?? '—'}</Td>
-                <Td className="max-w-[180px] truncate text-xs">{c.stream_url ?? '—'}</Td>
-                <Td>
-                  <Badge
-                    tone={
-                      c.status === 'active' ? 'ok' : c.status === 'maintenance' ? 'warn' : 'neutral'
-                    }
-                  >
-                    {STATUS_LABELS[c.status]}
-                  </Badge>
-                </Td>
-                <Td>
-                  <Badge tone={c.deployment_mode === 'edge' ? 'ok' : 'neutral'}>
-                    {c.deployment_mode === 'edge' ? 'Edge' : 'Cloud'}
-                  </Badge>
-                </Td>
-                <Td>
-                  <Badge tone={c.online ? 'ok' : 'warn'}>{c.online ? 'Online' : 'Offline'}</Badge>
-                </Td>
-                <Td>{c.frame_rate_fps != null ? `${c.frame_rate_fps} fps` : '—'}</Td>
-                <Td>{c.recognition_count_today ?? 0}</Td>
-                <Td>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" onClick={() => startEdit(c)}>
-                      Edit
-                    </Button>
-                    {c.stream_url && (
-                      <Button
-                        variant="ghost"
-                        disabled={capturing === c.id}
-                        onClick={() => captureFromStream(c.id)}
-                      >
-                        {capturing === c.id ? '…' : 'Test'}
-                      </Button>
+            cameras.map((c) => {
+              const h = c.health
+              const online = h?.online ?? c.online
+
+              return (
+                <tr key={c.id}>
+                  <Td>{c.name}</Td>
+                  <Td className="uppercase text-xs">{c.camera_type ?? 'rtsp'}</Td>
+                  <Td>
+                    <div className="text-sm">{c.location?.name ?? '—'}</div>
+                    {(c.zone || c.floor) && (
+                      <div className="text-xs text-slate-400">
+                        {[c.zone, c.floor].filter(Boolean).join(' · ')}
+                      </div>
                     )}
-                  </div>
-                </Td>
-              </tr>
-            ))
+                  </Td>
+                  <Td>{c.resolution ?? (c.target_fps ? `${c.target_fps} fps target` : '—')}</Td>
+                  <Td>
+                    <Badge
+                      tone={
+                        c.status === 'active'
+                          ? 'ok'
+                          : c.status === 'maintenance'
+                            ? 'warn'
+                            : 'neutral'
+                      }
+                    >
+                      {STATUS_LABELS[c.status]}
+                    </Badge>
+                  </Td>
+                  <Td>
+                    <Badge tone={online ? 'ok' : 'warn'}>{online ? 'Online' : 'Offline'}</Badge>
+                  </Td>
+                  <Td>{h?.fps != null ? h.fps.toFixed(1) : c.frame_rate_fps ?? '—'}</Td>
+                  <Td>{h?.latency_ms != null ? `${h.latency_ms}ms` : '—'}</Td>
+                  <Td>{h?.bandwidth_kbps != null ? `${h.bandwidth_kbps}` : '—'}</Td>
+                  <Td>
+                    {h?.cpu_usage_percent != null ? `${h.cpu_usage_percent}%` : '—'}
+                  </Td>
+                  <Td>
+                    {h?.gpu_usage_percent != null ? `${h.gpu_usage_percent}%` : '—'}
+                  </Td>
+                  <Td>{h?.dropped_frames ?? 0}</Td>
+                  <Td>{h?.recognition_events_today ?? c.recognition_count_today ?? 0}</Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" onClick={() => startEdit(c)}>
+                        Edit
+                      </Button>
+                      {c.stream_url && (
+                        <Button
+                          variant="ghost"
+                          disabled={capturing === c.id}
+                          onClick={() => captureFromStream(c.id)}
+                        >
+                          {capturing === c.id ? '…' : 'Test'}
+                        </Button>
+                      )}
+                    </div>
+                  </Td>
+                </tr>
+              )
+            })
           )}
         </TableBody>
       </TableShell>

@@ -101,16 +101,36 @@ export interface Shift {
   is_active: boolean
 }
 
+export interface CameraHealth {
+  online: boolean
+  fps: number | null
+  latency_ms: number | null
+  bandwidth_kbps: number | null
+  cpu_usage_percent: number | null
+  gpu_usage_percent: number | null
+  dropped_frames: number
+  recognition_events_today: number
+  updated_at?: string
+}
+
 export interface Camera {
   id: number
   name: string
+  camera_type?: string
+  zone?: string
+  floor?: string
   device_id: string
   stream_url?: string
+  target_fps?: number
+  resolution?: string
+  resolution_width?: number
+  resolution_height?: number
   direction: string
   deployment_mode?: 'cloud' | 'edge'
   status: 'active' | 'inactive' | 'maintenance'
   is_active: boolean
   online?: boolean
+  health?: CameraHealth
   frame_rate_fps?: number | null
   last_heartbeat_at?: string
   last_frame_at?: string

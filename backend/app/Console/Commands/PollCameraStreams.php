@@ -44,14 +44,34 @@ class PollCameraStreams extends Command
             $recognition = App::make(RecognitionController::class);
 
             foreach ($cameras as $camera) {
+                $captureStart = microtime(true);
                 $capture = $ai->captureStream($camera->stream_url);
+                $latencyMs = (int) round((microtime(true) - $captureStart) * 1000);
 
                 if (! ($capture['success'] ?? false)) {
+                    $camera->increment('dropped_frames');
                     $this->error("Camera {$camera->id} ({$camera->name}): ".($capture['error'] ?? 'capture failed'));
                     continue;
                 }
 
-                $monitoring->recordFrame($camera, round(1 / max($interval, 1), 2));
+                $bandwidthKbps = null;
+                if (! empty($capture['image']) && $latencyMs > 0) {
+                    $bandwidthKbps = (int) round((strlen($capture['image']) * 8) / $latencyMs);
+                }
+
+                $monitoring->recordHealth($camera, [
+                    'frame_rate_fps' => round(1 / max($interval, 1), 2),
+                    'latency_ms' => $capture['processing_ms'] ?? $latencyMs,
+                    'bandwidth_kbps' => $bandwidthKbps,
+                    'frame_received' => true,
+                ]);
+
+                if (isset($capture['image_width'], $capture['image_height'])) {
+                    $camera->update([
+                        'resolution_width' => $capture['image_width'],
+                        'resolution_height' => $capture['image_height'],
+                    ]);
+                }
 
                 $request = Request::create('/api/v1/recognition/identify', 'POST', [
                     'image' => $capture['image'],
