@@ -59,6 +59,13 @@ class ReportController extends Controller
             ->orderByDesc('recognized_at')
             ->paginate($request->integer('per_page', 50));
 
+        $events->getCollection()->transform(function (RecognitionEvent $event) {
+            $data = $event->toArray();
+            $data['snapshot_url'] = $event->snapshotUrl();
+
+            return $data;
+        });
+
         return response()->json($events);
     }
 

@@ -89,3 +89,16 @@ class EnrollBatchResponse(BaseModel):
     accepted_count: int | None = None
     error: str | None = None
     processing_ms: int | None = None
+
+
+class StreamCaptureRequest(BaseModel):
+    stream_url: str = Field(..., description="RTSP, HTTP, or other OpenCV-supported URL")
+
+
+class StreamCaptureResponse(BaseModel):
+    success: bool = True
+    image: str | None = None
+    image_width: int | None = None
+    image_height: int | None = None
+    processing_ms: int = 0
+    error: str | None = None

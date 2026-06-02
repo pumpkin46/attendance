@@ -156,6 +156,7 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           image: frame,
           camera_id: cameraId ? Number(cameraId) : undefined,
           require_liveness: requireLiveness,
+          source: 'webcam',
         })
         setIdentifyMs(data.processing_ms ?? 0)
         setLastMatch(data)

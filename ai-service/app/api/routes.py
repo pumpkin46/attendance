@@ -10,10 +10,13 @@ from app.schemas.recognition import (
     EnrollResponse,
     IdentifyRequest,
     IdentifyResponse,
+    StreamCaptureRequest,
+    StreamCaptureResponse,
     ValidateImageRequest,
     ValidateImageResponse,
 )
 from app.services import face_service
+from app.services.stream_capture import capture_stream_frame
 
 router = APIRouter(prefix="/api/v1")
 
@@ -49,6 +52,14 @@ def identify(req: IdentifyRequest):
 def detect(req: DetectRequest):
     result = face_service.detect_faces(req.image)
     return DetectResponse(**result)
+
+
+@router.post("/capture-stream", response_model=StreamCaptureResponse)
+def capture_stream(req: StreamCaptureRequest):
+    result = capture_stream_frame(req.stream_url)
+    if not result.get("success"):
+        raise HTTPException(422, detail=result.get("error", "Stream capture failed"))
+    return StreamCaptureResponse(**result)
 
 
 @router.post("/delete")

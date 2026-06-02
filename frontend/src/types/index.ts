@@ -48,10 +48,24 @@ export interface Camera {
   id: number
   name: string
   device_id: string
+  stream_url?: string
   direction: string
   is_active: boolean
   last_heartbeat_at?: string
   location?: { id: number; name: string }
+}
+
+export interface RecognitionEvent {
+  id: number
+  camera_id?: number
+  result: string
+  confidence?: number
+  snapshot_path?: string
+  snapshot_url?: string
+  notified_at?: string
+  recognized_at: string
+  metadata?: { source?: string; alert_sent?: boolean }
+  camera?: { id: number; name: string }
 }
 
 export interface Paginated<T> {

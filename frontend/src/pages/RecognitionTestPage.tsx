@@ -45,6 +45,7 @@ export default function RecognitionTestPage() {
         image: preview,
         camera_id: cameraId ? Number(cameraId) : undefined,
         require_liveness: requireLiveness,
+        source: 'upload',
       })
       setResult(data)
     } catch {

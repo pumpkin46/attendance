@@ -10,6 +10,8 @@ use App\Services\AiRecognitionClient;
 use App\Services\AttendanceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class RecognitionController extends Controller
 {
@@ -43,11 +45,13 @@ class RecognitionController extends Controller
             'image' => 'required|string',
             'camera_id' => 'nullable|exists:cameras,id',
             'require_liveness' => 'boolean',
+            'source' => 'nullable|string|in:webcam,upload,rtsp,ip_camera',
         ]);
 
         $camera = isset($data['camera_id']) ? Camera::find($data['camera_id']) : null;
         $threshold = config('services.ai.threshold', 0.95);
         $requireLiveness = $data['require_liveness'] ?? true;
+        $source = $data['source'] ?? ($camera?->stream_url ? 'rtsp' : 'upload');
 
         $result = $this->ai->identify($data['image'], $requireLiveness);
 
@@ -61,8 +65,6 @@ class RecognitionController extends Controller
         $imageHash = hash('sha256', $data['image']);
 
         if ($requireLiveness && ! $livenessPassed) {
-            $livenessReason = $result['liveness_reason'] ?? 'liveness_failed';
-
             RecognitionEvent::create([
                 'camera_id' => $camera?->id,
                 'result' => 'liveness_failed',
@@ -71,15 +73,16 @@ class RecognitionController extends Controller
                 'processing_ms' => $processingMs,
                 'image_hash' => $imageHash,
                 'metadata' => [
-                    'liveness_reason' => $livenessReason,
+                    'liveness_reason' => $result['liveness_reason'] ?? 'liveness_failed',
                     'liveness_checks' => $result['liveness_checks'] ?? null,
+                    'source' => $source,
                 ],
                 'recognized_at' => now(),
             ]);
 
             return response()->json([
                 'matched' => false,
-                'reason' => $livenessReason,
+                'reason' => $result['liveness_reason'] ?? 'liveness_failed',
                 'processing_ms' => $processingMs,
                 'liveness_score' => $result['liveness_score'] ?? null,
                 'liveness_checks' => $result['liveness_checks'] ?? null,
@@ -89,22 +92,45 @@ class RecognitionController extends Controller
         $employeeId = $result['employee_id'] ?? null;
 
         if (! $employeeId || $confidence < $threshold) {
-            $this->attendance->recordUnknown($camera, $confidence, $livenessPassed, $processingMs, $imageHash);
+            $event = $this->attendance->recordUnknown(
+                $camera,
+                $confidence,
+                $livenessPassed,
+                $processingMs,
+                $imageHash,
+                $data['image'],
+                $source,
+            );
 
             return response()->json([
                 'matched' => false,
                 'reason' => $employeeId ? 'low_confidence' : 'unknown',
                 'confidence' => $confidence,
                 'processing_ms' => $processingMs,
+                'event_id' => $event->id,
+                'snapshot_url' => $event->snapshotUrl(),
             ]);
         }
 
         $employee = Employee::where('id', $employeeId)->where('is_active', true)->first();
 
         if (! $employee) {
-            $this->attendance->recordUnknown($camera, $confidence, $livenessPassed, $processingMs, $imageHash);
+            $event = $this->attendance->recordUnknown(
+                $camera,
+                $confidence,
+                $livenessPassed,
+                $processingMs,
+                $imageHash,
+                $data['image'],
+                $source,
+            );
 
-            return response()->json(['matched' => false, 'reason' => 'unknown']);
+            return response()->json([
+                'matched' => false,
+                'reason' => 'unknown',
+                'event_id' => $event->id,
+                'snapshot_url' => $event->snapshotUrl(),
+            ]);
         }
 
         $attendanceResult = $this->attendance->processRecognition(
@@ -136,6 +162,41 @@ class RecognitionController extends Controller
             ->orderByDesc('recognized_at')
             ->paginate($request->integer('per_page', 50));
 
+        $events->getCollection()->transform(fn (RecognitionEvent $e) => $this->formatEvent($e));
+
         return response()->json($events);
+    }
+
+    public function snapshot(RecognitionEvent $event): StreamedResponse|JsonResponse
+    {
+        if (! $event->snapshot_path || ! Storage::disk('local')->exists($event->snapshot_path)) {
+            return response()->json(['message' => 'Snapshot not found'], 404);
+        }
+
+        return Storage::disk('local')->response($event->snapshot_path, 'snapshot.jpg', [
+            'Content-Type' => 'image/jpeg',
+        ]);
+    }
+
+    public function unknownSummary(): JsonResponse
+    {
+        $today = now()->toDateString();
+
+        return response()->json([
+            'today' => RecognitionEvent::where('result', 'unknown')
+                ->whereDate('recognized_at', $today)
+                ->count(),
+            'unreviewed' => RecognitionEvent::where('result', 'unknown')
+                ->whereDate('recognized_at', '>=', now()->subDays(7)->toDateString())
+                ->count(),
+        ]);
+    }
+
+    private function formatEvent(RecognitionEvent $event): array
+    {
+        $data = $event->toArray();
+        $data['snapshot_url'] = $event->snapshotUrl();
+
+        return $data;
     }
 }

@@ -13,6 +13,7 @@ import RecognitionTestPage from './pages/RecognitionTestPage'
 import LoginPage from './pages/LoginPage'
 import ReportsPage from './pages/ReportsPage'
 import ShiftsPage from './pages/ShiftsPage'
+import UnknownFacesPage from './pages/UnknownFacesPage'
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="shifts" element={<ShiftsPage />} />
             <Route path="cameras" element={<CamerasPage />} />
             <Route path="reports" element={<ReportsPage />} />
+            <Route path="unknown-faces" element={<UnknownFacesPage />} />
             <Route path="audit-logs" element={<AuditLogsPage />} />
           </Route>
           <Route

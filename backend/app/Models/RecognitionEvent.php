@@ -11,7 +11,8 @@ class RecognitionEvent extends Model
 
     protected $fillable = [
         'camera_id', 'employee_id', 'result', 'confidence',
-        'liveness_passed', 'processing_ms', 'image_hash', 'metadata', 'recognized_at',
+        'liveness_passed', 'processing_ms', 'image_hash', 'snapshot_path',
+        'metadata', 'recognized_at', 'notified_at',
     ];
 
     protected function casts(): array
@@ -21,7 +22,17 @@ class RecognitionEvent extends Model
             'liveness_passed' => 'boolean',
             'metadata' => 'array',
             'recognized_at' => 'datetime',
+            'notified_at' => 'datetime',
         ];
+    }
+
+    public function snapshotUrl(): ?string
+    {
+        if (! $this->snapshot_path) {
+            return null;
+        }
+
+        return url("/api/v1/recognition/events/{$this->id}/snapshot");
     }
 
     public function camera(): BelongsTo

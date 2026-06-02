@@ -90,6 +90,7 @@ ai-service/data/*
 !ai-service/data/.gitkeep
 
 backend/storage/app/enrollment/
+backend/storage/app/unknown-faces/
 
 # Anti-spoof ONNX weights (download via scripts/download_antispoof_model.py)
 ai-service/models/*

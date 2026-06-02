@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\EmployeeController;
 use App\Http\Controllers\Api\FaceEnrollmentController;
 use App\Http\Controllers\Api\HolidayController;
 use App\Http\Controllers\Api\LeaveRequestController;
+use App\Http\Controllers\Api\LocationController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\RecognitionController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ShiftController;
@@ -43,12 +45,22 @@ Route::prefix('v1')->group(function () {
         Route::post('leave-requests', [LeaveRequestController::class, 'store']);
         Route::patch('leave-requests/{leaveRequest}', [LeaveRequestController::class, 'update'])->middleware('permission:leave.approve');
 
+        Route::get('locations', [LocationController::class, 'index']);
+
         Route::apiResource('cameras', CameraController::class)->middleware('permission:cameras.manage');
         Route::post('cameras/{camera}/heartbeat', [CameraController::class, 'heartbeat']);
+        Route::post('cameras/{camera}/capture', [CameraController::class, 'capture'])->middleware('permission:cameras.manage');
 
         Route::post('recognition/detect', [RecognitionController::class, 'detect']);
         Route::post('recognition/identify', [RecognitionController::class, 'identify']);
         Route::get('recognition/events', [RecognitionController::class, 'events'])->middleware('permission:recognition.view');
+        Route::get('recognition/events/{event}/snapshot', [RecognitionController::class, 'snapshot'])->middleware('permission:recognition.view');
+        Route::get('recognition/unknown-summary', [RecognitionController::class, 'unknownSummary'])->middleware('permission:recognition.view');
+
+        Route::get('notifications', [NotificationController::class, 'index']);
+        Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('notifications/{id}/read', [NotificationController::class, 'markRead']);
+        Route::post('notifications/read-all', [NotificationController::class, 'markAllRead']);
 
         Route::get('reports/attendance-summary', [ReportController::class, 'attendanceSummary'])->middleware('permission:reports.view');
         Route::get('reports/overtime', [ReportController::class, 'overtime'])->middleware('permission:reports.view');

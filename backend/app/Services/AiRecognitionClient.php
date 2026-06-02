@@ -42,6 +42,13 @@ class AiRecognitionClient
         return $this->post('/api/v1/detect', ['image' => $imageBase64]);
     }
 
+    public function captureStream(string $streamUrl): array
+    {
+        return $this->post('/api/v1/capture-stream', [
+            'stream_url' => $streamUrl,
+        ]);
+    }
+
     public function deleteEmployee(string $employeeId): array
     {
         return $this->post('/api/v1/delete', ['employee_id' => $employeeId]);

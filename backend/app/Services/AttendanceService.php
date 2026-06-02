@@ -15,7 +15,8 @@ use Illuminate\Support\Facades\DB;
 class AttendanceService
 {
     public function __construct(
-        private readonly AuditService $audit
+        private readonly AuditService $audit,
+        private readonly UnknownFaceService $unknownFaces,
     ) {}
 
     public function processRecognition(
@@ -108,17 +109,24 @@ class AttendanceService
         });
     }
 
-    public function recordUnknown(?Camera $camera, float $confidence, bool $livenessPassed, int $processingMs, string $imageHash): void
-    {
-        RecognitionEvent::create([
-            'camera_id' => $camera?->id,
-            'result' => config('attendance.unknown_person_alert') ? 'unknown' : 'low_confidence',
-            'confidence' => $confidence,
-            'liveness_passed' => $livenessPassed,
-            'processing_ms' => $processingMs,
-            'image_hash' => $imageHash,
-            'recognized_at' => now(),
-        ]);
+    public function recordUnknown(
+        ?Camera $camera,
+        float $confidence,
+        bool $livenessPassed,
+        int $processingMs,
+        string $imageHash,
+        ?string $imageBase64 = null,
+        ?string $source = null,
+    ): RecognitionEvent {
+        return $this->unknownFaces->record(
+            $camera,
+            $confidence,
+            $livenessPassed,
+            $processingMs,
+            $imageHash,
+            $imageBase64,
+            $source,
+        );
     }
 
     public function calculateWorkedTime(AttendanceRecord $record): void
