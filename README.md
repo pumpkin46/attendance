@@ -93,6 +93,7 @@ UI runs at **http://127.0.0.1:5173**
 | Employee Management | CRUD, departments, locations |
 | Face Enrollment | Upload photo → AI embedding → FAISS index |
 | Face Recognition | Identify + liveness → auto attendance |
+| RFID Integration | Card tap at readers → auto check-in/out |
 | Attendance Engine | Check-in/out, duplicate prevention, overtime |
 | Shift Management | Schedules, grace periods, assignments |
 | Reporting | Summary, overtime, CSV export |
@@ -106,6 +107,14 @@ UI runs at **http://127.0.0.1:5173**
 3. Liveness check must pass
 4. Attendance engine records check-in or check-out (60s duplicate window)
 5. Unknown faces logged as alerts
+
+## RFID flow
+
+1. Admin registers an RFID reader (location + direction) and receives a one-time API token
+2. Admin assigns card UIDs to employees in the UI
+3. Physical reader POSTs to `POST /api/v1/rfid/tap` with `Authorization: Bearer <token>` and body `{ "uid": "A1B2C3D4" }`
+4. Laravel looks up the card, records check-in or check-out (60s duplicate window by default)
+5. Unknown or inactive cards are logged in `rfid_events`
 
 ## Security notes
 

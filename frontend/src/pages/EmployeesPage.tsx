@@ -23,7 +23,7 @@ export default function EmployeesPage() {
     <div>
       <PageHeader
         title="Employees"
-        description="Workforce registry and face enrollment status"
+        description="Workforce registry, face enrollment, and RFID card status"
         actions={
           <Input
             className="min-w-56"
@@ -41,12 +41,13 @@ export default function EmployeesPage() {
           <Th>Department</Th>
           <Th>Location</Th>
           <Th>Face enrolled</Th>
+          <Th>RFID card</Th>
           <Th>Status</Th>
         </TableHead>
         {loading ? (
           <TableBody>
             <tr>
-              <Td colSpan={6} className="text-slate-400">
+              <Td colSpan={7} className="text-slate-400">
                 Loading…
               </Td>
             </tr>
@@ -64,6 +65,11 @@ export default function EmployeesPage() {
                 <Td>
                   <Badge tone={e.face_enrolled ? 'ok' : 'warn'}>
                     {e.face_enrolled ? 'Yes' : 'No'}
+                  </Badge>
+                </Td>
+                <Td>
+                  <Badge tone={(e.active_rfid_cards_count ?? 0) > 0 ? 'ok' : 'neutral'}>
+                    {(e.active_rfid_cards_count ?? 0) > 0 ? 'Assigned' : 'None'}
                   </Badge>
                 </Td>
                 <Td>{e.is_active ? 'Active' : 'Inactive'}</Td>

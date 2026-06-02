@@ -13,6 +13,7 @@ import RecognitionTestPage from './pages/RecognitionTestPage'
 import LivenessTestPage from './pages/LivenessTestPage'
 import LoginPage from './pages/LoginPage'
 import ReportsPage from './pages/ReportsPage'
+import RfidPage from './pages/RfidPage'
 import ShiftsPage from './pages/ShiftsPage'
 import UnknownFacesPage from './pages/UnknownFacesPage'
 
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="attendance" element={<AttendancePage />} />
             <Route path="shifts" element={<ShiftsPage />} />
             <Route path="cameras" element={<CamerasPage />} />
+            <Route path="rfid" element={<RfidPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="unknown-faces" element={<UnknownFacesPage />} />
             <Route path="audit-logs" element={<AuditLogsPage />} />

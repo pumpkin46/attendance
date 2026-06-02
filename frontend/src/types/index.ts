@@ -30,7 +30,30 @@ export interface Employee {
   is_active: boolean
   face_enrolled: boolean
   face_enrolled_at?: string
+  active_rfid_cards_count?: number
   location?: { id: number; name: string }
+}
+
+export interface RfidReader {
+  id: number
+  name: string
+  device_id: string
+  direction: 'in' | 'out' | 'both'
+  is_active: boolean
+  online?: boolean
+  last_heartbeat_at?: string
+  taps_today?: number
+  location?: { id: number; name: string }
+}
+
+export interface RfidEvent {
+  id: number
+  uid: string
+  result: string
+  tapped_at: string
+  metadata?: { attendance_action?: string }
+  employee?: { id: number; first_name: string; last_name: string }
+  reader?: { id: number; name: string }
 }
 
 export interface AttendanceRecord {

@@ -59,6 +59,11 @@ class Employee extends Model
         return $this->hasMany(LeaveRequest::class);
     }
 
+    public function rfidCards(): HasMany
+    {
+        return $this->hasMany(RfidCard::class);
+    }
+
     public function getFullNameAttribute(): string
     {
         return trim("{$this->first_name} {$this->last_name}");

@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([
             'permission' => CheckPermission::class,
+            'rfid.reader' => \App\Http\Middleware\AuthenticateRfidReader::class,
         ]);
         if (env('FORCE_HTTPS', false)) {
             $middleware->append(\App\Http\Middleware\ForceHttps::class);

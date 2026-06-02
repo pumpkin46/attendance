@@ -14,6 +14,10 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PrivacyController;
 use App\Http\Controllers\Api\RecognitionController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\RfidCardController;
+use App\Http\Controllers\Api\RfidEventController;
+use App\Http\Controllers\Api\RfidReaderController;
+use App\Http\Controllers\Api\RfidTapController;
 use App\Http\Controllers\Api\ShiftController;
 use Illuminate\Support\Facades\Route;
 
@@ -24,6 +28,8 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::get('/auth/oauth/{provider}/redirect', [AuthController::class, 'oauthRedirect']);
     Route::get('/auth/oauth/{provider}/callback', [AuthController::class, 'oauthCallback']);
+
+    Route::post('/rfid/tap', [RfidTapController::class, 'tap'])->middleware('rfid.reader');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -56,6 +62,17 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('cameras', CameraController::class)->middleware('permission:cameras.manage');
         Route::post('cameras/{camera}/heartbeat', [CameraController::class, 'heartbeat']);
         Route::post('cameras/{camera}/capture', [CameraController::class, 'capture'])->middleware('permission:cameras.manage');
+
+        Route::apiResource('rfid-readers', RfidReaderController::class)->middleware('permission:rfid.manage');
+        Route::post('rfid-readers/{rfid_reader}/regenerate-token', [RfidReaderController::class, 'regenerateToken'])
+            ->middleware('permission:rfid.manage');
+        Route::get('employees/{employee}/rfid-cards', [RfidCardController::class, 'index']);
+        Route::post('employees/{employee}/rfid-cards', [RfidCardController::class, 'store'])
+            ->middleware('permission:rfid.manage');
+        Route::delete('rfid-cards/{rfid_card}', [RfidCardController::class, 'destroy'])
+            ->middleware('permission:rfid.manage');
+        Route::get('rfid-events', [RfidEventController::class, 'index'])->middleware('permission:rfid.manage');
+        Route::post('rfid/simulate', [RfidTapController::class, 'simulate'])->middleware('permission:rfid.manage');
 
         Route::post('recognition/detect', [RecognitionController::class, 'detect']);
         Route::post('recognition/identify', [RecognitionController::class, 'identify']);

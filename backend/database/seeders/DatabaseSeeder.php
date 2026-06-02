@@ -36,6 +36,7 @@ class DatabaseSeeder extends Seeder
             ['name' => 'holidays.manage', 'label' => 'Manage Holidays'],
             ['name' => 'leave.approve', 'label' => 'Approve Leave'],
             ['name' => 'cameras.manage', 'label' => 'Manage Cameras'],
+            ['name' => 'rfid.manage', 'label' => 'Manage RFID'],
             ['name' => 'recognition.view', 'label' => 'View Recognition Events'],
             ['name' => 'reports.view', 'label' => 'View Reports'],
             ['name' => 'reports.export', 'label' => 'Export Reports'],

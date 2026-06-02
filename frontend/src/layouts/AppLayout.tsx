@@ -13,6 +13,7 @@ const nav = [
   { to: '/attendance', label: 'Attendance' },
   { to: '/shifts', label: 'Shifts' },
   { to: '/cameras', label: 'Cameras' },
+  { to: '/rfid', label: 'RFID' },
   { to: '/unknown-faces', label: 'Unknown Faces' },
   { to: '/reports', label: 'Reports' },
   { to: '/audit-logs', label: 'Audit Logs' },

@@ -15,6 +15,7 @@ class EmployeeController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Employee::with(['location', 'organization'])
+            ->withCount(['rfidCards as active_rfid_cards_count' => fn ($q) => $q->where('is_active', true)])
             ->when($request->search, function ($q, $search) {
                 $q->where(function ($inner) use ($search) {
                     $inner->where('first_name', 'ilike', "%{$search}%")
