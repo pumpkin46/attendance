@@ -92,20 +92,20 @@ export default function MonitoringPage() {
           <div className="mb-4 grid grid-cols-2 gap-3 text-sm">
             <div>
               <span className="text-slate-400">Online</span>
-              <p className="text-xl font-semibold text-green-400">{dashboard?.camera_health.online ?? 0}</p>
+              <p className="text-xl font-semibold text-green-400">{dashboard?.camera_health?.online ?? 0}</p>
             </div>
             <div>
               <span className="text-slate-400">Offline</span>
-              <p className="text-xl font-semibold text-amber-400">{dashboard?.camera_health.offline ?? 0}</p>
+              <p className="text-xl font-semibold text-amber-400">{dashboard?.camera_health?.offline ?? 0}</p>
             </div>
             <div>
               <span className="text-slate-400">Avg FPS</span>
-              <p>{dashboard?.camera_health.avg_fps?.toFixed(1) ?? '—'}</p>
+              <p>{dashboard?.camera_health?.avg_fps?.toFixed(1) ?? '—'}</p>
             </div>
             <div>
               <span className="text-slate-400">Avg latency</span>
               <p>
-                {dashboard?.camera_health.avg_latency_ms != null
+                {dashboard?.camera_health?.avg_latency_ms != null
                   ? `${dashboard.camera_health.avg_latency_ms} ms`
                   : '—'}
               </p>

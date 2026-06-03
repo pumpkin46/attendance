@@ -21,7 +21,7 @@ export default function UnknownFacesPage() {
       .get<Paginated<RecognitionEvent>>('/reports/unknown-persons', {
         params: { date_from: dateFrom, date_to: dateTo, per_page: 50 },
       })
-      .then((r) => setEvents(r.data.data))
+      .then((r) => setEvents(r.data.data ?? []))
   }, [dateFrom, dateTo])
 
   return (

@@ -8,7 +8,7 @@ export function StatCard({
 }: {
   label: string
   value: React.ReactNode
-  tone?: 'warn' | 'danger'
+  tone?: 'ok' | 'warn' | 'danger'
 }) {
   return (
     <Card>
@@ -16,6 +16,7 @@ export function StatCard({
       <span
         className={cn(
           'mt-1 block text-3xl font-semibold',
+          tone === 'ok' && 'text-emerald-400',
           tone === 'warn' && 'text-amber-400',
           tone === 'danger' && 'text-red-400'
         )}

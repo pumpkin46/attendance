@@ -65,9 +65,9 @@ export default function SecurityTenancyPage() {
     if (hasPermission('security.view')) {
       api.get<SecurityConfig>('/security/config').then((r) => setSecurity(r.data)).catch(() => {})
     }
-    api.get<Organization[]>('/organizations').then((r) => setOrganizations(r.data))
-    api.get<Branch[]>('/branches').then((r) => setBranches(r.data))
-    api.get<Department[]>('/departments').then((r) => setDepartments(r.data))
+    api.get<Organization[]>('/organizations').then((r) => setOrganizations(r.data ?? []))
+    api.get<Branch[]>('/branches').then((r) => setBranches(r.data ?? []))
+    api.get<Department[]>('/departments').then((r) => setDepartments(r.data ?? []))
   }, [hasPermission])
 
   const applyTenantHeader = () => {
@@ -121,35 +121,35 @@ export default function SecurityTenancyPage() {
           <Card>
             <h2 className="mb-2 text-sm font-semibold">Authentication</h2>
             <ul className="space-y-1 text-xs text-slate-400">
-              <li>JWT (Sanctum Bearer): {security.authentication.jwt.enabled ? 'enabled' : 'off'}</li>
+              <li>JWT (Sanctum Bearer): {security.authentication?.jwt?.enabled ? 'enabled' : 'off'}</li>
               <li>
-                OAuth2: {security.authentication.oauth2.enabled ? 'enabled' : 'off'} (
-                {security.authentication.oauth2.providers.join(', ')})
+                OAuth2: {security.authentication?.oauth2?.enabled ? 'enabled' : 'off'} (
+                {(security.authentication?.oauth2?.providers ?? []).join(', ')})
               </li>
-              <li>SAML: {security.authentication.saml.enabled ? 'enabled' : 'off'}</li>
-              <li>LDAP / AD: {security.authentication.ldap.enabled ? 'enabled' : 'off'}</li>
+              <li>SAML: {security.authentication?.saml?.enabled ? 'enabled' : 'off'}</li>
+              <li>LDAP / AD: {security.authentication?.ldap?.enabled ? 'enabled' : 'off'}</li>
             </ul>
           </Card>
           <Card>
             <h2 className="mb-2 text-sm font-semibold">Encryption & secrets</h2>
             <ul className="space-y-1 text-xs text-slate-400">
-              <li>In transit: TLS {security.encryption.in_transit.protocol}</li>
-              <li>At rest: {security.encryption.at_rest.cipher}</li>
+              <li>In transit: TLS {security.encryption?.in_transit?.protocol ?? '—'}</li>
+              <li>At rest: {security.encryption?.at_rest?.cipher ?? '—'}</li>
               <li>
-                Secrets driver: {security.encryption.secrets.driver}
-                {security.encryption.secrets.vault_configured && ' · Vault'}
-                {security.encryption.secrets.kms_configured && ' · KMS'}
+                Secrets driver: {security.encryption?.secrets?.driver ?? '—'}
+                {security.encryption?.secrets?.vault_configured && ' · Vault'}
+                {security.encryption?.secrets?.kms_configured && ' · KMS'}
               </li>
               <li>
                 Tenant isolation:{' '}
-                {security.tenancy.isolation_enabled ? 'mandatory' : 'disabled'}
+                {security.tenancy?.isolation_enabled ? 'mandatory' : 'disabled'}
               </li>
             </ul>
           </Card>
           <Card className="md:col-span-2">
             <h2 className="mb-2 text-sm font-semibold">RBAC roles</h2>
             <div className="flex flex-wrap gap-2">
-              {Object.entries(security.authorization.roles).map(([key, label]) => (
+              {Object.entries(security.authorization?.roles ?? {}).map(([key, label]) => (
                 <span key={key} className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
                   {label}
                 </span>
@@ -190,7 +190,7 @@ export default function SecurityTenancyPage() {
           <Th>Employees</Th>
         </TableHead>
         <TableBody>
-          {organizations.map((o) => (
+          {(organizations ?? []).map((o) => (
             <tr key={o.id}>
               <Td>{o.name}</Td>
               <Td>{o.code}</Td>
@@ -210,7 +210,7 @@ export default function SecurityTenancyPage() {
           <Th>Org ID</Th>
         </TableHead>
         <TableBody>
-          {branches.map((b) => (
+          {(branches ?? []).map((b) => (
             <tr key={b.id}>
               <Td>{b.name}</Td>
               <Td>{b.code}</Td>
@@ -228,7 +228,7 @@ export default function SecurityTenancyPage() {
           <Th>Branch</Th>
         </TableHead>
         <TableBody>
-          {departments.map((d) => (
+          {(departments ?? []).map((d) => (
             <tr key={d.id}>
               <Td>{d.name}</Td>
               <Td>{d.code}</Td>

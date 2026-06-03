@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Label } from '../components/ui/Label'
+import { AppLogo } from '../components/AppLogo'
 import { Card } from '../components/ui/Card'
 
 export default function LoginPage() {
@@ -32,8 +33,13 @@ export default function LoginPage() {
     <div className="grid min-h-screen place-items-center bg-[radial-gradient(ellipse_at_top,_#1e3a5f_0%,_#020617_60%)]">
       <Card className="w-full max-w-md">
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-          <h1 className="text-xl font-semibold">Attendance Platform</h1>
-          <p className="text-sm text-slate-400">Enterprise face recognition attendance</p>
+          <div className="flex flex-col items-center gap-3 pb-2 text-center">
+            <AppLogo size="lg" />
+            <div>
+              <h1 className="text-xl font-semibold">Attendance Platform</h1>
+              <p className="text-sm text-slate-400">Enterprise face recognition attendance</p>
+            </div>
+          </div>
           {error && (
             <div className="rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-400">{error}</div>
           )}

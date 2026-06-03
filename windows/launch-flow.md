@@ -1,62 +1,50 @@
 ## Windows launcher: startup order + health checks
 
-This project runs as a local multi-process stack:
+This project runs as a local multi-process stack on Windows:
 
-- **Database**: SQLite by default; optional PostgreSQL (`127.0.0.1:5432`)
-- **Cache/queue**: file/sync by default; optional Redis (`127.0.0.1:6379`)
-- **Laravel backend** (default `http://127.0.0.1:8000`)
-- **FastAPI ai-service** (default `http://127.0.0.1:8001`)
-- **React UI** (default `http://127.0.0.1:5173`) with `VITE_API_URL=http://127.0.0.1:8000/api/v1`
+- **PostgreSQL** (`127.0.0.1:5432`) — required for default installer config
+- **Redis** (`127.0.0.1:6379`) — required for default installer config
+- **Python backend + AI** (FastAPI, `http://127.0.0.1:8000`)
+- **nginx** (`http://attendance.local`) — serves `frontend/dist`, proxies `/api/` to port 8000
 
-The Windows tray launcher should treat **backend + ai-service + UI** as the “app”. PostgreSQL/Redis are **optional**: if present, enable them; otherwise run with SQLite + file/sync drivers.
+The Windows tray launcher treats **backend + nginx** as the “app”. PostgreSQL and Redis are installed separately (installer wizard or pre-existing).
 
 ### Ports (defaults)
 
-- Backend: `8000`
-- AI service: `8001`
-- UI: `5173` (note: frontend dev server also uses 5173 in `frontend/vite.config.ts`)
+- Backend (uvicorn): `8000`
+- UI (nginx): `80` on `attendance.local` (`127.0.0.1`)
 
 ### Startup sequence (recommended)
 
-1. **(Optional) Detect Postgres**
-   - If `127.0.0.1:5432` is reachable and credentials are configured, use PostgreSQL.
-   - Otherwise default to SQLite (`backend/database/database.sqlite`).
+1. **Verify PostgreSQL**
+   - `127.0.0.1:5432` must be reachable (installed by wizard or already present).
 
-2. **(Optional) Detect Redis**
-   - If `127.0.0.1:6379` is reachable, enable redis cache/queue/session.
-   - Otherwise use file/sync drivers.
+2. **Verify Redis**
+   - `127.0.0.1:6379` must be reachable.
 
 3. **Prepare backend config**
-   - Ensure `backend/.env` exists (copy from `backend/.env.example` if needed).
-   - Ensure `APP_KEY` exists (if empty, run `php artisan key:generate`).
-   - Ensure DB + optional Redis settings are correct for the detected runtime.
-   - Ensure `AI_SERVICE_URL=http://127.0.0.1:8001`.
+   - Ensure `backend/.env` exists (copy from `.env.example` if needed).
+   - Set `DATABASE_URL`, `REDIS_URL`, and `JWT_SECRET` as needed.
 
 4. **Initialize/upgrade database (one-time)**
-   - Run `php artisan migrate --seed` (idempotent).
+   - Run `alembic upgrade head` and `python seed.py` (idempotent).
    - If migrations fail, surface logs and stop.
 
-5. **Start AI service (FastAPI)**
-   - Command (from `ai-service/` with venv activated):
-     - `uvicorn main:app --host 127.0.0.1 --port 8001`
-   - Health check: `GET http://127.0.0.1:8001/health` expects JSON with `"status":"ok"`.
+5. **Start backend (FastAPI)**
+   - Command (from `backend/` with venv activated):
+     - `uvicorn main:app --host 127.0.0.1 --port 8000`
+   - Health check: `GET http://127.0.0.1:8000/up`
 
-6. **Start backend (Laravel)**
-   - Command (from `backend/`):
-     - `php artisan serve --host 127.0.0.1 --port 8000`
-   - Health check: `GET http://127.0.0.1:8000/up` (Laravel health endpoint) OR `GET http://127.0.0.1:8000/api/v1/health` if present.
-
-7. **Start UI**
-   - Preferred for “installed” app: serve `frontend/dist` as static files on `127.0.0.1:5173`.
-   - Health check: HTTP `GET http://127.0.0.1:5173/` returns `200`.
-   - Open default browser to `http://127.0.0.1:5173`.
+6. **Start nginx**
+   - `nginx.exe -c conf/nginx.conf` from `windows/runtime/nginx`
+   - Health check: `GET http://attendance.local/` returns `200`
+   - Open default browser to `http://attendance.local`
 
 ### Shutdown sequence (recommended)
 
-1. Stop UI static server
-2. Stop backend
-3. Stop AI service
-4. No DB/cache processes are required. If the machine has Postgres/Redis, the launcher should not stop them.
+1. Stop nginx (`nginx -s quit`)
+2. Stop uvicorn / Python backend process
+3. Do not stop PostgreSQL or Redis (shared services).
 
 ### Process supervision + logging
 
@@ -66,4 +54,3 @@ The Windows tray launcher should treat **backend + ai-service + UI** as the “a
   - Keep launcher running
   - Provide “View logs” action
   - Provide “Restart” action
-

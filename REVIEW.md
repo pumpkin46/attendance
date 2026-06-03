@@ -1,13 +1,15 @@
 # AI Attendance Platform — Project Review
 
+> **Note:** The Laravel PHP backend was removed; the API and attendance logic now live in `backend/` (FastAPI). Sections below that mention PHP/Laravel are historical.
+
 **Review date:** 2026-06-01  
-**Scope:** Monorepo (`backend`, `frontend`, `ai-service`, `edge-agent`, `scripts`)
+**Scope:** Monorepo (`frontend`, `backend`, `scripts`)
 
 ---
 
 ## Executive summary
 
-This is a **feature-rich, enterprise-oriented attendance platform** with face recognition, RFID, edge inference, visitor kiosks, smart-building hooks, and security monitoring. Architecture is clear: **Laravel owns attendance and business rules**; **FastAPI handles embeddings only**; **React provides the admin UI**.
+This is a **feature-rich, enterprise-oriented attendance platform** with face recognition, RFID, edge inference, visitor kiosks, smart-building hooks, and security monitoring. Architecture: **FastAPI (`backend/`)** provides the REST API, attendance engine, and face recognition; **React** provides the admin UI.
 
 The codebase is substantial (~110 PHP application files, ~35 Eloquent models, 18 migrations, 24+ UI pages, ~3,600 lines in backend services alone) and well documented in the root `README.md`. The main gaps for production readiness are **automated tests**, **CI/CD**, and **hardening the AI service network boundary**.
 
@@ -38,7 +40,7 @@ The codebase is substantial (~110 PHP application files, ~35 Eloquent models, 18
                     ▲
                     │  match results only (no images)
              ┌──────┴──────┐
-             │ edge-agent  │ ──► local ai-service on camera site
+             │ edge camera │ ──► optional local backend on camera site
              └─────────────┘
 ```
 
@@ -100,10 +102,10 @@ The codebase is substantial (~110 PHP application files, ~35 Eloquent models, 18
 - **CORS allows `*`** with `allow_credentials=True` in `main.py`.
 - Service should be **network-isolated** (localhost/VPC only, reachable by Laravel and edge sync). Do not expose port 8001 to the public internet.
 
-### Edge agent
+### Edge cameras (no separate agent package)
 
-- Small, focused Python client (`local_ai.py`) for health, identify, stream capture, and embedding sync.
-- Aligns with privacy story: images stay on device; only match metadata goes to Laravel `/api/v1/edge/report`.
+- **Edge deployment mode** on cameras: run a local `backend` on hardware; sync embeddings via export/import APIs.
+- The standalone `edge-agent` package was removed from the repo.
 
 ---
 
@@ -139,7 +141,7 @@ The codebase is substantial (~110 PHP application files, ~35 Eloquent models, 18
 
 | Signal | Finding |
 |--------|---------|
-| TODO / FIXME | None found in `backend/app`, `frontend/src`, `ai-service/app` (quick scan) |
+| TODO / FIXME | None found in `backend/app`, `frontend/src` (quick scan) |
 | Layering | Consistent service injection in controllers |
 | Config | Extensive `.env.example` with NFR, GDPR, RFID, edge, visitor, building sections |
 | Lock files | `composer.lock` and `package-lock.json` present |
@@ -200,7 +202,7 @@ The codebase is substantial (~110 PHP application files, ~35 Eloquent models, 18
 | Attendance engine | Yes | `AttendanceService`, policies, shifts |
 | Anomaly detection | Yes | `AttendanceAnomalyService`, AI `anomaly_detector` |
 | Cameras & monitoring | Yes | `CameraController`, poll command |
-| Edge AI | Yes | Edge controllers, agent, embedding sync |
+| Edge cameras | Partial | Edge deployment mode + embedding sync APIs (no edge-agent package) |
 | Visitor kiosks | Yes | Kiosk API + public `/visitor-kiosk` route |
 | Smart building | Yes | `BuildingIntegrationController` |
 | Security monitoring | Yes | Alerts, acknowledge/resolve |

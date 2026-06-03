@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import Depends, Header, HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.security import decode_access_token, hash_device_token
+from app.models.user import User, Role
+
+
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    token = auth[7:]
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    stmt = (
+        select(User)
+        .options(selectinload(User.roles).selectinload(Role.permissions))
+        .where(User.id == int(user_id), User.is_active == True)  # noqa: E712
+    )
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
+
+
+CurrentUser = Annotated[User, Depends(get_current_user)]
+DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def require_permission(permission_name: str):
+    async def checker(user: Annotated[User, Depends(get_current_user)]) -> User:
+        if user.has_role(settings.super_admin_role):
+            return user
+        if not user.has_permission(permission_name):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission required: {permission_name}",
+            )
+        return user
+
+    return Annotated[User, Depends(checker)]
+
+
+async def get_tenant_org_id(
+    request: Request,
+    user: CurrentUser,
+) -> int | None:
+    if user.has_role(settings.super_admin_role):
+        header_val = request.headers.get(settings.tenant_header)
+        if header_val:
+            return int(header_val)
+        return None
+    return user.organization_id
+
+
+TenantOrgId = Annotated[int | None, Depends(get_tenant_org_id)]
+
+
+async def get_rfid_reader(
+    request: Request,
+    db: DbSession,
+):
+    from app.models.rfid import RfidReader
+
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing device token")
+    token_hash = hash_device_token(auth[7:])
+    stmt = select(RfidReader).where(RfidReader.api_token == token_hash, RfidReader.is_active == True)  # noqa: E712
+    result = await db.execute(stmt)
+    reader = result.scalar_one_or_none()
+    if reader is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid RFID reader token")
+    return reader
+
+
+async def get_visitor_kiosk(
+    request: Request,
+    db: DbSession,
+):
+    from app.models.visitor import VisitorKiosk
+
+    auth = request.headers.get("Authorization", "")
+    token = request.query_params.get("kiosk_token")
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing kiosk token")
+    token_hash = hash_device_token(token)
+    stmt = select(VisitorKiosk).where(VisitorKiosk.api_token == token_hash, VisitorKiosk.is_active == True)  # noqa: E712
+    result = await db.execute(stmt)
+    kiosk = result.scalar_one_or_none()
+    if kiosk is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid kiosk token")
+    return kiosk

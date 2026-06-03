@@ -16,7 +16,14 @@ interface Shift {
 }
 
 interface AttendanceConfig {
-  shift_types: Record<string, { label: string; example?: string; slots?: string[] }>
+  shift_types?: Record<string, { label: string; example?: string; description?: string; slots?: string[] }>
+}
+
+const SHIFT_TYPE_FALLBACK: AttendanceConfig['shift_types'] = {
+  fixed: { label: 'Fixed Shift', example: '09:00–18:00' },
+  rotational: { label: 'Rotational Shift', slots: ['morning', 'evening', 'night'] },
+  flexible: { label: 'Flexible Shift', description: 'Employee defines start time' },
+  split: { label: 'Split Shift', example: '08:00–12:00, 14:00–18:00' },
 }
 
 export default function ShiftsPage() {
@@ -27,6 +34,8 @@ export default function ShiftsPage() {
     api.get<Shift[]>('/shifts').then((r) => setShifts(r.data))
     api.get<AttendanceConfig>('/attendance/config').then((r) => setConfig(r.data))
   }, [])
+
+  const shiftTypes = config?.shift_types ?? SHIFT_TYPE_FALLBACK
 
   const formatSchedule = (s: Shift) => {
     if (s.type === 'split' && s.segments?.length) {
@@ -42,19 +51,17 @@ export default function ShiftsPage() {
         description="Fixed, rotational, flexible, and split shift schedules with policy-linked grace and work-hour rules."
       />
 
-      {config && (
-        <div className="mb-6 flex flex-wrap gap-2">
-          {Object.entries(config.shift_types).map(([key, meta]) => (
-            <span
-              key={key}
-              className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300"
-              title={meta.example}
-            >
-              {meta.label}
-            </span>
-          ))}
-        </div>
-      )}
+      <div className="mb-6 flex flex-wrap gap-2">
+        {Object.entries(shiftTypes).map(([key, meta]) => (
+          <span
+            key={key}
+            className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300"
+            title={meta.example ?? meta.description}
+          >
+            {meta.label}
+          </span>
+        ))}
+      </div>
 
       <TableShell>
         <TableHead>

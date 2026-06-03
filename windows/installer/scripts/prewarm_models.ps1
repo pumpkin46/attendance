@@ -7,17 +7,17 @@ $ErrorActionPreference = "Stop"
 
 function Write-Step($msg) { Write-Host "==> $msg" }
 
-$ai = Join-Path $InstallRoot "ai-service"
+$backend = Join-Path $InstallRoot "backend"
 
-if (-not (Test-Path $ai)) {
-  Write-Host "ai-service not found, skipping model prewarm"
+if (-not (Test-Path $backend)) {
+  Write-Host "backend not found, skipping model prewarm"
   exit 0
 }
 
-Push-Location $ai
+Push-Location $backend
 try {
   if (-not (Test-Path ".\.venv\Scripts\python.exe")) {
-    Write-Host "ai-service venv not found, skipping model prewarm"
+    Write-Host "backend venv not found, skipping model prewarm"
     exit 0
   }
 
@@ -37,4 +37,3 @@ print('insightface_ready', app is not None)
 } catch {
   Write-Host "Model prewarm failed (non-fatal): $($_.Exception.Message)"
 } finally { Pop-Location }
-

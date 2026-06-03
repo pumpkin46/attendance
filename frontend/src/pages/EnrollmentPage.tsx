@@ -13,11 +13,11 @@ import type { Employee, Paginated } from '../types'
 interface EnrollmentConfig {
   mode: string
   required_poses: string[]
-  pose_labels: Record<string, string>
+  pose_labels?: Record<string, string>
   min_images: number
   max_images: number
   retain_raw_images: boolean
-  quality_rules: Record<string, boolean>
+  quality_thresholds?: Record<string, number>
 }
 
 interface PoseCapture {
@@ -63,7 +63,7 @@ export default function EnrollmentPage() {
 
   const requiredPoses = config?.required_poses ?? []
   const currentPose = requiredPoses[stepIndex] ?? requiredPoses[0]
-  const currentLabel = config?.pose_labels[currentPose] ?? currentPose
+  const currentLabel = config?.pose_labels?.[currentPose] ?? currentPose?.replace(/_/g, ' ') ?? ''
 
   useEffect(() => {
     api.get<Paginated<Employee>>('/employees', { params: { per_page: 100, is_active: true } })

@@ -6,6 +6,7 @@ import { Input, Select } from '../components/ui/Input'
 import { Label } from '../components/ui/Label'
 import { PageHeader } from '../components/ui/PageHeader'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
+import type { Paginated } from '../types'
 
 interface AccessPoint {
   id: number
@@ -35,7 +36,14 @@ export default function AccessControlPage() {
     camera_id: '',
   })
 
-  const load = () => api.get<AccessPoint[]>('/access-points').then((r) => setPoints(r.data))
+  const load = () =>
+    api
+      .get<AccessPoint[] | Paginated<AccessPoint>>('/access-points')
+      .then((r) => {
+        const payload = r.data
+        setPoints(Array.isArray(payload) ? payload : (payload.data ?? []))
+      })
+      .catch(() => setPoints([]))
 
   useEffect(() => {
     load()

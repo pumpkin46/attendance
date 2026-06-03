@@ -56,27 +56,6 @@ export interface RfidEvent {
   reader?: { id: number; name: string }
 }
 
-export interface EdgeDevice {
-  id: number
-  name: string
-  device_id: string
-  stream_url?: string
-  local_ai_url: string
-  status: 'pending' | 'online' | 'offline' | 'error'
-  is_active: boolean
-  online?: boolean
-  poll_interval_seconds: number
-  require_liveness: boolean
-  recognition_threshold?: number
-  sync_version?: string
-  last_sync_at?: string
-  last_heartbeat_at?: string
-  frame_rate_fps?: number | null
-  software_version?: string
-  location?: { id: number; name: string }
-  camera?: { id: number; name: string; deployment_mode?: string }
-}
-
 export interface AttendanceRecord {
   id: number
   work_date: string

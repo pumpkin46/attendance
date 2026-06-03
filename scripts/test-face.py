@@ -6,7 +6,7 @@ Usage:
   python scripts/test-face.py path/to/photo.jpg
   python scripts/test-face.py path/to/photo.jpg --employee-id 1
 
-Requires: backend (8000), ai-service (8001) running.
+Requires: backend on http://127.0.0.1:8000
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ except ImportError:
     pass
 
 API_BASE = "http://127.0.0.1:8000/api/v1"
-AI_BASE = "http://127.0.0.1:8001"
+SERVICE_BASE = "http://127.0.0.1:8000"
 EMAIL = "admin@attendance.local"
 PASSWORD = "password"
 
@@ -59,7 +59,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Test face enroll + identify")
     parser.add_argument("image", type=Path, help="Path to face photo (jpg/png)")
     parser.add_argument("--employee-id", type=int, default=1, help="Employee ID (default: 1)")
-    parser.add_argument("--ai-only", action="store_true", help="Test AI service only (no Laravel)")
+    parser.add_argument("--ai-only", action="store_true", help="Test recognition endpoints only (no auth)")
     args = parser.parse_args()
 
     if not args.image.is_file():
@@ -69,20 +69,20 @@ def main() -> None:
     image_b64 = image_to_base64(args.image)
     emp_id = str(args.employee_id)
 
-    print("1. AI service health...")
-    health = request("GET", f"{AI_BASE}/health")
+    print("1. Service health...")
+    health = request("GET", f"{SERVICE_BASE}/health")
     print(f"   {json.dumps(health, indent=2)}")
 
     if args.ai_only:
         print("\n2. Enroll (AI direct)...")
-        enroll = request("POST", f"{AI_BASE}/api/v1/enroll", {
+        enroll = request("POST", f"{API_BASE}/enroll", {
             "employee_id": emp_id,
             "image": image_b64,
         })
         print(f"   {json.dumps(enroll, indent=2)}")
 
         print("\n3. Identify (AI direct)...")
-        identify = request("POST", f"{AI_BASE}/api/v1/identify", {
+        identify = request("POST", f"{API_BASE}/identify", {
             "image": image_b64,
             "require_liveness": True,
         })

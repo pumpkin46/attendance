@@ -57,9 +57,9 @@ export default function DashboardPage() {
       .get<{ data: AppNotification[] }>('/notifications', { params: { unread_only: true, per_page: 5 } })
       .then((r) => setNotifications(r.data.data))
       .catch(() => {})
-    fetch('http://127.0.0.1:8001/health')
-      .then((r) => r.json())
-      .then(setAiHealth)
+    api
+      .get<Record<string, unknown>>('/health')
+      .then((r) => setAiHealth(r.data))
       .catch(() => setAiHealth({ status: 'unavailable' }))
 
     const timer = setInterval(() => {
@@ -148,7 +148,7 @@ export default function DashboardPage() {
             </li>
             <li className="flex items-center justify-between py-3">
               <span>AI recognition service</span>
-              <Badge tone={aiHealth?.status === 'ok' ? 'ok' : 'warn'}>
+              <Badge tone={aiHealth?.status === 'healthy' ? 'ok' : 'warn'}>
                 {String(aiHealth?.status ?? 'checking')}
               </Badge>
             </li>

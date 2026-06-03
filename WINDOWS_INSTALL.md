@@ -1,10 +1,9 @@
 # Windows install (EXE setup)
 
-This repo is a multi-service local stack:
+This repo runs as a local stack on Windows:
 
-- `backend/` (Laravel API, default `http://127.0.0.1:8000`)
-- `ai-service/` (FastAPI, default `http://127.0.0.1:8001`)
-- `frontend/` (React UI, served locally on `http://127.0.0.1:5173`)
+- `backend/` — Python API + face recognition (FastAPI, default `http://127.0.0.1:8000`)
+- `frontend/` — React UI, served via nginx at `http://attendance.local`
 
 To make it feel like a single “Windows app”, we ship:
 
@@ -13,15 +12,14 @@ To make it feel like a single “Windows app”, we ship:
 
 ## What gets installed
 
-Installed to: `%ProgramFiles%\\Attendance Platform\\` (default)
+Installed to: `%ProgramFiles%\Attendance Platform\` (default)
 
-- App code: `backend/`, `frontend/`, `ai-service/`\n+- Tray launcher: `launcher/AttendanceLauncher.exe`\n+- Bootstrap scripts: `windows/scripts/*.ps1`
-- App code: `backend/`, `frontend/`, `ai-service/`
+- App code: `frontend/`, `backend/`
 - Tray launcher: `launcher/AttendanceLauncher.exe`
 - Bootstrap scripts: `windows/scripts/*.ps1`
 
 Logs are written to:
-`%LOCALAPPDATA%\\AttendancePlatform\\logs\\`
+`%LOCALAPPDATA%\AttendancePlatform\logs\`
 
 ## Installer entrypoint
 
@@ -34,21 +32,16 @@ Logs are written to:
 `bootstrap.ps1` runs these steps (idempotent):
 
 1. `install_prereqs.ps1`
-   - placeholder for bundling/installing:
-     - PHP + Composer
-     - Python
-     - Node.js (build-time)
-   - PostgreSQL and Redis are **required**, but the installer UI can optionally install them for you.
+   - Python (optional via installer UI)
+   - PostgreSQL and Redis (optional via installer UI; **required** for production config)
+   - nginx (extracted for UI + API reverse proxy)
 2. `build_app.ps1`
-   - `backend`: `composer install`
-   - `frontend`: `npm ci && npm run build` (creates `frontend/dist`)
-   - `ai-service`: create venv + `pip install -r requirements.txt`
+   - Verifies `frontend/dist` exists (built at packaging time)
+   - `backend`: create venv + `pip install -r requirements.txt`
 3. `configure_and_migrate.ps1`
-   - creates/updates `backend/.env` from `backend/.env.example`
-   - ensures `AI_SERVICE_URL=http://127.0.0.1:8001`
-   - requires PostgreSQL + Redis to be running on localhost
-   - `php artisan key:generate` (if missing)
-   - `php artisan migrate --seed --force`
+   - creates/updates `backend/.env` from `.env.example`
+   - requires PostgreSQL + Redis on localhost (or install them via the wizard)
+   - `alembic upgrade head` + `seed.py`
 4. `prewarm_models.ps1` (best-effort)
    - downloads anti-spoof ONNX model
    - warms InsightFace weights
@@ -57,17 +50,40 @@ Logs are written to:
 
 Launch **Attendance Platform** from the Start Menu. The tray app will:
 
-- Start ai-service: `uvicorn main:app --host 127.0.0.1 --port 8001`
-- Start backend: `php artisan serve --host 127.0.0.1 --port 8000`
-- Serve UI from `frontend/dist` via Python’s `http.server` on port `5173`
-- Open your browser to `http://127.0.0.1:5173`
+- Start backend: `uvicorn main:app --host 127.0.0.1 --port 8000`
+- Start nginx: serves `frontend/dist` and proxies `/api/` to the Python backend
+- Open your browser to `http://attendance.local`
+
+### Bundled Python (no system install required)
+
+The launcher prefers:
+
+- `windows/runtime/python/python.exe` (installed by the setup wizard)
+
+If missing, it falls back to:
+
+- `backend/.venv/Scripts/python.exe` (created during install)
+
+### Node.js on end-user PCs
+
+End users do **not** need Node.js. The installer expects `frontend/dist` to be included in the package (prebuilt).
+
+### Offline prerequisites to bundle
+
+To support offline installation on a clean PC, place these files before compiling the setup EXE:
+
+- `windows/installer/prereqs/python/python-3.14.4-amd64.exe`
+- `windows/installer/prereqs/nginx/nginx-1.30.2.zip`
+- `windows/installer/prereqs/redis/memurai.msi` (Redis-compatible for Windows)
+- `windows/installer/prereqs/postgresql/postgresql-installer.exe`
 
 ## Rebuilding the installer
 
-1. Build the launcher:
+1. Build the frontend (`cd frontend && npm ci && npm run build`).
+2. Build the launcher:
    - `dotnet build -c Release windows/launcher/AttendanceLauncher.sln`
-2. Open `windows/installer/inno/attendance.iss` in **Inno Setup Compiler**
-3. Compile → produces `AttendancePlatformSetup.exe`
+3. Open `windows/installer/inno/attendance.iss` in **Inno Setup Compiler**
+4. Compile → produces `AttendancePlatformSetup.exe`
 
 ## One-command build
 
@@ -82,4 +98,3 @@ If `ISCC.exe` is not on PATH, pass it explicitly:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File windows/build-installer.ps1 -InnoSetupIsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 ```
-

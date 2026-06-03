@@ -7,6 +7,7 @@ import { Label } from '../components/ui/Label'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Badge } from '../components/ui/Badge'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
+import type { Paginated } from '../types'
 
 interface VisitorKiosk {
   id: number
@@ -24,7 +25,14 @@ export default function VisitorKiosksPage() {
   const [form, setForm] = useState({ organization_id: '1', name: '' })
   const [lastToken, setLastToken] = useState<{ url: string; token: string } | null>(null)
 
-  const load = () => api.get<VisitorKiosk[]>('/visitor-kiosks').then((r) => setKiosks(r.data))
+  const load = () =>
+    api
+      .get<VisitorKiosk[] | Paginated<VisitorKiosk>>('/visitor-kiosks')
+      .then((r) => {
+        const payload = r.data
+        setKiosks(Array.isArray(payload) ? payload : (payload.data ?? []))
+      })
+      .catch(() => setKiosks([]))
 
   useEffect(() => {
     load()

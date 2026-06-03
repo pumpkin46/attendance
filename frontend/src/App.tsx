@@ -10,7 +10,6 @@ import DashboardPage from './pages/DashboardPage'
 import MonitoringPage from './pages/MonitoringPage'
 import AccessControlPage from './pages/AccessControlPage'
 import VisitorsPage from './pages/VisitorsPage'
-import EdgeDevicesPage from './pages/EdgeDevicesPage'
 import EmployeesPage from './pages/EmployeesPage'
 import EnrollmentPage from './pages/EnrollmentPage'
 import LiveKioskPage from './pages/LiveKioskPage'
@@ -55,7 +54,6 @@ export default function App() {
             <Route path="anomalies" element={<AnomaliesPage />} />
             <Route path="shifts" element={<ShiftsPage />} />
             <Route path="cameras" element={<CamerasPage />} />
-            <Route path="edge-devices" element={<EdgeDevicesPage />} />
             <Route path="rfid" element={<RfidPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="unknown-faces" element={<UnknownFacesPage />} />

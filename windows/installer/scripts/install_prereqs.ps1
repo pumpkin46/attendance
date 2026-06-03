@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory=$true)][string]$InstallRoot,
   [switch]$InstallPostgres,
-  [switch]$InstallRedis
+  [switch]$InstallRedis,
+  [switch]$InstallPython
 )
 
 Set-StrictMode -Version Latest
@@ -27,63 +28,136 @@ function Test-TcpPort([string]$HostName, [int]$Port, [int]$TimeoutMs = 800) {
   }
 }
 
-function Run-Installer([string]$exePath, [string]$args) {
+function Run-Installer([string]$exePath, [string[]]$installerArgs) {
   if (-not (Test-Path $exePath)) {
-    throw "Missing installer: $exePath"
+    $resolved = Get-Command $exePath -ErrorAction SilentlyContinue
+    if (-not $resolved) {
+      throw "Missing installer: $exePath"
+    }
   }
-  Write-Host "Running: $exePath $args"
-  $p = Start-Process -FilePath $exePath -ArgumentList $args -Wait -PassThru
+  Write-Output "Running: $exePath $($installerArgs -join ' ')"
+  $p = Start-Process -FilePath $exePath -ArgumentList $installerArgs -Wait -PassThru
   if ($p.ExitCode -ne 0) {
     throw "Installer failed (exit $($p.ExitCode)): $exePath"
   }
 }
 
-<#
-  This script is intentionally conservative:
-  - It does NOT hardcode vendor installer URLs here yet.
-  - It creates the directories and placeholders expected by the rest of the bootstrap.
-
-  In production, you would implement one of:
-  A) Bundle offline installers in the Inno Setup payload (recommended for "bundle" requirement)
-  B) Download installers at install time (smaller setup, needs internet)
-#>
-
 $runtimeDir = Join-Path $InstallRoot "windows\runtime"
 Ensure-Dir $runtimeDir
-
-Write-Step "Prereqs placeholder prepared at $runtimeDir"
 
 $prereqsDir = Join-Path $InstallRoot "windows\prereqs"
 Ensure-Dir $prereqsDir
 
-Write-Step "Optional: install PostgreSQL"
+# --- Python ---
+Write-Step "Install Python 3.14"
+if ($InstallPython) {
+  $pythonRuntime = Join-Path $runtimeDir "python\python.exe"
+  if (Test-Path $pythonRuntime) {
+    Write-Host "Python runtime already exists at $pythonRuntime (skipping)"
+  } else {
+    $pyInstaller = Get-ChildItem -Path (Join-Path $prereqsDir "python") -Filter "python-*-amd64.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $pyInstaller) {
+      throw "Missing bundled Python installer in: $(Join-Path $prereqsDir 'python')"
+    }
+    $pyTargetDir = Join-Path $runtimeDir "python"
+    # InstallAllUsers=1 avoids per-user install issues under Program Files (we are already running elevated).
+    Run-Installer $pyInstaller.FullName @(
+      "/quiet",
+      "InstallAllUsers=1",
+      ("TargetDir=`"{0}`"" -f $pyTargetDir),
+      "Include_pip=1",
+      "PrependPath=0",
+      "Shortcuts=0",
+      "SimpleInstall=1"
+    )
+    if (-not (Test-Path (Join-Path $pyTargetDir "python.exe"))) {
+      throw "Python install completed but python.exe not found at: $pyTargetDir"
+    }
+    Write-Host "Python installed to $pyTargetDir"
+  }
+} else {
+  Write-Host "User did not select Python install (skipped)."
+}
+
+# --- PostgreSQL ---
+Write-Step "Install PostgreSQL (server + psql only)"
 if ($InstallPostgres) {
   if (Test-TcpPort "127.0.0.1" 5432) {
-    Write-Host "PostgreSQL already reachable on 127.0.0.1:5432 (skipping install)"
+    Write-Host "PostgreSQL already reachable on 127.0.0.1:5432 (skipping)"
   } else {
-    # Place an offline installer at:
-    #   windows\installer\prereqs\postgresql\postgresql-installer.exe
-    # and ensure Inno Setup copies it to {app}\windows\prereqs\postgresql\
     $pgExe = Join-Path $prereqsDir "postgresql\postgresql-installer.exe"
-    Run-Installer $pgExe "--mode unattended"
+    if (-not (Test-Path $pgExe)) {
+      throw "Missing PostgreSQL installer at: $pgExe"
+    }
+    $pgDataDir = "C:\PostgreSQL\data"
+    Run-Installer $pgExe @(
+      "--mode", "unattended",
+      "--unattendedmodeui", "none",
+      "--superpassword", "postgres",
+      "--enable-components", "server,commandlinetools",
+      "--disable-components", "pgAdmin,stackbuilder"
+    )
+    Write-Host "PostgreSQL installed (server + psql)"
   }
 } else {
-  Write-Host "User did not select PostgreSQL install."
+  Write-Host "User did not select PostgreSQL install (skipped)."
 }
 
-Write-Step "Optional: install Redis"
+# --- Redis / Memurai ---
+Write-Step "Install Redis (Memurai)"
 if ($InstallRedis) {
   if (Test-TcpPort "127.0.0.1" 6379) {
-    Write-Host "Redis already reachable on 127.0.0.1:6379 (skipping install)"
+    Write-Host "Redis already reachable on 127.0.0.1:6379 (skipping)"
   } else {
-    # Place an offline installer at:
-    #   windows\installer\prereqs\redis\redis-installer.exe
-    $redisExe = Join-Path $prereqsDir "redis\redis-installer.exe"
-    Run-Installer $redisExe "/S"
+    $memuraiMsi = Join-Path $prereqsDir "redis\memurai.msi"
+    if (-not (Test-Path $memuraiMsi)) {
+      throw "Missing Memurai MSI at: $memuraiMsi"
+    }
+    Run-Installer "msiexec.exe" @("/i", "`"$memuraiMsi`"", "/quiet", "/norestart")
+    Write-Host "Memurai (Redis) installed"
   }
 } else {
-  Write-Host "User did not select Redis install."
+  Write-Host "User did not select Redis install (skipped)."
 }
 
-Write-Step "TODO: bundle/install PHP, Python, Composer, Node (build-time) as needed"
+# --- Nginx ---
+Write-Step "Extract nginx for UI serving"
+$nginxRuntime = Join-Path $runtimeDir "nginx\nginx.exe"
+if (Test-Path $nginxRuntime) {
+  Write-Host "nginx already exists at $nginxRuntime (skipping)"
+} else {
+  $nginxZip = Get-ChildItem -Path (Join-Path $prereqsDir "nginx") -Filter "nginx-*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $nginxZip) {
+    throw "Missing nginx zip in: $(Join-Path $prereqsDir 'nginx')"
+  }
+  $nginxTmp = Join-Path $runtimeDir "nginx-tmp"
+  Ensure-Dir $nginxTmp
+  Expand-Archive -Path $nginxZip.FullName -DestinationPath $nginxTmp -Force
+  $extracted = Get-ChildItem -Path $nginxTmp -Directory | Select-Object -First 1
+  if (-not $extracted -or -not (Test-Path (Join-Path $extracted.FullName "nginx.exe"))) {
+    throw "nginx.exe not found after extracting $($nginxZip.Name)"
+  }
+  $nginxDir = Join-Path $runtimeDir "nginx"
+  if (Test-Path $nginxDir) { Remove-Item $nginxDir -Recurse -Force }
+  Move-Item $extracted.FullName $nginxDir
+  Remove-Item $nginxTmp -Recurse -Force -ErrorAction SilentlyContinue
+  Write-Host "nginx extracted to $nginxDir"
+}
 
+Write-Step "Generate nginx.conf"
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+& (Join-Path $scriptDir "generate_nginx_conf.ps1") -InstallRoot $InstallRoot
+
+Write-Step "Register attendance.local in hosts file"
+$hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+$marker = "attendance.local"
+$hostsContent = Get-Content $hostsPath -Raw -ErrorAction SilentlyContinue
+if ($hostsContent -and $hostsContent -match [regex]::Escape($marker)) {
+  Write-Host "hosts file already contains $marker (skipping)"
+} else {
+  $entry = "`r`n# Attendance Platform (offline local domain)`r`n127.0.0.1  attendance.local`r`n"
+  [System.IO.File]::AppendAllText($hostsPath, $entry)
+  Write-Host "Added 127.0.0.1 attendance.local to $hostsPath"
+}
+
+Write-Step "Prereq installation complete"

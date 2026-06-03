@@ -219,14 +219,14 @@ export default function ReportsPage() {
               <Th>Overtime</Th>
             </TableHead>
             <TableBody>
-              {dailyReport.employees.length === 0 ? (
+              {(dailyReport.employees ?? []).length === 0 ? (
                 <tr>
                   <Td colSpan={6} className="text-slate-400">
                     No attendance records for this date
                   </Td>
                 </tr>
               ) : (
-                dailyReport.employees.map((e) => (
+                dailyReport.employees?.map((e) => (
                   <tr key={e.employee_code}>
                     <Td>
                       {e.employee_name}
@@ -271,7 +271,7 @@ export default function ReportsPage() {
               <Th>On leave</Th>
             </TableHead>
             <TableBody>
-              {monthlyReport.employees.map((e) => (
+              {(monthlyReport.employees ?? []).map((e) => (
                 <tr key={e.employee_code}>
                   <Td>
                     {e.employee_name}

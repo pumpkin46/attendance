@@ -50,7 +50,7 @@ export default function RecognitionTestPage() {
       })
       setResult(data)
     } catch {
-      setError('Recognition request failed. Is the API and ai-service running?')
+      setError('Recognition request failed. Is the backend API running?')
     } finally {
       setLoading(false)
     }

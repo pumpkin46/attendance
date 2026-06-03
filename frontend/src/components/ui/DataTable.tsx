@@ -1,9 +1,15 @@
 import { cn } from '../../lib/cn'
 import { Card } from './Card'
 
-export function TableShell({ children }: { children: React.ReactNode }) {
+export function TableShell({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
   return (
-    <Card padding={false} className="overflow-x-auto">
+    <Card padding={false} className={cn('overflow-x-auto', className)}>
       <table className="w-full text-sm">{children}</table>
     </Card>
   )

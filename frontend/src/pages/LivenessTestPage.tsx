@@ -43,9 +43,9 @@ export default function LivenessTestPage() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
-    fetch('http://127.0.0.1:8001/health')
-      .then((r) => r.json())
-      .then(setHealth)
+    api
+      .get<HealthInfo>('/health')
+      .then((r) => setHealth(r.data))
       .catch(() => setHealth(null))
   }, [])
 

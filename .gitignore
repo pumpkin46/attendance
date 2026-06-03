@@ -1,6 +1,6 @@
 # =============================================================================
 # Attendance Platform — monorepo (.gitignore)
-# backend/ (Laravel) · frontend/ (Vite/React) · ai-service/ (FastAPI)
+# frontend/ (Vite/React) · backend/ (FastAPI backend + AI)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -10,42 +10,6 @@
 .env.*
 !.env.example
 !.env.*.example
-
-# -----------------------------------------------------------------------------
-# PHP / Laravel (backend/)
-# -----------------------------------------------------------------------------
-backend/vendor/
-backend/.phpunit.cache
-backend/.phpunit.result.cache
-backend/Homestead.json
-backend/Homestead.yaml
-backend/auth.json
-backend/npm-debug.log
-backend/yarn-error.log
-
-# Laravel runtime & generated
-backend/storage/*.key
-backend/storage/app/public/*
-!backend/storage/app/public/.gitignore
-backend/storage/framework/cache/data/*
-!backend/storage/framework/cache/data/.gitignore
-backend/storage/framework/cache/*.php
-backend/storage/framework/sessions/*
-!backend/storage/framework/sessions/.gitignore
-backend/storage/framework/testing/*
-!backend/storage/framework/testing/.gitignore
-backend/storage/framework/views/*
-!backend/storage/framework/views/.gitignore
-backend/storage/logs/*
-!backend/storage/logs/.gitignore
-backend/bootstrap/cache/*.php
-!backend/bootstrap/cache/.gitignore
-backend/public/hot
-backend/public/storage
-
-# Local SQLite (if used instead of PostgreSQL)
-backend/database/*.sqlite
-backend/database/*.sqlite-journal
 
 # -----------------------------------------------------------------------------
 # Node / Vite / React (frontend/)
@@ -64,37 +28,34 @@ frontend/.eslintcache
 # Lock files: keep package-lock.json & composer.lock in git (reproducible installs)
 
 # -----------------------------------------------------------------------------
-# Python / FastAPI (ai-service/)
+# Python / FastAPI (backend/)
 # -----------------------------------------------------------------------------
-ai-service/venv/
-ai-service/.venv/
-ai-service/env/
-ai-service/__pycache__/
-ai-service/**/__pycache__/
-ai-service/*.py[cod]
-ai-service/*$py.class
-ai-service/.pytest_cache/
-ai-service/.mypy_cache/
-ai-service/.ruff_cache/
-ai-service/.coverage
-ai-service/htmlcov/
-ai-service/*.egg-info/
-ai-service/.eggs/
-ai-service/build/
-ai-service/dist/
-ai-service/wheels/
-ai-service/*.egg
+backend/venv/
+backend/.venv/
+backend/env/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/htmlcov/
+backend/*.egg-info/
+backend/.eggs/
+backend/build/
+backend/dist/
+backend/wheels/
+backend/*.egg
 
 # FAISS index & enrollment metadata (generated at runtime)
-ai-service/data/*
-!ai-service/data/.gitkeep
-
-backend/storage/app/enrollment/
-backend/storage/app/unknown-faces/
+backend/data/*
+!backend/data/.gitkeep
 
 # Anti-spoof ONNX weights (download via scripts/download_antispoof_model.py)
-ai-service/models/*
-!ai-service/models/.gitkeep
+backend/models/*
+!backend/models/.gitkeep
 
 # -----------------------------------------------------------------------------
 # Logs & debug
@@ -143,6 +104,22 @@ Desktop.ini
 .cache/
 
 # -----------------------------------------------------------------------------
+# Windows installer prereqs (large binaries — download before building; see prereqs/README.md)
+# -----------------------------------------------------------------------------
+windows/installer/prereqs/postgresql/*
+!windows/installer/prereqs/postgresql/.gitkeep
+windows/installer/prereqs/python/*
+!windows/installer/prereqs/python/.gitkeep
+windows/installer/prereqs/redis/*
+!windows/installer/prereqs/redis/.gitkeep
+windows/installer/prereqs/nginx/*
+!windows/installer/prereqs/nginx/.gitkeep
+
+# Launcher build artifacts (build with dotnet before compiling Inno Setup)
+windows/launcher/**/bin/
+windows/launcher/**/obj/
+
+# -----------------------------------------------------------------------------
 # Windows installer outputs (generated)
 # -----------------------------------------------------------------------------
 # Inno Setup common output folders
@@ -152,3 +129,6 @@ windows/installer/inno/*.exe
 
 # Our default installer output name
 AttendancePlatformSetup*.exe
+
+# Windows icon generation artifacts
+windows/assets/app.ico

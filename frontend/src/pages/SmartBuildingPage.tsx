@@ -7,12 +7,23 @@ import { Label } from '../components/ui/Label'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Badge } from '../components/ui/Badge'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
+import type { Paginated } from '../types'
+
+const DRIVER_FALLBACK: Record<string, string> = {
+  webhook: 'Webhook',
+  mqtt: 'MQTT',
+  bacnet_gateway: 'BACnet Gateway',
+}
 
 interface BuildingConfig {
   enabled: boolean
-  drivers: Record<string, string>
-  event_types: Record<string, string>
-  default_subscribed_events: string[]
+  webhook_timeout: number
+  business_hours_start: string
+  business_hours_end: string
+  business_timezone: string
+  drivers?: Record<string, string>
+  event_types?: Record<string, string>
+  default_subscribed_events?: string[]
 }
 
 interface Connector {
@@ -40,17 +51,21 @@ export default function SmartBuildingPage() {
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [events, setEvents] = useState<BuildingEvent[]>([])
   const [form, setForm] = useState({
-    organization_id: '1',
     name: '',
     driver: 'webhook',
     endpoint_url: '',
   })
 
+  const drivers = config?.drivers ?? DRIVER_FALLBACK
+  const eventTypes = config?.event_types ?? {}
+
   const load = () => {
-    api.get<Connector[]>('/building/connectors').then((r) => setConnectors(r.data))
-    api.get<{ data: BuildingEvent[] }>('/building/events', { params: { per_page: 30 } }).then((r) =>
-      setEvents(r.data.data ?? (r.data as unknown as BuildingEvent[]))
-    )
+    api
+      .get<Paginated<Connector>>('/building/connectors', { params: { per_page: 50 } })
+      .then((r) => setConnectors(r.data.data))
+    api
+      .get<Paginated<BuildingEvent>>('/building/events', { params: { per_page: 30 } })
+      .then((r) => setEvents(r.data.data))
   }
 
   useEffect(() => {
@@ -61,12 +76,12 @@ export default function SmartBuildingPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     await api.post('/building/connectors', {
-      ...form,
-      organization_id: Number(form.organization_id),
+      name: form.name,
+      driver: form.driver,
       endpoint_url: form.endpoint_url || null,
       subscribed_events: config?.default_subscribed_events,
     })
-    setForm({ organization_id: '1', name: '', driver: 'webhook', endpoint_url: '' })
+    setForm({ name: '', driver: 'webhook', endpoint_url: '' })
     load()
   }
 
@@ -76,7 +91,14 @@ export default function SmartBuildingPage() {
   }
 
   const publishOccupancy = async () => {
-    await api.post('/building/occupancy/publish')
+    const locationId = window.prompt('Location ID for occupancy update:', '1')
+    if (!locationId) return
+    const count = window.prompt('Occupant count:', '0')
+    if (count === null) return
+    await api.post('/building/occupancy/publish', {
+      location_id: Number(locationId),
+      count: Number(count),
+    })
     load()
   }
 
@@ -96,15 +118,18 @@ export default function SmartBuildingPage() {
         <Card className="mb-6">
           <p className="text-sm text-slate-300">
             Integration {config.enabled ? 'enabled' : 'disabled'} · Drivers:{' '}
-            {Object.keys(config.drivers).join(', ')}
+            {Object.keys(drivers).join(', ')} · Business hours {config.business_hours_start}–
+            {config.business_hours_end} ({config.business_timezone})
           </p>
-          <ul className="mt-2 list-inside list-disc text-sm text-slate-400">
-            {Object.entries(config.event_types).map(([k, v]) => (
-              <li key={k}>
-                {k}: {v}
-              </li>
-            ))}
-          </ul>
+          {Object.keys(eventTypes).length > 0 && (
+            <ul className="mt-2 list-inside list-disc text-sm text-slate-400">
+              {Object.entries(eventTypes).map(([k, v]) => (
+                <li key={k}>
+                  {k}: {v}
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 
@@ -118,12 +143,11 @@ export default function SmartBuildingPage() {
           <Label>
             Driver
             <Select value={form.driver} onChange={(e) => setForm({ ...form, driver: e.target.value })}>
-              {config &&
-                Object.entries(config.drivers).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
-                ))}
+              {Object.entries(drivers).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
             </Select>
           </Label>
           <Label className="sm:col-span-2">
@@ -141,32 +165,32 @@ export default function SmartBuildingPage() {
       </Card>
 
       <div className="mb-6">
-      <TableShell>
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Driver</Th>
-          <Th>Events today</Th>
-          <Th>Status</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {connectors.map((c) => (
-            <tr key={c.id}>
-              <Td>{c.name}</Td>
-              <Td>{c.driver}</Td>
-              <Td>{c.events_today}</Td>
-              <Td>
-                <Badge tone={c.is_active ? 'ok' : 'neutral'}>{c.is_active ? 'Active' : 'Off'}</Badge>
-              </Td>
-              <Td>
-                <Button variant="ghost" onClick={() => testConnector(c.id)}>
-                  Test
-                </Button>
-              </Td>
-            </tr>
-          ))}
-        </TableBody>
-      </TableShell>
+        <TableShell>
+          <TableHead>
+            <Th>Name</Th>
+            <Th>Driver</Th>
+            <Th>Events today</Th>
+            <Th>Status</Th>
+            <Th>Actions</Th>
+          </TableHead>
+          <TableBody>
+            {connectors.map((c) => (
+              <tr key={c.id}>
+                <Td>{c.name}</Td>
+                <Td>{c.driver}</Td>
+                <Td>{c.events_today}</Td>
+                <Td>
+                  <Badge tone={c.is_active ? 'ok' : 'neutral'}>{c.is_active ? 'Active' : 'Off'}</Badge>
+                </Td>
+                <Td>
+                  <Button variant="ghost" onClick={() => testConnector(c.id)}>
+                    Test
+                  </Button>
+                </Td>
+              </tr>
+            ))}
+          </TableBody>
+        </TableShell>
       </div>
 
       <h2 className="mb-3 text-lg font-medium">Recent building events</h2>
@@ -180,7 +204,9 @@ export default function SmartBuildingPage() {
         <TableBody>
           {events.map((ev) => (
             <tr key={ev.id}>
-              <Td className="text-xs">{new Date(ev.created_at).toLocaleString()}</Td>
+              <Td className="text-xs">
+                {ev.created_at ? new Date(ev.created_at).toLocaleString() : '—'}
+              </Td>
               <Td>{ev.connector?.name ?? '—'}</Td>
               <Td>{ev.event_type}</Td>
               <Td>

@@ -2,9 +2,8 @@
 
 This is a minimal Windows tray launcher for the Attendance Platform. It starts:
 
-- `ai-service` via `uvicorn` on `127.0.0.1:8001`
-- `backend` via `php artisan serve` on `127.0.0.1:8000`
-- the UI by serving `frontend/dist` on `127.0.0.1:5173`
+- **Backend** via `uvicorn` on `127.0.0.1:8000` (from `backend/`)
+- **UI** via nginx on `http://attendance.local` (serves `frontend/dist`, proxies `/api/` to the backend)
 
 Logs are written under:
 
@@ -20,6 +19,5 @@ dotnet build -c Release
 
 ## Notes
 
-- Postgres/Redis start/health checks are added in the installer integration step.
-- The UI server currently uses `npx serve`. The installer will bundle a known static server so Node tooling is not required at runtime.
-
+- PostgreSQL and Redis are installed by the setup wizard (or must already be running on localhost).
+- End users do not need Node.js or PHP at runtime.

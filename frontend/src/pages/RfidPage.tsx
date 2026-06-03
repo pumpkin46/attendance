@@ -61,7 +61,7 @@ export default function RfidPage() {
   useEffect(() => {
     loadReaders()
     loadEvents()
-    api.get<Location[]>('/locations').then((r) => setLocations(r.data))
+    api.get<Location[]>('/locations').then((r) => setLocations(r.data ?? []))
     api
       .get<Paginated<Employee>>('/employees', { params: { per_page: 100, is_active: true } })
       .then((r) => setEmployees(r.data.data))

@@ -8,6 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>AttendanceLauncher</AssemblyName>
     <RootNamespace>AttendanceLauncher</RootNamespace>
+    <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

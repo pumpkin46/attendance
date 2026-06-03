@@ -8,7 +8,7 @@ import { Label } from '../components/ui/Label'
 import { PageHeader } from '../components/ui/PageHeader'
 import { StatCard } from '../components/ui/StatCard'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
-import type { Camera } from '../types'
+import type { Camera, Paginated } from '../types'
 
 interface Location {
   id: number
@@ -16,9 +16,22 @@ interface Location {
 }
 
 interface CameraConfig {
-  camera_types: Record<string, string>
-  zones: Record<string, string>
-  statuses: string[]
+  camera_types?: Record<string, string>
+  zones?: Record<string, string>
+  statuses?: string[]
+}
+
+const CAMERA_TYPE_FALLBACK: Record<string, string> = {
+  rtsp: 'RTSP IP Camera',
+  ip: 'IP Camera (HTTP)',
+  usb: 'USB Camera',
+}
+
+const ZONE_FALLBACK: Record<string, string> = {
+  entry: 'Entry',
+  exit: 'Exit',
+  lobby: 'Lobby',
+  office: 'Office',
 }
 
 interface CaptureResult {
@@ -63,14 +76,19 @@ export default function CamerasPage() {
   const [form, setForm] = useState(emptyForm)
 
   const load = () => {
-    api.get<Camera[]>('/cameras').then((r) => setCameras(r.data))
+    api
+      .get<Paginated<Camera>>('/cameras', { params: { per_page: 100 } })
+      .then((r) => setCameras(r.data.data ?? []))
   }
 
   useEffect(() => {
     load()
-    api.get<Location[]>('/locations').then((r) => setLocations(r.data))
+    api.get<Location[]>('/locations').then((r) => setLocations(r.data ?? []))
     api.get<CameraConfig>('/cameras/config').then((r) => setConfig(r.data))
   }, [])
+
+  const cameraTypes = config?.camera_types ?? CAMERA_TYPE_FALLBACK
+  const zones = config?.zones ?? ZONE_FALLBACK
 
   const startEdit = (camera: Camera) => {
     setEditingId(camera.id)
@@ -179,12 +197,11 @@ export default function CamerasPage() {
                 value={form.camera_type}
                 onChange={(e) => setForm({ ...form, camera_type: e.target.value })}
               >
-                {config &&
-                  Object.entries(config.camera_types).map(([k, label]) => (
-                    <option key={k} value={k}>
-                      {label}
-                    </option>
-                  ))}
+                {Object.entries(cameraTypes).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
               </Select>
             </Label>
             <Label>
@@ -209,12 +226,11 @@ export default function CamerasPage() {
                 onChange={(e) => setForm({ ...form, zone: e.target.value })}
               >
                 <option value="">—</option>
-                {config &&
-                  Object.entries(config.zones).map(([k, label]) => (
-                    <option key={k} value={k}>
-                      {label}
-                    </option>
-                  ))}
+                {Object.entries(zones).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
               </Select>
             </Label>
             <Label>

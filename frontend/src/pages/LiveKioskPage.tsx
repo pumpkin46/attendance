@@ -46,16 +46,6 @@ const statusBarStyles: Record<KioskStatus, string> = {
   duplicate: 'bg-amber-600/90 text-white',
 }
 
-const QUALITY_REASONS = new Set([
-  'blurry',
-  'too_dark',
-  'low_resolution',
-  'occluded_face',
-  'low_quality',
-  'no_face',
-  'multiple_faces',
-])
-
 const SPOOF_REASONS = new Set([
   'spoof_detected',
   'liveness_failed',
