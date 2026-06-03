@@ -8,6 +8,36 @@ body {
   @apply min-h-screen bg-slate-950 font-sans text-slate-100 antialiased;
 }
 
+/* Slim dark scrollbars for main content and other scroll regions */
+.scrollbar-styled {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(71 85 105 / 0.85) transparent;
+}
+
+.scrollbar-styled::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scrollbar-styled::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-styled::-webkit-scrollbar-thumb {
+  background-color: rgb(51 65 85 / 0.9);
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+}
+
+.scrollbar-styled::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(100 116 139 / 0.95);
+}
+
+.scrollbar-styled::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Hide native scrollbar — sidebar custom thumb (no arrow buttons on Chrome) */
 .scrollbar-hidden {
   scrollbar-width: none;

@@ -19,7 +19,7 @@ from app.core.pagination import PaginationDep, PaginationParams, paginate
 from app.core.security import generate_device_token
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
-from app.models.visitor import Visitor, VisitorKiosk
+from app.models.visitor import Visitor, VisitorKiosk, VisitorStatus
 from app.schemas.visitor import (
     HostOut,
     KioskConfigResponse,
@@ -62,24 +62,29 @@ async def create_visitor(
     if org_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
 
-    check_in_code = secrets.token_urlsafe(16)
+    check_in_code = _generate_check_in_code()
     badge_number = f"{settings.visitor_badge_prefix}{secrets.randbelow(999999):06d}"
-    expires_at = None
-    if body.expected_at:
-        expires_at = body.expected_at + timedelta(hours=settings.visitor_default_visit_hours)
+    now = datetime.now(timezone.utc)
+    visit_start = body.visit_start_at or now
+    if body.visit_end_at:
+        visit_end = body.visit_end_at
+    elif body.visit_start_at:
+        visit_end = body.visit_start_at + timedelta(hours=settings.visitor_default_visit_hours)
+    else:
+        visit_end = visit_start + timedelta(hours=settings.visitor_default_visit_hours)
 
     visitor = Visitor(
         organization_id=org_id,
         name=body.name,
         company=body.company,
-        email=body.email,
         phone=body.phone,
         purpose=body.purpose,
         host_employee_id=body.host_employee_id,
         check_in_code=check_in_code,
         badge_number=badge_number,
-        expected_at=body.expected_at,
-        expires_at=expires_at,
+        visit_start_at=visit_start,
+        visit_end_at=visit_end,
+        status=VisitorStatus.scheduled,
     )
     db.add(visitor)
     await db.flush()
@@ -124,7 +129,7 @@ async def enroll_visitor_face(
 
     result = face_service.enroll(f"visitor-{visitor.id}", image)
     if result.get("success"):
-        visitor.face_enrolled = True
+        visitor.face_registered = True
         await db.flush()
     return result
 
@@ -138,7 +143,7 @@ async def cancel_visitor(
     user: CurrentUser,
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
-    visitor.status = "cancelled"
+    visitor.status = VisitorStatus.cancelled
     await db.flush()
     await db.refresh(visitor)
 
@@ -212,7 +217,7 @@ async def kiosk_register_visitor(
     kiosk: VisitorKiosk = Depends(get_visitor_kiosk),
 ):
     now = datetime.now(timezone.utc)
-    check_in_code = secrets.token_urlsafe(16)
+    check_in_code = _generate_check_in_code()
     badge_number = f"{settings.visitor_badge_prefix}{secrets.randbelow(999999):06d}"
     expires_at = now + timedelta(hours=settings.visitor_kiosk_default_visit_hours)
 
@@ -225,9 +230,9 @@ async def kiosk_register_visitor(
         host_employee_id=body.host_employee_id,
         check_in_code=check_in_code,
         badge_number=badge_number,
-        status="walk_in",
-        expected_at=now,
-        expires_at=expires_at,
+        status=VisitorStatus.scheduled,
+        visit_start_at=now,
+        visit_end_at=expires_at,
     )
     db.add(visitor)
     await db.flush()
@@ -278,7 +283,7 @@ async def kiosk_enroll_visitor_face(
 
     result = face_service.enroll(f"visitor-{visitor.id}", image)
     if result.get("success"):
-        visitor.face_enrolled = True
+        visitor.face_registered = True
         await db.flush()
     return result
 
@@ -292,14 +297,17 @@ async def kiosk_check_in_visitor(
     visitor = await db.get(Visitor, visitor_id)
     if not visitor or visitor.organization_id != kiosk.organization_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Visitor not found")
-    if visitor.status == "checked_in":
+    if visitor.status == VisitorStatus.checked_in:
         raise HTTPException(status.HTTP_409_CONFLICT, "Visitor already checked in")
 
     now = datetime.now(timezone.utc)
-    visitor.status = "checked_in"
+    visitor.status = VisitorStatus.checked_in
     visitor.checked_in_at = now
-    if not visitor.expires_at:
-        visitor.expires_at = now + timedelta(hours=settings.visitor_kiosk_default_visit_hours)
+    if not visitor.visit_end_at or visitor.visit_end_at < now:
+        visitor.visit_end_at = now + timedelta(hours=settings.visitor_kiosk_default_visit_hours)
+    visitor.face_expires_at = visitor.visit_end_at + timedelta(
+        minutes=settings.visitor_face_expiry_buffer_minutes
+    )
     await db.flush()
     await db.refresh(visitor)
     return VisitorOut.model_validate(visitor, from_attributes=True)
@@ -484,6 +492,16 @@ async def regenerate_kiosk_token(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+_CHECK_IN_CODE_LEN = 12
+
+
+def _generate_check_in_code() -> str:
+    """URL-safe code that fits visitors.check_in_code VARCHAR(12)."""
+    code = secrets.token_urlsafe(9)
+    if len(code) > _CHECK_IN_CODE_LEN:
+        code = code[:_CHECK_IN_CODE_LEN]
+    return code
 
 
 async def _get_visitor_or_404(

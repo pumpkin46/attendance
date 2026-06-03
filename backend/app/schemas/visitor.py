@@ -8,11 +8,11 @@ from pydantic import BaseModel
 class VisitorCreate(BaseModel):
     name: str
     company: str | None = None
-    email: str | None = None
     phone: str | None = None
     purpose: str | None = None
     host_employee_id: int | None = None
-    expected_at: datetime | None = None
+    visit_start_at: datetime | None = None
+    visit_end_at: datetime | None = None
 
 
 class VisitorOut(BaseModel):
@@ -22,18 +22,17 @@ class VisitorOut(BaseModel):
     organization_id: int
     name: str
     company: str | None = None
-    email: str | None = None
     phone: str | None = None
     purpose: str | None = None
     host_employee_id: int | None = None
     check_in_code: str | None = None
     badge_number: str | None = None
-    face_enrolled: bool = False
+    face_registered: bool = False
     status: str
-    expected_at: datetime | None = None
+    visit_start_at: datetime
+    visit_end_at: datetime
     checked_in_at: datetime | None = None
-    checked_out_at: datetime | None = None
-    expires_at: datetime | None = None
+    face_expires_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

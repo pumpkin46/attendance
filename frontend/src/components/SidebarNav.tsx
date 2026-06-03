@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '../lib/cn'
 
 type NavItem = { to: string; label: string; end?: boolean }
@@ -182,6 +182,7 @@ function updateScrollThumb(el: HTMLElement): ScrollThumb {
 
 export default function SidebarNav() {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const scrollRef = useRef<HTMLElement>(null)
@@ -242,13 +243,12 @@ export default function SidebarNav() {
     }
   }, [filteredGroups, expanded])
 
-  const toggleGroup = (id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  const openGroup = (group: NavGroup) => {
+    setExpanded((prev) => new Set(prev).add(group.id))
+    const first = group.items[0]
+    if (first) {
+      navigate(first.to)
+    }
   }
 
   return (
@@ -288,7 +288,7 @@ export default function SidebarNav() {
                 <li key={group.id}>
                   <button
                     type="button"
-                    onClick={() => toggleGroup(group.id)}
+                    onClick={() => openGroup(group)}
                     className={cn(
                       'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[15px] font-medium transition-colors',
                       isActiveGroup && isOpen
