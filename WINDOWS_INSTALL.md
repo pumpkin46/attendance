@@ -1,5 +1,7 @@
 # Windows install (EXE setup)
 
+**Building the installer?** See [WINDOWS_BUILD.md](WINDOWS_BUILD.md).
+
 This repo runs as a local stack on Windows:
 
 - `backend/` — Python API + face recognition (FastAPI, default `http://127.0.0.1:8000`)
@@ -16,7 +18,7 @@ Installed to: `%ProgramFiles%\Attendance Platform\` (default)
 
 - App code: `frontend/`, `backend/`
 - Tray launcher: `launcher/AttendanceLauncher.exe`
-- Bootstrap scripts: `windows/scripts/*.ps1`
+- Bootstrap scripts: `windows/scripts/*.ps1` (from `windows/installer/scripts/` in the repo)
 
 Logs are written to:
 `%LOCALAPPDATA%\AttendancePlatform\logs\`
@@ -79,22 +81,4 @@ To support offline installation on a clean PC, place these files before compilin
 
 ## Rebuilding the installer
 
-1. Build the frontend (`cd frontend && npm ci && npm run build`).
-2. Build the launcher:
-   - `dotnet build -c Release windows/launcher/AttendanceLauncher.sln`
-3. Open `windows/installer/inno/attendance.iss` in **Inno Setup Compiler**
-4. Compile → produces `AttendancePlatformSetup.exe`
-
-## One-command build
-
-If you have Inno Setup installed (so `ISCC.exe` is available), run from repo root:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File windows/build-installer.ps1
-```
-
-If `ISCC.exe` is not on PATH, pass it explicitly:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File windows/build-installer.ps1 -InnoSetupIsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-```
+See **[WINDOWS_BUILD.md](WINDOWS_BUILD.md)** for prerequisites, prereq downloads, full checklist, and troubleshooting.

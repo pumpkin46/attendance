@@ -130,7 +130,8 @@ Check compliance: `GET http://127.0.0.1:8000/api/v1/health`
 
 ## Windows installer
 
-See [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md) for the offline EXE setup (Python, PostgreSQL, Redis, nginx).
+- **Build** the setup EXE: [WINDOWS_BUILD.md](WINDOWS_BUILD.md)
+- **Install / run** on end-user PCs: [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md)
 
 ## Project structure
 

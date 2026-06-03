@@ -2,6 +2,8 @@
 
 These installers are **not stored in git** (too large for GitHub). Download them locally before building `attendance.iss`.
 
+Full build steps: [WINDOWS_BUILD.md](../../../WINDOWS_BUILD.md).
+
 ## PostgreSQL (server only, ~42 MB)
 
 The setup no longer bundles the ~350 MB EDB graphical installer. Use a **server-only** zip (`bin`, `lib`, `share` — no pgAdmin, docs, or debug symbols).
