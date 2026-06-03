@@ -75,7 +75,7 @@ To support offline installation on a clean PC, place these files before compilin
 - `windows/installer/prereqs/python/python-3.14.4-amd64.exe`
 - `windows/installer/prereqs/nginx/nginx-1.30.2.zip`
 - `windows/installer/prereqs/redis/memurai.msi` (Redis-compatible for Windows)
-- `windows/installer/prereqs/postgresql/postgresql-installer.exe`
+- `windows/installer/prereqs/postgresql/postgresql-server-windows-x64.zip` (~42 MB; see `windows/installer/prereqs/README.md` to build from EDB binaries)
 
 ## Rebuilding the installer
 

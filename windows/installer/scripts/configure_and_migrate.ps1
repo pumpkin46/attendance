@@ -79,11 +79,21 @@ try {
 
   Write-Step "Create database if it doesn't exist"
   try {
-    $pgBin = "C:\Program Files\PostgreSQL\17\bin"
-    if (-not (Test-Path "$pgBin\psql.exe")) {
-      $pgBin = "C:\Program Files\PostgreSQL\16\bin"
+    $pgBin = $null
+    $pgBinCandidates = @(
+      (Join-Path $InstallRoot "windows\runtime\postgresql\bin"),
+      "C:\Program Files\PostgreSQL\17\bin",
+      "C:\Program Files\PostgreSQL\16\bin",
+      "C:\Program Files\PostgreSQL\15\bin",
+      "C:\Program Files\PostgreSQL\14\bin"
+    )
+    foreach ($candidate in $pgBinCandidates) {
+      if (Test-Path (Join-Path $candidate "psql.exe")) {
+        $pgBin = $candidate
+        break
+      }
     }
-    if (Test-Path "$pgBin\psql.exe") {
+    if ($pgBin) {
       $env:PGPASSWORD = "postgres"
       & "$pgBin\psql.exe" -U postgres -h 127.0.0.1 -tc "SELECT 1 FROM pg_database WHERE datname='attendance'" | Out-Null
       $dbExists = $LASTEXITCODE -eq 0

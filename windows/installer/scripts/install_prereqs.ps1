@@ -79,26 +79,11 @@ if ($InstallPython) {
   Write-Host "User did not select Python install (skipped)."
 }
 
-# --- PostgreSQL ---
-Write-Step "Install PostgreSQL (server + psql only)"
+# --- PostgreSQL (portable server: bin + lib + share, no pgAdmin) ---
+Write-Step "Install PostgreSQL (portable server)"
 if ($InstallPostgres) {
-  if (Test-TcpPort "127.0.0.1" 5432) {
-    Write-Host "PostgreSQL already reachable on 127.0.0.1:5432 (skipping)"
-  } else {
-    $pgExe = Join-Path $prereqsDir "postgresql\postgresql-installer.exe"
-    if (-not (Test-Path $pgExe)) {
-      throw "Missing PostgreSQL installer at: $pgExe"
-    }
-    $pgDataDir = "C:\PostgreSQL\data"
-    Run-Installer $pgExe @(
-      "--mode", "unattended",
-      "--unattendedmodeui", "none",
-      "--superpassword", "postgres",
-      "--enable-components", "server,commandlinetools",
-      "--disable-components", "pgAdmin,stackbuilder"
-    )
-    Write-Host "PostgreSQL installed (server + psql)"
-  }
+  $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+  & (Join-Path $scriptDir "install_postgresql_portable.ps1") -InstallRoot $InstallRoot
 } else {
   Write-Host "User did not select PostgreSQL install (skipped)."
 }

@@ -38,6 +38,21 @@ Start-Sleep -Seconds 2
 # =====================================================================
 Write-Step "Uninstall PostgreSQL"
 try {
+  $portablePg = Join-Path $InstallRoot "windows\runtime\postgresql"
+  $portablePgCtl = Join-Path $portablePg "bin\pg_ctl.exe"
+  $portableData = Join-Path $portablePg "data"
+  if (Test-Path $portablePgCtl) {
+    Write-Host "Removing portable PostgreSQL (AttendancePostgreSQL service)"
+    Stop-Service -Name "AttendancePostgreSQL" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    & $portablePgCtl stop -D $portableData -m fast -w 2>$null
+    & $portablePgCtl unregister -N "AttendancePostgreSQL" 2>$null
+    if (Test-Path $portablePg) {
+      Remove-Item $portablePg -Recurse -Force -ErrorAction SilentlyContinue
+      Write-Host "Removed $portablePg"
+    }
+  }
+
   $pgUninstaller = $null
   foreach ($ver in @("17", "16", "15", "14")) {
     $candidate = "C:\Program Files\PostgreSQL\$ver\uninstall-postgresql.exe"

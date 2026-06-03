@@ -52,7 +52,7 @@ Source: "{#InstallerRoot}scripts\*"; DestDir: "{app}\windows\scripts"; Flags: re
 ; =====================================================================
 ; Offline prereq installers (REQUIRED — build fails if any are missing)
 ; =====================================================================
-Source: "{#InstallerRoot}prereqs\postgresql\postgresql-installer.exe"; DestDir: "{app}\windows\prereqs\postgresql"; Flags: ignoreversion
+Source: "{#InstallerRoot}prereqs\postgresql\postgresql-server-windows-x64.zip"; DestDir: "{app}\windows\prereqs\postgresql"; Flags: ignoreversion
 Source: "{#InstallerRoot}prereqs\redis\memurai.msi"; DestDir: "{app}\windows\prereqs\redis"; Flags: ignoreversion
 Source: "{#InstallerRoot}prereqs\python\python-3.14.4-amd64.exe"; DestDir: "{app}\windows\prereqs\python"; Flags: ignoreversion
 Source: "{#InstallerRoot}prereqs\nginx\nginx-1.30.2.zip"; DestDir: "{app}\windows\prereqs\nginx"; Flags: ignoreversion
