@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     argon_memory: int = 65536
     argon_time: int = 4
 
+    # ── Rate limiting ────────────────────────────────────────────────────
+    # In-process, per-client-IP sliding window. Best-effort: not shared across
+    # workers, so size limits accordingly behind a load balancer (or terminate
+    # rate limiting at the reverse proxy for hard guarantees).
+    rate_limit_enabled: bool = True
+    rate_limit_login_max: int = 10
+    rate_limit_login_window_seconds: int = 60
+    rate_limit_recognition_max: int = 60
+    rate_limit_recognition_window_seconds: int = 60
+
     # ── Tenancy ──────────────────────────────────────────────────────────
     tenant_isolation_enabled: bool = True
     tenant_header: str = "X-Organization-Id"

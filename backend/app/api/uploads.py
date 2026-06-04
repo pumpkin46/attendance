@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
 
-from app.core.dependencies import CurrentUser
+from app.core.dependencies import CurrentUser, TenantOrgId
 from app.services.upload_storage import resolve_upload_path
 
 router = APIRouter(prefix="/api/v1/uploads", tags=["uploads"])
@@ -16,7 +16,12 @@ async def serve_visitor_upload(
     category: str,
     filename: str,
     user: CurrentUser,
+    tenant_org_id: TenantOrgId,
 ):
+    # Enforce tenant isolation: non-super-admins (tenant_org_id is not None)
+    # may only read uploads belonging to their own organization.
+    if tenant_org_id is not None and tenant_org_id != org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if category not in ("photos", "documents"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     path = resolve_upload_path(org_id, visitor_id, category, filename)

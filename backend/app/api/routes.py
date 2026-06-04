@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.core.dependencies import CurrentUser, require_permission
+from app.core.rate_limit import recognition_rate_limit
 from app.schemas.recognition import (
     DeleteRequest,
     DetectRequest,
@@ -66,7 +67,11 @@ def enroll_batch(req: EnrollBatchRequest, user: require_permission("employees.ma
     return EnrollBatchResponse(**result)
 
 
-@router.post("/recognize", response_model=RecognizeResponse)
+@router.post(
+    "/recognize",
+    response_model=RecognizeResponse,
+    dependencies=[recognition_rate_limit()],
+)
 def recognize(req: RecognizeRequest, user: CurrentUser):
     return RecognizeResponse(
         **face_service.recognize(
@@ -79,7 +84,11 @@ def recognize(req: RecognizeRequest, user: CurrentUser):
     )
 
 
-@router.post("/recognize-stream", response_model=RecognizeResponse)
+@router.post(
+    "/recognize-stream",
+    response_model=RecognizeResponse,
+    dependencies=[recognition_rate_limit()],
+)
 def recognize_stream(req: RecognizeStreamRequest, user: CurrentUser):
     capture = capture_stream_frame(req.stream_url)
     if not capture.get("success"):
@@ -94,7 +103,11 @@ def recognize_stream(req: RecognizeStreamRequest, user: CurrentUser):
     return RecognizeResponse(**result)
 
 
-@router.post("/identify", response_model=IdentifyResponse)
+@router.post(
+    "/identify",
+    response_model=IdentifyResponse,
+    dependencies=[recognition_rate_limit()],
+)
 def identify(req: IdentifyRequest, user: CurrentUser):
     result = face_service.identify(
         req.image,

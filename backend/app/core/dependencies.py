@@ -27,10 +27,14 @@ async def get_current_user(
     user_id = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
     stmt = (
         select(User)
         .options(selectinload(User.roles).selectinload(Role.permissions))
-        .where(User.id == int(user_id), User.is_active == True)  # noqa: E712
+        .where(User.id == user_id_int, User.is_active == True)  # noqa: E712
     )
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()

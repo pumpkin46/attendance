@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession
+from app.core.rate_limit import login_rate_limit
 from app.core.security import (
     create_access_token,
     hash_password,
@@ -24,7 +25,7 @@ from app.services.audit_service import log_action
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post("/login", response_model=LoginResponse, dependencies=[login_rate_limit()])
 async def login(body: LoginRequest, request: Request, db: DbSession):
     stmt = (
         select(User)

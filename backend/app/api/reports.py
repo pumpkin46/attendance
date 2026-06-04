@@ -14,9 +14,7 @@ from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_p
 from app.core.pagination import PaginationDep, paginate
 from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord, Holiday, LeaveRequest
-from app.models.camera import Camera
 from app.models.employee import Employee
-from app.models.location import Location
 from app.models.recognition import RecognitionEvent, RecognitionResult
 from app.schemas.report import (
     AttendanceSummaryReport,
@@ -327,11 +325,7 @@ async def unknown_persons_report(
 ):
     stmt = select(RecognitionEvent).where(RecognitionEvent.result == RecognitionResult.unknown)
     if org_id is not None:
-        stmt = (
-            stmt.join(Camera, RecognitionEvent.camera_id == Camera.id, isouter=True)
-            .join(Location, Camera.location_id == Location.id, isouter=True)
-        )
-        stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
+        stmt = stmt.where(RecognitionEvent.organization_id == org_id)
     if date_from is not None:
         start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
         stmt = stmt.where(RecognitionEvent.recognized_at >= start)

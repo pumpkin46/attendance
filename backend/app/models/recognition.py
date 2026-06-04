@@ -30,9 +30,13 @@ class RecognitionEvent(Base):
     __tablename__ = "recognition_events"
     __table_args__ = (
         Index("ix_recognition_events_recognized_at_result", "recognized_at", "result"),
+        Index("ix_recognition_events_org_recognized_at", "organization_id", "recognized_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
     camera_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True
     )

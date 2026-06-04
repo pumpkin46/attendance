@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,6 +22,8 @@ from app.engine.metrics import get_metrics
 from app.engine.unknown_detector import get_unknown_detector
 from app.engine.face_tracker import get_tracker
 from app.engine.vector_search import get_vector_search
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/engine", tags=["recognition-engine"])
 
@@ -114,8 +117,14 @@ async def engine_recognize(
                     liveness_passed=result.liveness_passed,
                     method="face",
                 )
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as exc:
+                # Non-numeric employee id from the engine — skip the attendance
+                # write but record why so it is not silently lost.
+                logger.warning(
+                    "Skipping attendance write for employee_id=%r: %s",
+                    emp_id_str,
+                    exc,
+                )
 
     return result.to_dict()
 

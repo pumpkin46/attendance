@@ -15,6 +15,7 @@ from app.core.dependencies import (
     require_permission,
 )
 from app.core.pagination import paginate, PaginationDep
+from app.core.rate_limit import recognition_rate_limit
 from app.core.security import generate_device_token
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
@@ -197,7 +198,9 @@ async def list_employee_cards(
     employee_id: int,
     db: DbSession,
     user: CurrentUser,
+    org_id: TenantOrgId,
 ):
+    await _employee_in_tenant_or_404(db, employee_id, org_id)
     stmt = (
         select(RfidCard)
         .where(RfidCard.employee_id == employee_id)
@@ -217,8 +220,10 @@ async def add_employee_card(
     body: RfidCardCreate,
     request: Request,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("rfid.manage"),
 ):
+    await _employee_in_tenant_or_404(db, employee_id, org_id)
     uid = body.uid.strip().upper()
     existing = await db.execute(select(RfidCard).where(RfidCard.uid == uid))
     if existing.scalar_one_or_none():
@@ -246,9 +251,15 @@ async def delete_card(
     card_id: int,
     request: Request,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("rfid.manage"),
 ):
-    stmt = select(RfidCard).where(RfidCard.id == card_id)
+    stmt = (
+        select(RfidCard)
+        .join(Employee, RfidCard.employee_id == Employee.id)
+        .where(RfidCard.id == card_id)
+    )
+    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
     result = await db.execute(stmt)
     card = result.scalar_one_or_none()
     if not card:
@@ -297,19 +308,21 @@ async def list_rfid_events(
 async def simulate_tap(
     body: SimulateRequest,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("rfid.manage"),
 ):
-    reader = await db.get(RfidReader, body.rfid_reader_id)
-    if not reader:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Reader not found")
-
+    reader = await _get_reader_or_404(db, body.rfid_reader_id, org_id)
     return await _process_tap(db, body.uid, reader, body.timestamp)
 
 
 # ── Device Tap Endpoint ───────────────────────────────────────────────────────
 
 
-@router.post("/rfid/tap", response_model=DeviceTapResponse)
+@router.post(
+    "/rfid/tap",
+    response_model=DeviceTapResponse,
+    dependencies=[recognition_rate_limit()],
+)
 async def rfid_tap(
     body: TapRequest,
     db: DbSession,
@@ -507,6 +520,18 @@ async def _record_event(
     )
     db.add(event)
     await db.flush()
+
+
+async def _employee_in_tenant_or_404(
+    db: DbSession, employee_id: int, org_id: int | None
+) -> Employee:
+    stmt = select(Employee).where(Employee.id == employee_id)
+    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    result = await db.execute(stmt)
+    employee = result.scalar_one_or_none()
+    if employee is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+    return employee
 
 
 async def _get_reader_or_404(

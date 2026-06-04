@@ -169,17 +169,7 @@ async def monitoring_dashboard(
         func.date(RecognitionEvent.recognized_at) == today,
     )
     if org_id is not None:
-        unknown_stmt = (
-            select(func.count())
-            .select_from(RecognitionEvent)
-            .join(Camera, RecognitionEvent.camera_id == Camera.id, isouter=True)
-            .join(Location, Camera.location_id == Location.id, isouter=True)
-            .where(
-                RecognitionEvent.result == RecognitionResult.unknown,
-                func.date(RecognitionEvent.recognized_at) == today,
-            )
-        )
-        unknown_stmt = apply_tenant_filter(unknown_stmt, org_id, Location.organization_id)
+        unknown_stmt = unknown_stmt.where(RecognitionEvent.organization_id == org_id)
     unknown_today = (await db.execute(unknown_stmt)).scalar() or 0
 
     visitor_stmt = select(func.count()).select_from(Visitor).where(

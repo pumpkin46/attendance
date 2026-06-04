@@ -2,13 +2,43 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import secrets
 import sys
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import async_session_factory, engine
 from app.core.security import hash_password
+
+_DEFAULT_SEED_PASSWORD = "password"
+
+
+def _seed_password(env_var: str, label: str) -> str:
+    """Resolve a seed account password.
+
+    Reads ``env_var`` if set. In non-local environments we refuse to fall back
+    to the well-known default; instead we generate a strong random password and
+    print it once so the operator can capture and rotate it.
+    """
+    value = os.environ.get(env_var)
+    if value:
+        return value
+    if settings.app_env != "local":
+        generated = secrets.token_urlsafe(18)
+        print(
+            f"[seed] {env_var} not set — generated a random password for {label}:\n"
+            f"       {generated}\n"
+            f"       Save it now and change it after first login."
+        )
+        return generated
+    print(
+        f"[seed] WARNING: using insecure default password for {label} "
+        f"(set {env_var} to override). Do NOT use this outside local dev."
+    )
+    return _DEFAULT_SEED_PASSWORD
 
 
 async def seed():
@@ -102,7 +132,7 @@ async def seed():
             organization_id=None,
             name="Platform Super Admin",
             email="superadmin@attendance.local",
-            password=hash_password("password"),
+            password=hash_password(_seed_password("SEED_SUPERADMIN_PASSWORD", "superadmin@attendance.local")),
         )
         super_admin.roles = [role_map["super_admin"]]
         db.add(super_admin)
@@ -113,7 +143,7 @@ async def seed():
             department_id=department.id,
             name="Organization Admin",
             email="admin@attendance.local",
-            password=hash_password("password"),
+            password=hash_password(_seed_password("SEED_ADMIN_PASSWORD", "admin@attendance.local")),
         )
         admin.roles = [role_map["org_admin"]]
         db.add(admin)

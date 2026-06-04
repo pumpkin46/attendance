@@ -106,7 +106,13 @@ those.
 
 ## 🟠 Medium severity
 
+> **Update 2026-06-04:** M-1 through M-5 **fixed**. `pytest` 161 passed; rate limiter and config validated.
+
 ### M-1 — Tenant isolation is opt-in per-endpoint and missed in several places
+**✅ Fixed.** Added `_employee_in_tenant_or_404` in [`rfid.py`](backend/app/api/rfid.py) and applied org scoping
+to `list_employee_cards`, `add_employee_card`, `delete_card` (join → `Employee.organization_id`), and
+`simulate_tap` (now uses the tenant-scoped `_get_reader_or_404`). *(Structural guard to replace per-endpoint
+opt-in remains a worthwhile follow-up.)*
 Isolation depends on each handler remembering to call `apply_tenant_filter(...)`
 ([`middleware/tenant.py`](backend/app/middleware/tenant.py)). It's easy to forget, and it has been:
 - [`rfid.py:195` `list_employee_cards`](backend/app/api/rfid.py#L195) — filters only by `employee_id`, no
@@ -122,6 +128,11 @@ over per-endpoint opt-in. At minimum, scope these endpoints by joining to `Emplo
 `Location.organization_id` and validating against `TenantOrgId`.
 
 ### M-2 — In-memory duplicate-suppression cache: unbounded + not multi-worker safe
+**✅ Fixed.** [`attendance_service.py`](backend/app/services/attendance_service.py): the in-memory cache is now
+bounded (`_prune_dup_cache`, 10k cap with stale eviction) and demoted to a best-effort fast path. The
+authoritative duplicate guard (`_recent_action_within`) is now based on the persisted record timestamps, which
+are shared across all workers. *(Redis is referenced in the README but is not actually wired into the backend;
+this fix avoids adding that dependency while making dedup correct across workers.)*
 [`attendance_service.py:19`](backend/app/services/attendance_service.py#L19) `_dup_cache: dict[str, datetime]`
 is a module-global that (a) **never evicts** entries → unbounded memory growth, and (b) is **per-process**, so
 running uvicorn with >1 worker (or multiple nodes — which the README's horizontal-scaling NFR assumes) makes
@@ -131,6 +142,10 @@ the 60s duplicate window leak duplicates across workers.
 the DB layer with a unique/partial constraint + upsert.
 
 ### M-3 — Attendance record creation has a check-then-insert race
+**✅ Fixed.** The `(employee_id, work_date)` unique constraint already existed on the model, so duplicate *rows*
+were not possible — but the race surfaced as an unhandled `IntegrityError` (→500). New
+`_get_or_create_today_record` wraps the insert in a savepoint (`begin_nested`) and recovers from a concurrent
+insert by re-selecting the winning row.
 Both `process_recognition` and `process_rfid_tap` do `select ... where (employee_id, work_date)` then
 conditionally `INSERT` ([`attendance_service.py:161-178`](backend/app/services/attendance_service.py#L161-L178)).
 Two concurrent taps/recognitions for the same employee can both miss the existing row and create two records
@@ -140,6 +155,8 @@ for the same day (the in-memory dup cache does not protect across workers — se
 IntegrityError and re-select).
 
 ### M-4 — Cross-tenant read of visitor uploads
+**✅ Fixed.** [`uploads.py`](backend/app/api/uploads.py) now takes `TenantOrgId` and returns 404 when a
+non-super-admin requests a path outside their own organization.
 [`uploads.py:12` `serve_visitor_upload`](backend/app/api/uploads.py#L12) authenticates the caller but does
 **not** check that `org_id` matches the caller's tenant. Any logged-in user can fetch another org's visitor
 photos/ID documents if they know the path. Exposure is limited because the filename is a random `uuid4` hex
@@ -151,6 +168,10 @@ is correctly mitigated by `_safe_filename` + the resolved-prefix check
 **Fix:** Verify `org_id == TenantOrgId` (or that the visitor belongs to the caller's org) before serving.
 
 ### M-5 — No rate limiting on auth-sensitive endpoints
+**✅ Fixed.** Added [`app/core/rate_limit.py`](backend/app/core/rate_limit.py) — a per-IP sliding-window limiter
+(configurable, disable-able via `RATE_LIMIT_ENABLED`) applied to `/auth/login`, the recognition `identify`/
+`recognize`/`recognize-stream` endpoints (both routers), and `/rfid/tap`. *(Best-effort/in-process; for hard
+guarantees behind a load balancer, also limit at the reverse proxy.)*
 There is no throttling on `POST /api/v1/auth/login` ([`auth.py:27`](backend/app/api/auth.py#L27)),
 `/recognition/identify`, or the RFID/visitor device endpoints. Login is brute-forceable; recognition
 endpoints are resource-intensive and unthrottled.
@@ -160,20 +181,47 @@ public-facing device/recognition routes.
 
 ---
 
+## 🔧 Additional fixes found during remediation
+
+- **A-1 — `process_recognition` call-signature mismatch (runtime `TypeError`).** `recognition_api.identify_face`
+  called the service with `processing_ms`/`organization_id` and without the then-required `camera_id`, so every
+  *matched* recognition through `/api/v1/recognition/identify` raised before writing attendance. **✅ Fixed** —
+  widened the signature to the union both callers use (keyword-only, defaulted) in
+  [`attendance_service.py`](backend/app/services/attendance_service.py); locked with contract tests in
+  [`tests/test_attendance_service_contract.py`](backend/tests/test_attendance_service_contract.py).
+- **A-2 — Matched recognitions were never logged as `RecognitionEvent`.** Only `unknown` rows were written, so
+  the metrics endpoint's `matched` count was always 0 and the events list/exports never showed successful
+  recognitions. **✅ Fixed** — [`recognition_api.py`](backend/app/api/recognition_api.py) now writes a
+  `result="matched"` event (+ a `recognition.matched` live event) on success; covered by new
+  [`tests/test_recognition_api.py`](backend/tests/test_recognition_api.py).
+- **A-3 — Recognition events couldn't be tenant-scoped without a camera.** Events were scoped via
+  `camera → location`, so camera-less events (from `/recognition/identify`) were invisible to org-scoped users.
+  **✅ Fixed** — added a direct `organization_id` column to `recognition_events`
+  ([model](backend/app/models/recognition.py) + migration
+  [`d4e5f6a7b8c9`](backend/alembic/versions/d4e5f6a7b8c9_recognition_event_organization_id.py), which backfills
+  existing rows from `camera → location`). Events are now stamped with the tenant on write (employee's org for
+  matches, caller's org for unknowns), and every tenant-scoped query in
+  [`recognition_api.py`](backend/app/api/recognition_api.py), [`monitoring.py`](backend/app/api/monitoring.py),
+  and [`reports.py`](backend/app/api/reports.py) filters on `organization_id` directly (removing the fragile
+  camera-join filters).
+
 ## 🟡 Low severity / hardening
 
-- **L-1 — JWT `sub` is unvalidated `int()`.** [`dependencies.py:33`](backend/app/core/dependencies.py#L33)
-  calls `int(user_id)` without a try/except; a malformed `sub` in a (validly signed) token raises `ValueError`
-  → 500 instead of 401. Wrap in try/except and return 401.
-- **L-2 — Token in `localStorage`.** [`client.ts:11`](frontend/src/api/client.ts#L11) — standard SPA pattern
-  but XSS-exfiltratable. Consider httpOnly cookies or short-lived tokens for high-security deployments.
-- **L-3 — Broad `except` blocks.** ~45 bare/broad excepts in `backend/app`; e.g.
-  [`engine_api.py:117`](backend/app/api/engine_api.py#L117) swallows `ValueError/TypeError` silently around an
-  attendance write. Audit these so real failures aren't hidden; log at minimum.
-- **L-4 — Default admin credentials.** README/seed ship `admin@attendance.local` / `password`. Force a change
-  on first login or block boot in production until rotated.
-- **L-5 — Stale documentation.** `REVIEW.md` describes the removed Laravel backend. Delete it; reconcile
-  `README.md` "AI service on private network" notes with the now-unified process.
+- **L-1 — JWT `sub` is unvalidated `int()`.** **✅ Fixed** —
+  [`dependencies.py`](backend/app/core/dependencies.py) now wraps `int(sub)` and returns 401 on a malformed
+  value instead of raising a 500.
+- **L-2 — Token in `localStorage`.** [`client.ts:11`](frontend/src/api/client.ts#L11) — **not changed
+  (deliberate).** Migrating to httpOnly cookies is the right long-term fix but is an architectural change
+  spanning login response handling, the axios client, and CSRF protection; it should be decided/scoped
+  separately rather than bundled into this pass. Tracked as a follow-up.
+- **L-3 — Broad `except` blocks.** **✅ Partially fixed** — the silent swallow around the attendance write in
+  [`engine_api.py`](backend/app/api/engine_api.py) now logs a warning. A broader audit of the remaining ~45
+  broad excepts is still recommended.
+- **L-4 — Default admin credentials.** **✅ Fixed** — [`seed.py`](backend/seed.py) reads
+  `SEED_ADMIN_PASSWORD` / `SEED_SUPERADMIN_PASSWORD`; outside `app_env=local` it refuses the well-known default
+  and instead generates + prints a strong random password to rotate.
+- **L-5 — Stale documentation.** **✅ Fixed** — `REVIEW.md` deleted. *(Reconciling the README's "AI service on
+  private network" wording with the now-unified process is still worth a doc pass.)*
 
 ---
 

@@ -9,10 +9,9 @@ from sqlalchemy import select, func
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.rate_limit import recognition_rate_limit
 from app.core.pagination import PaginationParams, paginate, PaginationDep
-from app.middleware.tenant import apply_tenant_filter
-from app.models.camera import Camera
-from app.models.location import Location
+from app.models.employee import Employee
 from app.models.recognition import RecognitionEvent
 from app.schemas.recognition import (
     DetectRequest,
@@ -59,7 +58,11 @@ async def detect_faces(body: DetectRequest, user: CurrentUser):
     return DetectResponse(**result)
 
 
-@router.post("/recognition/identify", response_model=IdentifyResponse)
+@router.post(
+    "/recognition/identify",
+    response_model=IdentifyResponse,
+    dependencies=[recognition_rate_limit()],
+)
 async def identify_face(
     body: IdentifyRequest,
     db: DbSession,
@@ -92,7 +95,7 @@ async def identify_face(
         else:
             employee_id = int(emp_id_str)
             confidence = result.get("confidence", 0.0)
-            liveness_passed = result.get("liveness_passed", False)
+            liveness_passed = bool(result.get("liveness_passed", False))
             processing_ms = result.get("processing_ms", 0)
 
             await attendance_service.process_recognition(
@@ -103,9 +106,40 @@ async def identify_face(
                 processing_ms=processing_ms,
                 organization_id=org_id,
             )
+
+            # Log the successful match so it appears in metrics, the events
+            # list, and exports (previously only "unknown" events were recorded).
+            employee = await db.get(Employee, employee_id)
+            event_org_id = employee.organization_id if employee else org_id
+            db.add(
+                RecognitionEvent(
+                    employee_id=employee_id,
+                    organization_id=event_org_id,
+                    result="matched",
+                    confidence=confidence,
+                    liveness_passed=liveness_passed,
+                    processing_ms=processing_ms,
+                    recognized_at=datetime.now(timezone.utc),
+                )
+            )
+            await db.flush()
+
+            if employee is not None:
+                await create_live_event(
+                    db=db,
+                    organization_id=employee.organization_id,
+                    event_type="recognition.matched",
+                    message=f"{employee.first_name} {employee.last_name} recognized",
+                    employee_id=employee.id,
+                    payload={
+                        "confidence": confidence,
+                        "liveness_passed": liveness_passed,
+                    },
+                )
     else:
         event = RecognitionEvent(
             employee_id=None,
+            organization_id=org_id,
             result="unknown",
             confidence=result.get("confidence"),
             liveness_passed=result.get("liveness_passed"),
@@ -126,7 +160,11 @@ async def identify_face(
     return IdentifyResponse(**result)
 
 
-@router.post("/recognition/recognize", response_model=RecognizeResponse)
+@router.post(
+    "/recognition/recognize",
+    response_model=RecognizeResponse,
+    dependencies=[recognition_rate_limit()],
+)
 async def recognize_face(body: RecognizeRequest, user: CurrentUser):
     result = face_service.recognize(
         image_b64=body.image,
@@ -174,12 +212,7 @@ async def get_recognition_metrics(
 ):
     base_stmt = select(RecognitionEvent)
     if org_id is not None:
-        base_stmt = (
-            base_stmt
-            .join(Camera, RecognitionEvent.camera_id == Camera.id, isouter=True)
-            .join(Location, Camera.location_id == Location.id, isouter=True)
-        )
-        base_stmt = apply_tenant_filter(base_stmt, org_id, Location.organization_id)
+        base_stmt = base_stmt.where(RecognitionEvent.organization_id == org_id)
 
     total_result = await db.execute(
         select(func.count()).select_from(base_stmt.subquery())
@@ -226,12 +259,7 @@ async def list_recognition_events(
 ):
     stmt = select(RecognitionEvent)
     if org_id is not None:
-        stmt = (
-            stmt
-            .join(Camera, RecognitionEvent.camera_id == Camera.id, isouter=True)
-            .join(Location, Camera.location_id == Location.id, isouter=True)
-        )
-        stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
+        stmt = stmt.where(RecognitionEvent.organization_id == org_id)
     stmt = stmt.order_by(RecognitionEvent.recognized_at.desc())
     return await paginate(db, stmt, pagination.page, pagination.per_page, RecognitionEventOut)
 
@@ -262,12 +290,7 @@ async def get_unknown_summary(
 ):
     base_stmt = select(RecognitionEvent).where(RecognitionEvent.result == "unknown")
     if org_id is not None:
-        base_stmt = (
-            base_stmt
-            .join(Camera, RecognitionEvent.camera_id == Camera.id, isouter=True)
-            .join(Location, Camera.location_id == Location.id, isouter=True)
-        )
-        base_stmt = apply_tenant_filter(base_stmt, org_id, Location.organization_id)
+        base_stmt = base_stmt.where(RecognitionEvent.organization_id == org_id)
 
     total_result = await db.execute(
         select(func.count()).select_from(base_stmt.subquery())

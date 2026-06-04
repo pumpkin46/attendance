@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -16,16 +17,93 @@ from app.models.attendance import (
 )
 from app.models.employee import Employee
 
+# In-memory fast-path cache for duplicate suppression. This is a best-effort
+# optimisation only — it is per-process and so cannot be relied on for
+# correctness across multiple workers/nodes. The authoritative duplicate guard
+# is `_recent_action_within`, which is based on the persisted record timestamps
+# (shared by all workers), backed by the UNIQUE(employee_id, work_date)
+# constraint on attendance_records.
 _dup_cache: dict[str, datetime] = {}
+_DUP_CACHE_MAX = 10_000
 
 
 def _is_duplicate(key: str, window_seconds: int) -> bool:
     now = datetime.now(timezone.utc)
+    _prune_dup_cache(now)
     last = _dup_cache.get(key)
     if last and (now - last).total_seconds() < window_seconds:
         return True
     _dup_cache[key] = now
     return False
+
+
+def _prune_dup_cache(now: datetime) -> None:
+    """Evict stale entries so the in-memory cache cannot grow unbounded."""
+    if len(_dup_cache) < _DUP_CACHE_MAX:
+        return
+    cutoff = now - timedelta(
+        seconds=max(
+            settings.face_duplicate_window_seconds,
+            settings.rfid_duplicate_window_seconds,
+        )
+    )
+    for key in [k for k, ts in _dup_cache.items() if ts < cutoff]:
+        _dup_cache.pop(key, None)
+    if len(_dup_cache) >= _DUP_CACHE_MAX:
+        # Pathological case (all entries still fresh): drop everything rather
+        # than leak memory. Worst case is a few missed fast-path hits.
+        _dup_cache.clear()
+
+
+def _recent_action_within(
+    record: AttendanceRecord, window_seconds: int, now: datetime
+) -> bool:
+    """Authoritative, cross-worker duplicate guard based on persisted state."""
+    last = record.check_out_at or record.check_in_at
+    return last is not None and (now - last).total_seconds() < window_seconds
+
+
+async def _get_or_create_today_record(
+    db: AsyncSession,
+    employee_id: int,
+    work_date: date,
+    *,
+    location_id: int | None,
+    camera_id: int | None,
+    shift_id: int | None,
+) -> AttendanceRecord:
+    """Fetch today's record or create it, tolerating a concurrent insert.
+
+    The UNIQUE(employee_id, work_date) constraint means two concurrent
+    taps/recognitions cannot both create a row; the loser gets an
+    IntegrityError, which we recover from by re-selecting the winner's row.
+    """
+    stmt = select(AttendanceRecord).where(
+        AttendanceRecord.employee_id == employee_id,
+        AttendanceRecord.work_date == work_date,
+    )
+    record = (await db.execute(stmt)).scalar_one_or_none()
+    if record is not None:
+        return record
+
+    record = AttendanceRecord(
+        employee_id=employee_id,
+        work_date=work_date,
+        location_id=location_id,
+        camera_id=camera_id,
+        shift_id=shift_id,
+        status="absent",
+    )
+    db.add(record)
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        db.expunge(record)
+        record = (await db.execute(stmt)).scalar_one_or_none()
+        if record is None:
+            raise
+    return record
 
 
 async def _get_active_shift(
@@ -127,30 +205,24 @@ def _resolve_checkout_status(
 async def process_recognition(
     db: AsyncSession,
     employee_id: int,
-    camera_id: int | None,
-    confidence: float,
-    liveness_passed: bool,
+    *,
+    camera_id: int | None = None,
+    confidence: float = 0.0,
+    liveness_passed: bool = False,
+    processing_ms: int | None = None,
+    organization_id: int | None = None,
     method: str = "face",
 ) -> AttendanceRecord:
+    # Note: confidence / liveness_passed / processing_ms describe the recognition
+    # event, not the attendance row (which has no columns for them), so they are
+    # accepted for a uniform caller interface but not persisted here.
     window = settings.face_duplicate_window_seconds
     dup_key = f"face:{employee_id}"
-    if _is_duplicate(dup_key, window):
-        stmt = (
-            select(AttendanceRecord)
-            .where(
-                AttendanceRecord.employee_id == employee_id,
-                AttendanceRecord.work_date == date.today(),
-            )
-        )
-        result = await db.execute(stmt)
-        existing = result.scalar_one_or_none()
-        if existing:
-            return existing
 
     emp_stmt = select(Employee).where(Employee.id == employee_id)
     emp_result = await db.execute(emp_stmt)
     employee = emp_result.scalar_one_or_none()
-    org_id = employee.organization_id if employee else None
+    org_id = employee.organization_id if employee else organization_id
 
     now = datetime.now(timezone.utc)
     today = now.date()
@@ -158,24 +230,20 @@ async def process_recognition(
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None
 
-    stmt = select(AttendanceRecord).where(
-        AttendanceRecord.employee_id == employee_id,
-        AttendanceRecord.work_date == today,
+    fast_dup = _is_duplicate(dup_key, window)
+    record = await _get_or_create_today_record(
+        db,
+        employee_id,
+        today,
+        location_id=employee.location_id if employee else None,
+        camera_id=camera_id,
+        shift_id=shift.id if shift else None,
     )
-    result = await db.execute(stmt)
-    record = result.scalar_one_or_none()
 
-    if record is None:
-        record = AttendanceRecord(
-            employee_id=employee_id,
-            work_date=today,
-            location_id=employee.location_id if employee else None,
-            camera_id=camera_id,
-            shift_id=shift.id if shift else None,
-            status="absent",
-        )
-        db.add(record)
-        await db.flush()
+    # Suppress duplicates using persisted state (authoritative across workers)
+    # plus the in-process fast path.
+    if fast_dup or _recent_action_within(record, window, now):
+        return record
 
     if not record.check_in_at:
         record.check_in_at = now
@@ -205,15 +273,6 @@ async def process_rfid_tap(
 ) -> AttendanceRecord:
     window = settings.rfid_duplicate_window_seconds
     dup_key = f"rfid:{employee_id}"
-    if _is_duplicate(dup_key, window):
-        stmt = select(AttendanceRecord).where(
-            AttendanceRecord.employee_id == employee_id,
-            AttendanceRecord.work_date == date.today(),
-        )
-        result = await db.execute(stmt)
-        existing = result.scalar_one_or_none()
-        if existing:
-            return existing
 
     emp_stmt = select(Employee).where(Employee.id == employee_id)
     emp_result = await db.execute(emp_stmt)
@@ -226,23 +285,18 @@ async def process_rfid_tap(
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None
 
-    stmt = select(AttendanceRecord).where(
-        AttendanceRecord.employee_id == employee_id,
-        AttendanceRecord.work_date == today,
+    fast_dup = _is_duplicate(dup_key, window)
+    record = await _get_or_create_today_record(
+        db,
+        employee_id,
+        today,
+        location_id=employee.location_id if employee else None,
+        camera_id=None,
+        shift_id=shift.id if shift else None,
     )
-    result = await db.execute(stmt)
-    record = result.scalar_one_or_none()
 
-    if record is None:
-        record = AttendanceRecord(
-            employee_id=employee_id,
-            work_date=today,
-            location_id=employee.location_id if employee else None,
-            shift_id=shift.id if shift else None,
-            status="absent",
-        )
-        db.add(record)
-        await db.flush()
+    if fast_dup or _recent_action_within(record, window, now):
+        return record
 
     is_entry = reader_direction in ("in", "both")
     is_exit = reader_direction in ("out", "both")
