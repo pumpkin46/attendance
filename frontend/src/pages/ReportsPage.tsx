@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api } from '../api/client'
+import { useApiQuery } from '../hooks/useApiQuery'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -56,37 +57,26 @@ export default function ReportsPage() {
   const [dailyDate, setDailyDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [monthYear, setMonthYear] = useState(() => String(new Date().getFullYear()))
   const [monthNum, setMonthNum] = useState(() => String(new Date().getMonth() + 1).padStart(2, '0'))
-  const [dailyReport, setDailyReport] = useState<DailyReport | null>(null)
-  const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null)
-  const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
 
-  const loadDaily = async () => {
-    setLoading(true)
-    try {
-      const { data } = await api.get<DailyReport>('/reports/daily', { params: { date: dailyDate } })
-      setDailyReport(data)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const dailyQuery = useApiQuery<DailyReport>(
+    ['reports', 'daily', dailyDate],
+    '/reports/daily',
+    { date: dailyDate },
+    { enabled: tab === 'daily' }
+  )
+  const monthlyQuery = useApiQuery<MonthlyReport>(
+    ['reports', 'monthly', monthYear, monthNum],
+    '/reports/monthly',
+    { year: monthYear, month: monthNum },
+    { enabled: tab === 'monthly' }
+  )
 
-  const loadMonthly = async () => {
-    setLoading(true)
-    try {
-      const { data } = await api.get<MonthlyReport>('/reports/monthly', {
-        params: { year: monthYear, month: monthNum },
-      })
-      setMonthlyReport(data)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (tab === 'daily') loadDaily()
-    else loadMonthly()
-  }, [tab])
+  const dailyReport = dailyQuery.data
+  const monthlyReport = monthlyQuery.data
+  const loading = tab === 'daily' ? dailyQuery.isFetching : monthlyQuery.isFetching
+  const loadDaily = () => dailyQuery.refetch()
+  const loadMonthly = () => monthlyQuery.refetch()
 
   const downloadExport = async (format: ExportFormat) => {
     setExporting(format)

@@ -5,7 +5,8 @@ import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Label } from '../components/ui/Label'
 import { Badge } from '../components/ui/Badge'
-import { AuthImage, openAuthMedia } from './AuthImage'
+import { AuthImage } from './AuthImage'
+import { openAuthMedia } from '../lib/authMedia'
 
 interface Host {
   id: number

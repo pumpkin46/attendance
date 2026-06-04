@@ -1,17 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-
-/** Strip /api/v1 prefix so axios baseURL resolves correctly. */
-export function toApiPath(url: string): string {
-  if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
-    return url
-  }
-  const prefix = '/api/v1'
-  if (url.startsWith(prefix)) {
-    return url.slice(prefix.length)
-  }
-  return url.startsWith('/') ? url : `/${url}`
-}
+import { toApiPath } from '../lib/authMedia'
 
 export function AuthImage({
   src,
@@ -22,21 +11,21 @@ export function AuthImage({
   alt?: string
   className?: string
 }) {
+  const direct = src && src.startsWith('data:') ? src : null
+  const needsFetch = Boolean(src) && !direct
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
 
-  useEffect(() => {
-    if (!src) {
-      setBlobUrl(null)
-      setFailed(false)
-      return
-    }
+  // Reset cached blob/error state when the source changes (render-phase, not in an effect).
+  const [trackedSrc, setTrackedSrc] = useState(src)
+  if (src !== trackedSrc) {
+    setTrackedSrc(src)
+    setBlobUrl(null)
+    setFailed(false)
+  }
 
-    if (src.startsWith('data:')) {
-      setBlobUrl(src)
-      setFailed(false)
-      return
-    }
+  useEffect(() => {
+    if (!needsFetch) return
 
     let objectUrl: string | null = null
     let cancelled = false
@@ -60,7 +49,11 @@ export function AuthImage({
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [src])
+  }, [src, needsFetch])
+
+  if (direct) {
+    return <img src={direct} alt={alt} className={className} />
+  }
 
   if (failed) {
     return (
@@ -77,15 +70,4 @@ export function AuthImage({
   }
 
   return <img src={blobUrl} alt={alt} className={className} />
-}
-
-export async function openAuthMedia(url: string) {
-  if (url.startsWith('data:')) {
-    window.open(url, '_blank')
-    return
-  }
-  const res = await api.get(toApiPath(url), { responseType: 'blob' })
-  const objectUrl = URL.createObjectURL(res.data)
-  window.open(objectUrl, '_blank')
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
 }

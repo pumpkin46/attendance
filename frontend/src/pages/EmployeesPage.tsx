@@ -1,23 +1,19 @@
-import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { useState } from 'react'
 import { Badge } from '../components/ui/Badge'
 import { Input } from '../components/ui/Input'
 import { PageHeader } from '../components/ui/PageHeader'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
+import { useApiQuery } from '../hooks/useApiQuery'
 import type { Employee, Paginated } from '../types'
 
 export default function EmployeesPage() {
-  const [employees, setEmployees] = useState<Employee[]>([])
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    api
-      .get<Paginated<Employee>>('/employees', { params: { search, per_page: 50 } })
-      .then((r) => setEmployees(r.data.data))
-      .finally(() => setLoading(false))
-  }, [search])
+  const { data, isPending: loading } = useApiQuery<Paginated<Employee>>(
+    ['employees', 'list', search],
+    '/employees',
+    { search, per_page: 50 }
+  )
+  const employees = data?.data ?? []
 
   return (
     <div>

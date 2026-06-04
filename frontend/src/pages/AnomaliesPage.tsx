@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useApiQuery } from '../hooks/useApiQuery'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -28,59 +30,55 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 export default function AnomaliesPage() {
-  const [anomalies, setAnomalies] = useState<AttendanceAnomaly[]>([])
-  const [summary, setSummary] = useState<AnomalySummary | null>(null)
+  const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState('open')
   const [severityFilter, setSeverityFilter] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [detecting, setDetecting] = useState(false)
   const [detectResult, setDetectResult] = useState<string | null>(null)
 
-  const load = () => {
-    setLoading(true)
-    Promise.all([
-      api.get<AnomalySummary>('/anomalies/summary'),
-      api.get<Paginated<AttendanceAnomaly>>('/anomalies', {
-        params: {
-          status: statusFilter || undefined,
-          severity: severityFilter || undefined,
-          per_page: 50,
-        },
-      }),
-    ])
-      .then(([summaryRes, listRes]) => {
-        setSummary(summaryRes.data)
-        setAnomalies(listRes.data.data)
-      })
-      .finally(() => setLoading(false))
-  }
+  const { data: summary } = useApiQuery<AnomalySummary>(
+    ['anomalies', 'summary'],
+    '/anomalies/summary'
+  )
+  const { data: list, isPending: loading } = useApiQuery<Paginated<AttendanceAnomaly>>(
+    ['anomalies', 'list', statusFilter, severityFilter],
+    '/anomalies',
+    {
+      status: statusFilter || undefined,
+      severity: severityFilter || undefined,
+      per_page: 50,
+    }
+  )
+  const anomalies = list?.data ?? []
 
-  useEffect(() => {
-    load()
-  }, [statusFilter, severityFilter])
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['anomalies'] })
 
-  const runDetection = async () => {
-    setDetecting(true)
-    setDetectResult(null)
-    try {
-      const { data } = await api.post<{
-        anomalies_found: number
-        records_analyzed: number
-        processing_ms: number
-      }>('/anomalies/detect', { lookback_days: 30 })
+  const detection = useMutation({
+    mutationFn: () =>
+      api.post<{ anomalies_found: number; records_analyzed: number; processing_ms: number }>(
+        '/anomalies/detect',
+        { lookback_days: 30 }
+      ),
+    onSuccess: ({ data }) => {
       setDetectResult(
         `Analyzed ${data.records_analyzed} records — ${data.anomalies_found} anomalies found (${data.processing_ms}ms)`
       )
-      load()
-    } finally {
-      setDetecting(false)
-    }
-  }
+      invalidate()
+    },
+  })
 
-  const updateStatus = async (id: number, status: 'acknowledged' | 'resolved' | 'false_positive') => {
-    await api.patch(`/anomalies/${id}`, { status })
-    load()
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      api.patch(`/anomalies/${id}`, { status }),
+    onSuccess: invalidate,
+  })
+
+  const detecting = detection.isPending
+  const runDetection = () => {
+    setDetectResult(null)
+    detection.mutate()
   }
+  const updateStatus = (id: number, status: 'acknowledged' | 'resolved' | 'false_positive') =>
+    statusMutation.mutate({ id, status })
 
   return (
     <div>

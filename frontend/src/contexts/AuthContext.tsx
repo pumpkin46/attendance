@@ -23,45 +23,48 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Only "loading" when there is a token to validate, so the effect never has to
+  // synchronously flip loading off for anonymous visitors.
+  const [loading, setLoading] = useState(() => Boolean(localStorage.getItem('auth_token')))
 
-  const loadUser = useCallback(async () => {
+  useEffect(() => {
     const token = localStorage.getItem('auth_token')
-    if (!token) {
-      setLoading(false)
-      return
-    }
-    try {
-      const { data } = await api.get<User>('/auth/me')
-      setUser(data)
-    } catch {
-      localStorage.removeItem('auth_token')
-    } finally {
-      setLoading(false)
+    if (!token) return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const { data } = await api.get<User>('/auth/me')
+        if (!cancelled) setUser(data)
+      } catch {
+        localStorage.removeItem('auth_token')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
   }, [])
 
-  useEffect(() => {
-    loadUser()
-  }, [loadUser])
-
-  const login = async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     const { data } = await api.post<{ token: string; user: User }>('/auth/login', {
       email,
       password,
     })
     localStorage.setItem('auth_token', data.token)
     setUser(data.user)
-  }
+  }, [])
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await api.post('/auth/logout')
     } finally {
       localStorage.removeItem('auth_token')
       setUser(null)
     }
-  }
+  }, [])
 
   const hasPermission = useCallback(
     (name: string) => {
@@ -84,6 +87,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+// Colocated with the provider by convention; the hook is the sole consumer API.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')

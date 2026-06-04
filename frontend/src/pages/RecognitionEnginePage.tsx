@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { api, getApiErrorMessage } from '../api/client'
+import { useApiQuery } from '../hooks/useApiQuery'
+
+interface EngineAlert {
+  severity: string
+  message: string
+  timestamp: string
+}
 
 interface EngineStatus {
   running: boolean
@@ -22,7 +29,7 @@ interface EngineStatus {
     }
     pipeline_performance: { stage_averages_ms: Record<string, number>; total_pipeline_avg_ms: number }
     camera_health: { cameras_reporting: number; avg_fps: number; avg_latency_ms: number }
-    alerts: { total: number; recent: any[] }
+    alerts: { total: number; recent: EngineAlert[] }
   }
   sla_compliance: Record<string, { target_ms: number; actual_ms: number; met: boolean }>
 }
@@ -52,52 +59,29 @@ function SlaIndicator({ name, target, actual, met }: { name: string; target: num
 }
 
 export default function RecognitionEnginePage() {
-  const [status, setStatus] = useState<EngineStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [actionLoading, setActionLoading] = useState(false)
+  const queryClient = useQueryClient()
+  const {
+    data: status,
+    isPending: loading,
+    error: queryError,
+  } = useApiQuery<EngineStatus>(['engine', 'status'], '/engine/status', undefined, {
+    refetchInterval: 5000,
+    silent: true,
+  })
 
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await api.get('/engine/status')
-      setStatus(res.data)
-      setError(null)
-    } catch (e: any) {
-      setError(e.message || 'Failed to fetch engine status')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const toggleEngine = useMutation({
+    mutationFn: (action: 'start' | 'stop') => api.post(`/engine/${action}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['engine', 'status'] }),
+  })
 
-  useEffect(() => {
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 5000)
-    return () => clearInterval(interval)
-  }, [fetchStatus])
-
-  const handleStart = async () => {
-    setActionLoading(true)
-    try {
-      await api.post('/engine/start')
-      await fetchStatus()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleStop = async () => {
-    setActionLoading(true)
-    try {
-      await api.post('/engine/stop')
-      await fetchStatus()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setActionLoading(false)
-    }
-  }
+  const error = toggleEngine.error
+    ? getApiErrorMessage(toggleEngine.error)
+    : queryError
+      ? getApiErrorMessage(queryError, 'Failed to fetch engine status')
+      : null
+  const actionLoading = toggleEngine.isPending
+  const handleStart = () => toggleEngine.mutate('start')
+  const handleStop = () => toggleEngine.mutate('stop')
 
   if (loading) {
     return (
@@ -262,7 +246,7 @@ export default function RecognitionEnginePage() {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Alerts</h2>
           <div className="space-y-2">
-            {status.metrics.alerts.recent.map((alert: any, i: number) => (
+            {status.metrics.alerts.recent.map((alert: EngineAlert, i: number) => (
               <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 dark:bg-gray-700/50">
                 <span className={`w-2 h-2 rounded-full ${alert.severity === 'critical' ? 'bg-red-500' : alert.severity === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'}`} />
                 <span className="text-sm text-gray-700 dark:text-gray-200 flex-1">{alert.message}</span>

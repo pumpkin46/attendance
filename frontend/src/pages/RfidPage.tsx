@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useApiQuery } from '../hooks/useApiQuery'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -37,43 +39,40 @@ const emptyReaderForm = {
 }
 
 export default function RfidPage() {
-  const [readers, setReaders] = useState<RfidReader[]>([])
-  const [events, setEvents] = useState<RfidEvent[]>([])
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [locations, setLocations] = useState<Location[]>([])
+  const queryClient = useQueryClient()
   const [showReaderForm, setShowReaderForm] = useState(false)
   const [readerForm, setReaderForm] = useState(emptyReaderForm)
   const [newToken, setNewToken] = useState<string | null>(null)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
   const [cardUid, setCardUid] = useState('')
   const [cardLabel, setCardLabel] = useState('')
-  const [employeeCards, setEmployeeCards] = useState<RfidCard[]>([])
   const [simulateReaderId, setSimulateReaderId] = useState('')
   const [simulateUid, setSimulateUid] = useState('')
   const [tapResult, setTapResult] = useState<TapResult | null>(null)
 
-  const loadReaders = () => api.get<RfidReader[]>('/rfid-readers').then((r) => setReaders(r.data))
-  const loadEvents = () =>
-    api
-      .get<Paginated<RfidEvent>>('/rfid-events', { params: { per_page: 25 } })
-      .then((r) => setEvents(r.data.data))
+  const { data: readers = [] } = useApiQuery<RfidReader[]>(['rfid', 'readers'], '/rfid-readers')
+  const { data: eventsResp } = useApiQuery<Paginated<RfidEvent>>(['rfid', 'events'], '/rfid-events', {
+    per_page: 25,
+  })
+  const events = eventsResp?.data ?? []
+  const { data: locations = [] } = useApiQuery<Location[]>(['locations'], '/locations')
+  const { data: employeesResp } = useApiQuery<Paginated<Employee>>(
+    ['employees', 'active'],
+    '/employees',
+    { per_page: 100, is_active: true }
+  )
+  const employees = employeesResp?.data ?? []
+  const { data: employeeCards = [] } = useApiQuery<RfidCard[]>(
+    ['rfid', 'cards', selectedEmployeeId],
+    `/employees/${selectedEmployeeId}/rfid-cards`,
+    undefined,
+    { enabled: Boolean(selectedEmployeeId) }
+  )
 
-  useEffect(() => {
-    loadReaders()
-    loadEvents()
-    api.get<Location[]>('/locations').then((r) => setLocations(r.data ?? []))
-    api
-      .get<Paginated<Employee>>('/employees', { params: { per_page: 100, is_active: true } })
-      .then((r) => setEmployees(r.data.data))
-  }, [])
-
-  useEffect(() => {
-    if (!selectedEmployeeId) {
-      setEmployeeCards([])
-      return
-    }
-    api.get<RfidCard[]>(`/employees/${selectedEmployeeId}/rfid-cards`).then((r) => setEmployeeCards(r.data))
-  }, [selectedEmployeeId])
+  const invalidateReaders = () => queryClient.invalidateQueries({ queryKey: ['rfid', 'readers'] })
+  const invalidateEvents = () => queryClient.invalidateQueries({ queryKey: ['rfid', 'events'] })
+  const invalidateCards = () =>
+    queryClient.invalidateQueries({ queryKey: ['rfid', 'cards', selectedEmployeeId] })
 
   const saveReader = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -85,7 +84,7 @@ export default function RfidPage() {
     if (data.api_token_plain) setNewToken(data.api_token_plain)
     setShowReaderForm(false)
     setReaderForm(emptyReaderForm)
-    loadReaders()
+    invalidateReaders()
   }
 
   const regenerateToken = async (readerId: number) => {
@@ -104,14 +103,12 @@ export default function RfidPage() {
     })
     setCardUid('')
     setCardLabel('')
-    api.get<RfidCard[]>(`/employees/${selectedEmployeeId}/rfid-cards`).then((r) => setEmployeeCards(r.data))
+    invalidateCards()
   }
 
   const revokeCard = async (cardId: number) => {
     await api.delete(`/rfid-cards/${cardId}`)
-    if (selectedEmployeeId) {
-      api.get<RfidCard[]>(`/employees/${selectedEmployeeId}/rfid-cards`).then((r) => setEmployeeCards(r.data))
-    }
+    invalidateCards()
   }
 
   const simulateTap = async (e: React.FormEvent) => {
@@ -123,12 +120,12 @@ export default function RfidPage() {
         uid: simulateUid,
       })
       setTapResult(data)
-      loadEvents()
-      loadReaders()
+      invalidateEvents()
+      invalidateReaders()
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: TapResult } }
       setTapResult(axiosErr.response?.data ?? { matched: false, reason: 'request_failed' })
-      loadEvents()
+      invalidateEvents()
     }
   }
 

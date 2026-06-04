@@ -184,7 +184,6 @@ export default function SidebarNav() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const scrollRef = useRef<HTMLElement>(null)
   const [scrollThumb, setScrollThumb] = useState<ScrollThumb>({
     height: 0,
@@ -196,12 +195,6 @@ export default function SidebarNav() {
     () => navGroups.find((g) => groupHasActiveItem(pathname, g))?.id,
     [pathname]
   )
-
-  useEffect(() => {
-    if (activeGroupId) {
-      setExpanded(new Set([activeGroupId]))
-    }
-  }, [activeGroupId])
 
   const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -217,11 +210,13 @@ export default function SidebarNav() {
       .filter((group) => group.items.length > 0)
   }, [query])
 
-  useEffect(() => {
-    if (query.trim()) {
-      setExpanded(new Set(filteredGroups.map((g) => g.id)))
-    }
-  }, [query, filteredGroups])
+  // Expansion is fully derived: a search expands every match, otherwise only the
+  // group owning the active route is open (accordion). Navigating updates the
+  // route, which re-derives this — no effect needed.
+  const expanded = useMemo(() => {
+    if (query.trim()) return new Set(filteredGroups.map((g) => g.id))
+    return new Set(activeGroupId ? [activeGroupId] : [])
+  }, [query, filteredGroups, activeGroupId])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -244,7 +239,6 @@ export default function SidebarNav() {
   }, [filteredGroups, expanded])
 
   const openGroup = (group: NavGroup) => {
-    setExpanded(new Set([group.id]))
     const first = group.items[0]
     if (first) {
       navigate(first.to)

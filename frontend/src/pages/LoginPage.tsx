@@ -9,8 +9,8 @@ import { Card } from '../components/ui/Card'
 
 export default function LoginPage() {
   const { user, login, loading } = useAuth()
-  const [email, setEmail] = useState('admin@attendance.local')
-  const [password, setPassword] = useState('password')
+  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@attendance.local' : '')
+  const [password, setPassword] = useState(import.meta.env.DEV ? 'password' : '')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 

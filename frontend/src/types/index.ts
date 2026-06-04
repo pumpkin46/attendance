@@ -168,3 +168,16 @@ export interface AnomalySummary {
   low: number
   by_type: Record<string, number>
 }
+
+export interface NfrCompliance {
+  nfr?: {
+    'NFR-007'?: { argon2_compliant?: boolean; hasher?: string }
+    'NFR-008'?: { enabled?: boolean }
+  }
+}
+
+export interface PlatformHealth {
+  status?: string
+  antispoof_model_loaded?: boolean
+  nfr_compliance?: NfrCompliance
+}

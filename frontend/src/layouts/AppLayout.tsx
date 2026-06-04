@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { Outlet } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { AppLogo } from '../components/AppLogo'
@@ -27,7 +28,11 @@ export default function AppLayout() {
           </div>
         </header>
         <main className="scrollbar-styled min-h-0 flex-1 overflow-y-auto p-6">
-          <Outlet />
+          <Suspense
+            fallback={<div className="grid h-full place-items-center text-slate-400">Loading…</div>}
+          >
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

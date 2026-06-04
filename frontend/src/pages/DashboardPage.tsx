@@ -1,17 +1,12 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../api/client'
 import { Badge } from '../components/ui/Badge'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
 import { StatCard } from '../components/ui/StatCard'
+import { StatCardSkeleton } from '../components/ui/Skeleton'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
-import type { CameraMonitoringSummary } from '../types'
-
-interface AnomalySummary {
-  open_total: number
-  critical: number
-}
+import { useApiQuery } from '../hooks/useApiQuery'
+import type { AnomalySummary, CameraMonitoringSummary, PlatformHealth } from '../types'
 
 interface TodaySummary {
   date: string
@@ -39,35 +34,42 @@ interface AppNotification {
 }
 
 export default function DashboardPage() {
-  const [summary, setSummary] = useState<TodaySummary | null>(null)
-  const [anomalySummary, setAnomalySummary] = useState<AnomalySummary | null>(null)
-  const [unknown, setUnknown] = useState<UnknownSummary | null>(null)
-  const [cameraMonitoring, setCameraMonitoring] = useState<CameraMonitoringSummary | null>(null)
-  const [notifications, setNotifications] = useState<AppNotification[]>([])
-  const [aiHealth, setAiHealth] = useState<Record<string, unknown> | null>(null)
-  const [platformHealth, setPlatformHealth] = useState<Record<string, unknown> | null>(null)
+  const { data: summary, isLoading: summaryLoading } = useApiQuery<TodaySummary>(
+    ['attendance', 'today'],
+    '/attendance/today',
+    undefined,
+    { silent: true }
+  )
+  const { data: anomalySummary } = useApiQuery<AnomalySummary>(
+    ['anomalies', 'summary'],
+    '/anomalies/summary',
+    undefined,
+    { silent: true }
+  )
+  const { data: unknown } = useApiQuery<UnknownSummary>(
+    ['recognition', 'unknown-summary'],
+    '/recognition/unknown-summary',
+    undefined,
+    { silent: true }
+  )
+  const { data: cameraMonitoring } = useApiQuery<CameraMonitoringSummary>(
+    ['cameras', 'monitoring'],
+    '/cameras/monitoring',
+    undefined,
+    { silent: true, refetchInterval: 30_000 }
+  )
+  const { data: health } = useApiQuery<PlatformHealth>(['health'], '/health', undefined, {
+    silent: true,
+  })
+  const { data: notificationsResp } = useApiQuery<{ data: AppNotification[] }>(
+    ['notifications', 'unread'],
+    '/notifications',
+    { unread_only: true, per_page: 5 },
+    { silent: true }
+  )
+  const notifications = notificationsResp?.data ?? []
 
-  useEffect(() => {
-    api.get<TodaySummary>('/attendance/today').then((r) => setSummary(r.data)).catch(() => {})
-    api.get<AnomalySummary>('/anomalies/summary').then((r) => setAnomalySummary(r.data)).catch(() => {})
-    api.get<UnknownSummary>('/recognition/unknown-summary').then((r) => setUnknown(r.data)).catch(() => {})
-    api.get<CameraMonitoringSummary>('/cameras/monitoring').then((r) => setCameraMonitoring(r.data)).catch(() => {})
-    api.get<Record<string, unknown>>('/health').then((r) => setPlatformHealth(r.data)).catch(() => {})
-    api
-      .get<{ data: AppNotification[] }>('/notifications', { params: { unread_only: true, per_page: 5 } })
-      .then((r) => setNotifications(r.data.data))
-      .catch(() => {})
-    api
-      .get<Record<string, unknown>>('/health')
-      .then((r) => setAiHealth(r.data))
-      .catch(() => setAiHealth({ status: 'unavailable' }))
-
-    const timer = setInterval(() => {
-      api.get<CameraMonitoringSummary>('/cameras/monitoring').then((r) => setCameraMonitoring(r.data)).catch(() => {})
-    }, 30_000)
-
-    return () => clearInterval(timer)
-  }, [])
+  const nfr = health?.nfr_compliance?.nfr
 
   return (
     <div>
@@ -77,16 +79,22 @@ export default function DashboardPage() {
       />
 
       <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
-        <StatCard label="Present today" value={summary?.present ?? '—'} />
-        <StatCard label="Late" value={summary?.late ?? '—'} tone="warn" />
-        <StatCard label="Absent" value={summary?.absent ?? '—'} tone="danger" />
-        <StatCard label="On leave" value={summary?.on_leave ?? '—'} />
-        <StatCard label="Unknown faces today" value={unknown?.today ?? '—'} tone="danger" />
-        <StatCard
-          label="Open anomalies"
-          value={anomalySummary?.open_total ?? '—'}
-          tone={(anomalySummary?.critical ?? 0) > 0 ? 'danger' : 'warn'}
-        />
+        {summaryLoading ? (
+          Array.from({ length: 6 }).map((_, i) => <StatCardSkeleton key={i} />)
+        ) : (
+          <>
+            <StatCard label="Present today" value={summary?.present ?? '—'} />
+            <StatCard label="Late" value={summary?.late ?? '—'} tone="warn" />
+            <StatCard label="Absent" value={summary?.absent ?? '—'} tone="danger" />
+            <StatCard label="On leave" value={summary?.on_leave ?? '—'} />
+            <StatCard label="Unknown faces today" value={unknown?.today ?? '—'} tone="danger" />
+            <StatCard
+              label="Open anomalies"
+              value={anomalySummary?.open_total ?? '—'}
+              tone={(anomalySummary?.critical ?? 0) > 0 ? 'danger' : 'warn'}
+            />
+          </>
+        )}
       </div>
 
       <Card className="mb-6">
@@ -148,14 +156,14 @@ export default function DashboardPage() {
             </li>
             <li className="flex items-center justify-between py-3">
               <span>AI recognition service</span>
-              <Badge tone={aiHealth?.status === 'healthy' ? 'ok' : 'warn'}>
-                {String(aiHealth?.status ?? 'checking')}
+              <Badge tone={health?.status === 'healthy' ? 'ok' : 'warn'}>
+                {health?.status ?? 'checking'}
               </Badge>
             </li>
             <li className="flex items-center justify-between py-3">
               <span>Liveness (FR-017/018)</span>
-              <Badge tone={aiHealth?.antispoof_model_loaded ? 'ok' : 'warn'}>
-                {aiHealth?.antispoof_model_loaded ? 'Anti-spoof active' : 'Model missing'}
+              <Badge tone={health?.antispoof_model_loaded ? 'ok' : 'warn'}>
+                {health?.antispoof_model_loaded ? 'Anti-spoof active' : 'Model missing'}
               </Badge>
             </li>
             <li className="flex items-center justify-between py-3">
@@ -164,37 +172,14 @@ export default function DashboardPage() {
             </li>
             <li className="flex items-center justify-between py-3">
               <span>Password hashing (NFR-007)</span>
-              <Badge
-                tone={
-                  (platformHealth?.nfr_compliance as { nfr?: { 'NFR-007'?: { argon2_compliant?: boolean } } })
-                    ?.nfr?.['NFR-007']?.argon2_compliant
-                    ? 'ok'
-                    : 'warn'
-                }
-              >
-                {String(
-                  (platformHealth?.nfr_compliance as { nfr?: { 'NFR-007'?: { hasher?: string } } })?.nfr?.[
-                    'NFR-007'
-                  ]?.hasher ?? 'argon2id'
-                )}
+              <Badge tone={nfr?.['NFR-007']?.argon2_compliant ? 'ok' : 'warn'}>
+                {nfr?.['NFR-007']?.hasher ?? 'argon2id'}
               </Badge>
             </li>
             <li className="flex items-center justify-between py-3">
               <span>GDPR (NFR-008)</span>
-              <Badge
-                tone={
-                  (platformHealth?.nfr_compliance as { nfr?: { 'NFR-008'?: { enabled?: boolean } } })?.nfr?.[
-                    'NFR-008'
-                  ]?.enabled
-                    ? 'ok'
-                    : 'neutral'
-                }
-              >
-                {(
-                  platformHealth?.nfr_compliance as { nfr?: { 'NFR-008'?: { enabled?: boolean } } }
-                )?.nfr?.['NFR-008']?.enabled
-                  ? 'Enabled'
-                  : 'Off'}
+              <Badge tone={nfr?.['NFR-008']?.enabled ? 'ok' : 'neutral'}>
+                {nfr?.['NFR-008']?.enabled ? 'Enabled' : 'Off'}
               </Badge>
             </li>
           </ul>

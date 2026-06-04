@@ -80,11 +80,16 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
   const inFlightDetect = useRef(false)
   const inFlightIdentify = useRef(false)
   const faceCountRef = useRef(0)
-  const sessionIdRef = useRef(
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `kiosk-${Date.now()}`
-  )
+  const sessionIdRef = useRef('')
+
+  // Generate a stable per-mount session id in an effect (time/random sources are
+  // impure and not allowed during render).
+  useEffect(() => {
+    sessionIdRef.current =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `kiosk-${Date.now()}`
+  }, [])
 
   const pushFrame = useCallback(
     (frame: string) => {
@@ -141,9 +146,6 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
   useEffect(() => {
     if (!running || !active) return
 
-    let detectTimer: ReturnType<typeof setInterval>
-    let identifyTimer: ReturnType<typeof setInterval>
-    let bufferTimer: ReturnType<typeof setInterval>
     let frames = 0
     let lastFps = performance.now()
 
@@ -219,9 +221,9 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
       }
     }
 
-    detectTimer = setInterval(runDetect, DETECT_MS)
-    identifyTimer = setInterval(runIdentify, IDENTIFY_MS)
-    bufferTimer = setInterval(sampleForLiveness, FRAME_BUFFER_MS)
+    const detectTimer = setInterval(runDetect, DETECT_MS)
+    const identifyTimer = setInterval(runIdentify, IDENTIFY_MS)
+    const bufferTimer = setInterval(sampleForLiveness, FRAME_BUFFER_MS)
     runDetect()
 
     return () => {
