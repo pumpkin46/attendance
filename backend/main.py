@@ -52,10 +52,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version="2.0.0", lifespan=lifespan)
 
+# Wildcard origins and credentialed requests are mutually exclusive (and unsafe
+# together); only allow credentials when origins are explicitly listed.
+_cors_origins = settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials="*" not in _cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

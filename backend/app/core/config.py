@@ -1,4 +1,7 @@
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_SECRET_KEY = "change-me-in-production"
 
 
 class Settings(BaseSettings):
@@ -10,9 +13,27 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_url: str = "http://localhost:8000"
     app_timezone: str = "UTC"
-    secret_key: str = "change-me-in-production"
-    jwt_algorithm: str = "HS256"
-    token_expire_minutes: int = 60 * 24 * 7  # 7 days
+    secret_key: str = Field(
+        default=DEFAULT_SECRET_KEY,
+        validation_alias=AliasChoices("SECRET_KEY", "JWT_SECRET"),
+    )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        validation_alias=AliasChoices("JWT_ALGORITHM",),
+    )
+    token_expire_minutes: int = Field(
+        default=60 * 24 * 7,  # 7 days
+        validation_alias=AliasChoices("TOKEN_EXPIRE_MINUTES", "JWT_EXPIRATION_MINUTES"),
+    )
+
+    # ── CORS ─────────────────────────────────────────────────────────────
+    # Comma-separated list of allowed browser origins. Avoid "*" together
+    # with credentialed requests; set explicit origins in production.
+    cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
 
     # ── Database ─────────────────────────────────────────────────────────
     db_host: str = "127.0.0.1"
@@ -191,6 +212,24 @@ class Settings(BaseSettings):
     @property
     def upload_dir(self) -> str:
         return self.visitor_upload_dir
+
+    @model_validator(mode="after")
+    def _enforce_production_security(self) -> "Settings":
+        """Fail closed on insecure defaults when running in production."""
+        if self.app_env == "production":
+            if self.secret_key in ("", DEFAULT_SECRET_KEY):
+                raise ValueError(
+                    "SECRET_KEY must be overridden with a strong, unique value when "
+                    "APP_ENV=production (the default value is insecure and makes JWTs forgeable)."
+                )
+            if "*" in self.cors_origins:
+                raise ValueError(
+                    "CORS_ALLOW_ORIGINS must not contain '*' when APP_ENV=production; "
+                    "list explicit frontend origins instead."
+                )
+            # Never serve debug error pages / verbose tracebacks in production.
+            self.app_debug = False
+        return self
 
 
 settings = Settings()
