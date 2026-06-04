@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import func, select
 
 from app.core.config import settings
@@ -14,7 +14,8 @@ from app.core.dependencies import (
     get_rfid_reader,
     require_permission,
 )
-from app.core.pagination import paginate, PaginationDep
+from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.core.pagination import PaginatedResponse, paginate, PaginationDep
 from app.core.rate_limit import recognition_rate_limit
 from app.core.security import generate_device_token
 from app.middleware.tenant import apply_tenant_filter
@@ -29,8 +30,10 @@ from app.schemas.rfid import (
     RfidCardOut,
     RfidEventOut,
     RfidReaderCreate,
+    RfidReaderCreatedOut,
     RfidReaderOut,
     RfidReaderUpdate,
+    RfidTokenRegeneratedOut,
     ReaderBrief,
     SimulateRequest,
     SimulateTapResponse,
@@ -62,7 +65,11 @@ async def list_readers(
     return [_format_reader(r, tap_counts.get(r.id, 0), threshold) for r in readers]
 
 
-@router.post("/rfid-readers", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/rfid-readers",
+    response_model=RfidReaderCreatedOut,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_reader(
     body: RfidReaderCreate,
     request: Request,
@@ -94,7 +101,7 @@ async def create_reader(
     )
 
     out = _format_reader(reader, 0, _online_threshold())
-    return {**out.model_dump(mode="json"), "api_token_plain": plain_token}
+    return RfidReaderCreatedOut(**out.model_dump(), api_token_plain=plain_token)
 
 
 @router.get("/rfid-readers/{reader_id}", response_model=RfidReaderOut)
@@ -140,7 +147,7 @@ async def update_reader(
     return _format_reader(reader, tap_counts.get(reader.id, 0), _online_threshold())
 
 
-@router.delete("/rfid-readers/{reader_id}", status_code=status.HTTP_200_OK)
+@router.delete("/rfid-readers/{reader_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_reader(
     reader_id: int,
     request: Request,
@@ -160,10 +167,13 @@ async def delete_reader(
         entity_id=reader.id,
         ip_address=request.client.host if request.client else None,
     )
-    return {"message": "RFID reader deactivated"}
+    return None
 
 
-@router.post("/rfid-readers/{reader_id}/regenerate-token", response_model=dict)
+@router.post(
+    "/rfid-readers/{reader_id}/regenerate-token",
+    response_model=RfidTokenRegeneratedOut,
+)
 async def regenerate_reader_token(
     reader_id: int,
     request: Request,
@@ -184,11 +194,11 @@ async def regenerate_reader_token(
         entity_id=reader.id,
         ip_address=request.client.host if request.client else None,
     )
-    return {
-        "id": reader.id,
-        "api_token_plain": plain_token,
-        "message": "Token regenerated. Update the physical reader with the new token.",
-    }
+    return RfidTokenRegeneratedOut(
+        id=reader.id,
+        api_token_plain=plain_token,
+        message="Token regenerated. Update the physical reader with the new token.",
+    )
 
 
 # ── RFID Cards ────────────────────────────────────────────────────────────────
@@ -228,7 +238,7 @@ async def add_employee_card(
     uid = body.uid.strip().upper()
     existing = await db.execute(select(RfidCard).where(RfidCard.uid == uid))
     if existing.scalar_one_or_none():
-        raise HTTPException(status.HTTP_409_CONFLICT, "Card UID already registered")
+        raise ConflictError("Card UID already registered")
 
     card = RfidCard(employee_id=employee_id, uid=uid, label=body.label)
     db.add(card)
@@ -247,7 +257,7 @@ async def add_employee_card(
     return RfidCardOut.model_validate(card, from_attributes=True)
 
 
-@router.delete("/rfid-cards/{card_id}", status_code=status.HTTP_200_OK)
+@router.delete("/rfid-cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_card(
     card_id: int,
     request: Request,
@@ -264,7 +274,7 @@ async def delete_card(
     result = await db.execute(stmt)
     card = result.scalar_one_or_none()
     if not card:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "RFID card not found")
+        raise NotFoundError("RFID card not found")
 
     card.is_active = False
     await db.flush()
@@ -277,13 +287,13 @@ async def delete_card(
         entity_id=card.id,
         ip_address=request.client.host if request.client else None,
     )
-    return {"message": "RFID card revoked"}
+    return None
 
 
 # ── RFID Events ───────────────────────────────────────────────────────────────
 
 
-@router.get("/rfid-events")
+@router.get("/rfid-events", response_model=PaginatedResponse[RfidEventOut])
 async def list_rfid_events(
     db: DbSession,
     org_id: TenantOrgId,
@@ -298,7 +308,7 @@ async def list_rfid_events(
     )
     stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
     page = await paginate(db, stmt, pagination.page, pagination.per_page)
-    page["data"] = [_format_event(e) for e in page["data"]]
+    page.data = [_format_event(e) for e in page.data]
     return page
 
 
@@ -342,7 +352,7 @@ def _online_threshold() -> datetime:
 def _parse_direction(value: str) -> RfidDirection:
     mapping = {"in": RfidDirection.in_, "out": RfidDirection.out, "both": RfidDirection.both}
     if value not in mapping:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Invalid direction: {value}")
+        raise ValidationError(f"Invalid direction: {value}")
     return mapping[value]
 
 
@@ -540,7 +550,7 @@ async def _employee_in_tenant_or_404(
     result = await db.execute(stmt)
     employee = result.scalar_one_or_none()
     if employee is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+        raise NotFoundError("Employee not found")
     return employee
 
 
@@ -556,5 +566,5 @@ async def _get_reader_or_404(
     result = await db.execute(stmt)
     reader = result.scalar_one_or_none()
     if not reader:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "RFID reader not found")
+        raise NotFoundError("RFID reader not found")
     return reader

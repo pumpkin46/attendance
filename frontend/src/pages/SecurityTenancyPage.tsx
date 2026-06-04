@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { useState } from 'react'
+import { clearOrgId, getOrgId, setOrgId } from '../lib/session'
 import { useAuth } from '../contexts/AuthContext'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
@@ -7,83 +7,38 @@ import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataT
 import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
 import { Label } from '../components/ui/Label'
-
-interface SecurityConfig {
-  authentication: {
-    jwt: { enabled: boolean; token_type: string }
-    oauth2: { enabled: boolean; providers: string[] }
-    saml: { enabled: boolean }
-    ldap: { enabled: boolean }
-  }
-  authorization: { model: string; roles: Record<string, string> }
-  encryption: {
-    in_transit: { protocol: string; force_https: boolean }
-    at_rest: { cipher: string }
-    secrets: { driver: string; vault_configured: boolean; kms_configured: boolean }
-  }
-  tenancy: {
-    isolation_enabled: boolean
-    supports: Record<string, boolean>
-  }
-}
-
-interface Organization {
-  id: number
-  name: string
-  code: string
-  branches_count?: number
-  departments_count?: number
-  employees_count?: number
-}
-
-interface Branch {
-  id: number
-  name: string
-  code: string
-  organization_id: number
-}
-
-interface Department {
-  id: number
-  name: string
-  code: string
-  branch?: { name: string }
-}
+import {
+  useBranches,
+  useCreateOrganization,
+  useDepartments,
+  useOrganizations,
+  useSecurityConfig,
+} from './security/queries'
 
 export default function SecurityTenancyPage() {
   const { isSuperAdmin, hasPermission } = useAuth()
-  const [security, setSecurity] = useState<SecurityConfig | null>(null)
-  const [organizations, setOrganizations] = useState<Organization[]>([])
-  const [branches, setBranches] = useState<Branch[]>([])
-  const [departments, setDepartments] = useState<Department[]>([])
-  const [tenantOrgId, setTenantOrgId] = useState(
-    () => localStorage.getItem('tenant_organization_id') ?? ''
-  )
-  const [newOrg, setNewOrg] = useState({ name: '', code: '', timezone: 'UTC' })
+  const { data: security } = useSecurityConfig(hasPermission('security.view'))
+  const { data: organizations } = useOrganizations()
+  const { data: branches } = useBranches()
+  const { data: departments } = useDepartments()
+  const createOrganization = useCreateOrganization()
 
-  useEffect(() => {
-    if (hasPermission('security.view')) {
-      api.get<SecurityConfig>('/security/config').then((r) => setSecurity(r.data)).catch(() => {})
-    }
-    api.get<Organization[]>('/organizations').then((r) => setOrganizations(r.data ?? []))
-    api.get<Branch[]>('/branches').then((r) => setBranches(r.data ?? []))
-    api.get<Department[]>('/departments').then((r) => setDepartments(r.data ?? []))
-  }, [hasPermission])
+  const [tenantOrgId, setTenantOrgId] = useState(() => getOrgId() ?? '')
+  const [newOrg, setNewOrg] = useState({ name: '', code: '', timezone: 'UTC' })
 
   const applyTenantHeader = () => {
     if (tenantOrgId) {
-      localStorage.setItem('tenant_organization_id', tenantOrgId)
+      setOrgId(tenantOrgId)
     } else {
-      localStorage.removeItem('tenant_organization_id')
+      clearOrgId()
     }
     window.location.reload()
   }
 
-  const createOrganization = async () => {
-    await api.post('/organizations', newOrg)
-    setNewOrg({ name: '', code: '', timezone: 'UTC' })
-    const { data } = await api.get<Organization[]>('/organizations')
-    setOrganizations(data)
+  const handleCreateOrganization = () => {
+    createOrganization.mutate(newOrg, {
+      onSuccess: () => setNewOrg({ name: '', code: '', timezone: 'UTC' }),
+    })
   }
 
   return (
@@ -173,7 +128,11 @@ export default function SecurityTenancyPage() {
               value={newOrg.code}
               onChange={(e) => setNewOrg({ ...newOrg, code: e.target.value })}
             />
-            <Button type="button" onClick={createOrganization} disabled={!newOrg.name || !newOrg.code}>
+            <Button
+              type="button"
+              onClick={handleCreateOrganization}
+              disabled={!newOrg.name || !newOrg.code || createOrganization.isPending}
+            >
               Create
             </Button>
           </div>

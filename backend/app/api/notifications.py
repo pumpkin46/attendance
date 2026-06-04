@@ -2,18 +2,32 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
+from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DbSession
-from app.core.pagination import PaginationDep, paginate
+from app.core.errors import NotFoundError
+from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.models.notification import Notification
 from app.schemas.notification import NotificationOut
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
+# The notifications table is polymorphic (Laravel-style notifiable_type/_id),
+# not a flat user_id column. User-targeted notifications use this notifiable_type.
+USER_NOTIFIABLE = "user"
 
-@router.get("")
+
+class UnreadCountResponse(BaseModel):
+    unread_count: int
+
+
+class MarkAllReadResponse(BaseModel):
+    marked_read: int
+
+
+@router.get("", response_model=PaginatedResponse[NotificationOut])
 async def list_notifications(
     db: DbSession,
     user: CurrentUser,
@@ -21,23 +35,27 @@ async def list_notifications(
 ):
     stmt = (
         select(Notification)
-        .where(Notification.user_id == user.id)
+        .where(
+            Notification.notifiable_type == USER_NOTIFIABLE,
+            Notification.notifiable_id == user.id,
+        )
         .order_by(Notification.created_at.desc())
     )
     return await paginate(db, stmt, pagination.page, pagination.per_page, NotificationOut)
 
 
-@router.get("/unread-count")
+@router.get("/unread-count", response_model=UnreadCountResponse)
 async def unread_count(
     db: DbSession,
     user: CurrentUser,
 ):
     stmt = select(func.count(Notification.id)).where(
-        Notification.user_id == user.id,
+        Notification.notifiable_type == USER_NOTIFIABLE,
+        Notification.notifiable_id == user.id,
         Notification.read_at.is_(None),
     )
     count = (await db.execute(stmt)).scalar() or 0
-    return {"unread_count": count}
+    return UnreadCountResponse(unread_count=count)
 
 
 @router.post("/{notification_id}/read", response_model=NotificationOut)
@@ -48,12 +66,13 @@ async def mark_as_read(
 ):
     stmt = select(Notification).where(
         Notification.id == notification_id,
-        Notification.user_id == user.id,
+        Notification.notifiable_type == USER_NOTIFIABLE,
+        Notification.notifiable_id == user.id,
     )
     result = await db.execute(stmt)
     notif = result.scalar_one_or_none()
     if not notif:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Notification not found")
+        raise NotFoundError("Notification not found")
 
     if notif.read_at is None:
         notif.read_at = datetime.now(timezone.utc)
@@ -62,13 +81,14 @@ async def mark_as_read(
     return NotificationOut.model_validate(notif, from_attributes=True)
 
 
-@router.post("/read-all")
+@router.post("/read-all", response_model=MarkAllReadResponse)
 async def mark_all_as_read(
     db: DbSession,
     user: CurrentUser,
 ):
     stmt = select(Notification).where(
-        Notification.user_id == user.id,
+        Notification.notifiable_type == USER_NOTIFIABLE,
+        Notification.notifiable_id == user.id,
         Notification.read_at.is_(None),
     )
     result = await db.execute(stmt)
@@ -80,4 +100,4 @@ async def mark_all_as_read(
         notif.read_at = now
         count += 1
     await db.flush()
-    return {"marked_read": count}
+    return MarkAllReadResponse(marked_read=count)

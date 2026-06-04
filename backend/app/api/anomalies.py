@@ -3,17 +3,20 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Query
+from fastapi.concurrency import run_in_threadpool
 
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.pagination import PaginationParams, paginate, PaginationDep
+from app.core.errors import NotFoundError
+from app.core.pagination import PaginatedResponse, paginate, PaginationDep
 from app.models.attendance import AttendanceAnomaly, AttendanceRecord
 from app.models.employee import Employee
 from app.schemas.attendance import (
     AnomalyDetectRequest,
+    AnomalyDetectResponse,
     AnomalyOut,
     AnomalySummary,
     AnomalyUpdateRequest,
@@ -31,7 +34,7 @@ def _org_employee_ids(org_id: int | None):
     return select(Employee.id).where(Employee.organization_id == org_id)
 
 
-@router.get("/anomalies/summary")
+@router.get("/anomalies/summary", response_model=AnomalySummary)
 async def anomaly_summary(
     db: DbSession,
     org_id: TenantOrgId,
@@ -67,7 +70,7 @@ async def anomaly_summary(
     )
 
 
-@router.get("/anomalies")
+@router.get("/anomalies", response_model=PaginatedResponse[AnomalyOut])
 async def list_anomalies(
     db: DbSession,
     org_id: TenantOrgId,
@@ -96,7 +99,7 @@ async def list_anomalies(
     return await paginate(db, stmt, pagination.page, pagination.per_page, AnomalyOut)
 
 
-@router.post("/anomalies/detect")
+@router.post("/anomalies/detect", response_model=AnomalyDetectResponse)
 async def detect_anomalies(
     body: AnomalyDetectRequest,
     db: DbSession,
@@ -149,7 +152,7 @@ async def detect_anomalies(
         "check_in_deviation_minutes": settings.anomaly_checkin_deviation_minutes,
     }
 
-    analysis = analyze_records(record_dicts, config)
+    analysis = await run_in_threadpool(analyze_records, record_dicts, config)
     detected = analysis.get("anomalies", [])
 
     run_id = str(uuid.uuid4())
@@ -178,16 +181,16 @@ async def detect_anomalies(
     if saved:
         await emit(org_id, "anomalies.changed", {"detection_run_id": run_id, "count": saved})
 
-    return {
-        "success": True,
-        "detection_run_id": run_id,
-        "records_analyzed": analysis.get("records_analyzed", 0),
-        "anomalies_detected": saved,
-        "processing_ms": analysis.get("processing_ms", 0),
-    }
+    return AnomalyDetectResponse(
+        success=True,
+        detection_run_id=run_id,
+        records_analyzed=analysis.get("records_analyzed", 0),
+        anomalies_detected=saved,
+        processing_ms=analysis.get("processing_ms", 0),
+    )
 
 
-@router.patch("/anomalies/{anomaly_id}")
+@router.patch("/anomalies/{anomaly_id}", response_model=AnomalyOut)
 async def update_anomaly(
     anomaly_id: int,
     body: AnomalyUpdateRequest,
@@ -198,7 +201,7 @@ async def update_anomaly(
     result = await db.execute(stmt)
     anomaly = result.scalar_one_or_none()
     if not anomaly:
-        raise HTTPException(404, "Anomaly not found")
+        raise NotFoundError("Anomaly not found")
 
     now = datetime.now(timezone.utc)
     anomaly.status = body.status

@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.pagination import PaginationParams, paginate, PaginationDep
+from app.core.pagination import PaginatedResponse, PaginationParams, paginate, PaginationDep
 from app.models.attendance import AttendanceRecord
 from app.models.employee import Employee
 from app.schemas.attendance import (
@@ -22,7 +22,7 @@ from app.schemas.attendance import (
 router = APIRouter(prefix="/api/v1", tags=["attendance"])
 
 
-@router.get("/attendance/config")
+@router.get("/attendance/config", response_model=AttendanceConfigResponse)
 async def attendance_config(user: CurrentUser) -> AttendanceConfigResponse:
     return AttendanceConfigResponse(
         attendance_grace_minutes=settings.attendance_grace_minutes,
@@ -40,7 +40,7 @@ async def attendance_config(user: CurrentUser) -> AttendanceConfigResponse:
     )
 
 
-@router.get("/attendance")
+@router.get("/attendance", response_model=PaginatedResponse[AttendanceRecordOut])
 async def list_attendance(
     db: DbSession,
     user: CurrentUser,
@@ -66,7 +66,7 @@ async def list_attendance(
     return await paginate(db, stmt, pagination.page, pagination.per_page, AttendanceRecordOut)
 
 
-@router.get("/attendance/today")
+@router.get("/attendance/today", response_model=TodaySummary)
 async def today_summary(
     db: DbSession,
     user: CurrentUser,
@@ -101,7 +101,7 @@ async def today_summary(
     )
 
 
-@router.post("/attendance/manual")
+@router.post("/attendance/manual", response_model=AttendanceRecordOut)
 async def create_manual_attendance(
     body: AttendanceManualRequest,
     db: DbSession,

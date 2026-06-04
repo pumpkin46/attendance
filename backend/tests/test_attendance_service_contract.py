@@ -14,7 +14,7 @@ from app.services.attendance_service import process_recognition, process_rfid_ta
 
 
 def test_process_recognition_accepts_engine_api_call():
-    # Mirrors app/api/engine_api.py
+    # Mirrors app/api/engine.py
     inspect.signature(process_recognition).bind(
         db="db",
         employee_id=1,
@@ -26,7 +26,7 @@ def test_process_recognition_accepts_engine_api_call():
 
 
 def test_process_recognition_accepts_recognition_api_call():
-    # Mirrors app/api/recognition_api.py
+    # Mirrors app/api/recognition.py
     inspect.signature(process_recognition).bind(
         db="db",
         employee_id=1,

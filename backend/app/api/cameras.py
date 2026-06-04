@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.pagination import PaginationParams, paginate, PaginationDep
+from app.core.errors import NotFoundError, ValidationError
+from app.core.pagination import PaginatedResponse, paginate, PaginationDep
 from app.middleware.tenant import apply_tenant_filter
 from app.models.camera import Camera, CameraHealthLog
 from app.models.location import Location
@@ -24,6 +26,7 @@ from app.schemas.camera import (
     CameraUpdate,
     CaptureResult,
 )
+from app.schemas.monitoring import MonitoringCameraOut
 from app.api.monitoring import _camera_is_online, _format_camera
 from app.services.stream_capture import capture_stream_frame
 
@@ -82,7 +85,7 @@ async def get_camera_monitoring(
     )
 
 
-@router.get("/cameras")
+@router.get("/cameras", response_model=PaginatedResponse[MonitoringCameraOut])
 async def list_cameras(
     db: DbSession,
     user: CurrentUser,
@@ -96,9 +99,9 @@ async def list_cameras(
         seconds=settings.camera_online_threshold_seconds
     )
     page = await paginate(db, stmt, pagination.page, pagination.per_page)
-    page["data"] = [
+    page.data = [
         _format_camera(c, _camera_is_online(c, threshold), recognition_today=0)
-        for c in page["data"]
+        for c in page.data
     ]
     return page
 
@@ -132,7 +135,7 @@ async def get_camera(
     result = await db.execute(stmt)
     camera = result.scalar_one_or_none()
     if not camera:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise NotFoundError("Camera not found")
     return CameraOut.model_validate(camera, from_attributes=True)
 
 
@@ -153,7 +156,7 @@ async def update_camera(
     result = await db.execute(stmt)
     camera = result.scalar_one_or_none()
     if not camera:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise NotFoundError("Camera not found")
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -180,11 +183,14 @@ async def delete_camera(
     result = await db.execute(stmt)
     camera = result.scalar_one_or_none()
     if not camera:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise NotFoundError("Camera not found")
     await db.delete(camera)
 
 
-@router.get("/cameras/{camera_id}/health")
+@router.get(
+    "/cameras/{camera_id}/health",
+    response_model=PaginatedResponse[CameraHealthLogOut],
+)
 async def get_camera_health(
     camera_id: int,
     db: DbSession,
@@ -216,7 +222,7 @@ async def camera_heartbeat(
     result = await db.execute(stmt)
     camera = result.scalar_one_or_none()
     if not camera:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise NotFoundError("Camera not found")
 
     camera.last_heartbeat_at = datetime.now(timezone.utc)
     await db.flush()
@@ -249,11 +255,11 @@ async def capture_camera_frame(
     result = await db.execute(stmt)
     camera = result.scalar_one_or_none()
     if not camera:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+        raise NotFoundError("Camera not found")
     if not camera.stream_url:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Camera has no stream URL configured")
+        raise ValidationError("Camera has no stream URL configured")
 
-    capture = capture_stream_frame(camera.stream_url)
+    capture = await run_in_threadpool(capture_stream_frame, camera.stream_url)
     return CaptureResult(
         success=capture["success"],
         image=capture.get("image"),

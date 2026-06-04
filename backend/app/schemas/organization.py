@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Organization ────────────────────────────────────────────────────────────
@@ -25,6 +25,14 @@ class OrganizationCreate(BaseModel):
     code: str
     timezone: str = "UTC"
     settings: dict[str, Any] | None = None
+
+
+class OrganizationWithCounts(OrganizationOut):
+    """Organization plus computed related-entity counts."""
+
+    branches_count: int = 0
+    departments_count: int = 0
+    employees_count: int = 0
 
 
 # ── Branch ──────────────────────────────────────────────────────────────────
@@ -73,6 +81,17 @@ class DepartmentCreate(BaseModel):
     branch_id: int | None = None
 
 
+class BranchBrief(BaseModel):
+    id: int
+    name: str
+
+
+class DepartmentWithBranch(DepartmentOut):
+    """Department plus an embedded branch summary when available."""
+
+    branch: BranchBrief | None = None
+
+
 # ── Location ────────────────────────────────────────────────────────────────
 
 class LocationOut(BaseModel):
@@ -88,3 +107,28 @@ class LocationOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class LocationBrief(BaseModel):
+    """Minimal location summary returned by the locations list endpoint."""
+
+    id: int
+    name: str
+    address: str | None = None
+
+
+# ── Security config ───────────────────────────────────────────────────────────
+
+class SecurityConfigResponse(BaseModel):
+    """Static security/platform configuration descriptor.
+
+    The nested shape is descriptive rather than strictly modelled, so the
+    sub-sections allow extra keys.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    authentication: dict[str, Any]
+    authorization: dict[str, Any]
+    encryption: dict[str, Any]
+    tenancy: dict[str, Any]

@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import or_, select
 
 from app.core.dependencies import (
@@ -11,7 +12,8 @@ from app.core.dependencies import (
     DbSession,
     TenantOrgId,
 )
-from app.core.pagination import PaginationDep, paginate
+from app.core.errors import NotFoundError, ValidationError
+from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.middleware.tenant import apply_tenant_filter
 from app.models.visitor import (
     DocumentType,
@@ -34,6 +36,7 @@ from app.schemas.visitor import (
     VisitorDailyReport,
     VisitorDashboard,
     VisitorDocumentOut,
+    VisitorFaceEnrollResult,
     VisitorOut,
     VisitorPhotoOut,
     VisitorUpdate,
@@ -140,7 +143,7 @@ async def list_pending_approvals(
     return [_format_visitor(v) for v in visitors]
 
 
-@router.get("/visitors")
+@router.get("/visitors", response_model=PaginatedResponse[VisitorOut])
 async def list_visitors(
     db: DbSession,
     user: CurrentUser,
@@ -163,7 +166,7 @@ async def list_visitors(
         )
 
     result = await paginate(db, stmt, pagination.page, pagination.per_page, None)
-    result["data"] = [_format_visitor(v) for v in result["data"]]
+    result.data = [_format_visitor(v) for v in result.data]
     return result
 
 
@@ -176,7 +179,7 @@ async def create_visitor(
     user: CurrentUser,
 ):
     if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+        raise ValidationError("Organization context required")
     try:
         visitor = await visitor_service.create_visitor(
             db,
@@ -186,7 +189,7 @@ async def create_visitor(
             pre_registered=body.pre_registered,
         )
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+        raise ValidationError(str(e)) from e
 
     await log_action(
         db,
@@ -244,7 +247,7 @@ async def update_visitor(
     return _format_visitor(visitor)
 
 
-@router.post("/visitors/{visitor_id}/enroll-face")
+@router.post("/visitors/{visitor_id}/enroll-face", response_model=VisitorFaceEnrollResult)
 async def enroll_visitor_face(
     visitor_id: int,
     request: Request,
@@ -256,7 +259,7 @@ async def enroll_visitor_face(
     body = await request.json()
     image = body.get("image")
     if not image:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Image required")
+        raise ValidationError("Image required")
     method = body.get("method", "admin")
     return await visitor_service.enroll_visitor_face(db, visitor, image, method=method)
 
@@ -275,7 +278,7 @@ async def check_in_visitor(
             db, visitor, user_id=user.id, method="reception"
         )
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+        raise ValidationError(str(e)) from e
     await log_action(
         db,
         user_id=user.id,
@@ -313,7 +316,7 @@ async def check_out_visitor(
             notes=notes,
         )
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+        raise ValidationError(str(e)) from e
     await log_action(
         db,
         user_id=user.id,
@@ -341,7 +344,7 @@ async def approve_visitor(
             db, visitor, body.stage, user_id=user.id, notes=body.notes
         )
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+        raise ValidationError(str(e)) from e
     await log_action(
         db,
         user_id=user.id,
@@ -364,7 +367,7 @@ async def cancel_visitor(
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     visitor.status = VisitorStatus.cancelled
     identity = f"visitor-{visitor.id}"
-    face_service.delete_employee(identity)
+    await run_in_threadpool(face_service.delete_employee, identity)
     visitor.face_registered = False
     await visitor_service.log_visitor_event(
         db, visitor.id, "cancelled", "Visit cancelled", user.id
@@ -393,7 +396,7 @@ async def revoke_visitor_access(
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     identity = f"visitor-{visitor.id}"
-    face_service.delete_employee(identity)
+    await run_in_threadpool(face_service.delete_employee, identity)
     visitor.face_registered = False
     visitor.face_expires_at = datetime.now(timezone.utc)
     visitor.status = VisitorStatus.expired
@@ -463,7 +466,7 @@ async def upload_visitor_photo(
     elif image:
         _, url = save_visitor_base64(oid, visitor_id, "photos", image)
     else:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File or image required")
+        raise ValidationError("File or image required")
 
     if is_primary:
         visitor.photo_url = url
@@ -512,7 +515,7 @@ async def delete_visitor_photo(
     await _get_visitor_or_404(db, visitor_id, org_id)
     photo = await db.get(VisitorPhoto, photo_id)
     if not photo or photo.visitor_id != visitor_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Photo not found")
+        raise NotFoundError("Photo not found")
     await db.delete(photo)
     await db.flush()
 
@@ -593,7 +596,7 @@ async def delete_visitor_document(
     await _get_visitor_or_404(db, visitor_id, org_id)
     doc = await db.get(VisitorDocument, doc_id)
     if not doc or doc.visitor_id != visitor_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+        raise NotFoundError("Document not found")
     await db.delete(doc)
     await db.flush()
 
@@ -645,7 +648,7 @@ async def set_visitor_access_permissions(
 # ── Blacklist ─────────────────────────────────────────────────────────────────
 
 
-@router.get("/visitor-blacklist")
+@router.get("/visitor-blacklist", response_model=PaginatedResponse[BlacklistOut])
 async def list_blacklist(
     db: DbSession,
     org_id: TenantOrgId,
@@ -655,7 +658,7 @@ async def list_blacklist(
     stmt = select(VisitorBlacklist).where(VisitorBlacklist.is_active == True).order_by(VisitorBlacklist.id.desc())  # noqa: E712
     stmt = apply_tenant_filter(stmt, org_id, VisitorBlacklist.organization_id)
     result = await paginate(db, stmt, pagination.page, pagination.per_page, None)
-    result["data"] = [
+    result.data = [
         BlacklistOut(
             id=e.id,
             organization_id=e.organization_id,
@@ -667,7 +670,7 @@ async def list_blacklist(
             is_active=e.is_active,
             created_at=e.created_at,
         )
-        for e in result["data"]
+        for e in result.data
     ]
     return result
 
@@ -681,7 +684,7 @@ async def add_to_blacklist(
     user: CurrentUser,
 ):
     if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+        raise ValidationError("Organization context required")
     from app.models.visitor import BlacklistReason
     try:
         reason = BlacklistReason(body.reason)
@@ -723,7 +726,7 @@ async def remove_from_blacklist(
     stmt = apply_tenant_filter(stmt, org_id, VisitorBlacklist.organization_id)
     entry = (await db.execute(stmt)).scalar_one_or_none()
     if not entry:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Blacklist entry not found")
+        raise NotFoundError("Blacklist entry not found")
     entry.is_active = False
     await db.flush()
 
@@ -762,5 +765,5 @@ async def _get_visitor_or_404(
     stmt = apply_tenant_filter(stmt, org_id, Visitor.organization_id)
     visitor = (await db.execute(stmt)).scalar_one_or_none()
     if not visitor:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Visitor not found")
+        raise NotFoundError("Visitor not found")
     return visitor

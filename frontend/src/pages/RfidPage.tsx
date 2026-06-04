@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api } from '../api/client'
 import { useApiQuery } from '../hooks/useApiQuery'
 import { Badge } from '../components/ui/Badge'
@@ -74,59 +75,86 @@ export default function RfidPage() {
   const invalidateCards = () =>
     queryClient.invalidateQueries({ queryKey: ['rfid', 'cards', selectedEmployeeId] })
 
-  const saveReader = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const { data } = await api.post<RfidReader & { api_token_plain?: string }>('/rfid-readers', {
-      location_id: Number(readerForm.location_id),
-      name: readerForm.name,
-      direction: readerForm.direction,
-    })
-    if (data.api_token_plain) setNewToken(data.api_token_plain)
-    setShowReaderForm(false)
-    setReaderForm(emptyReaderForm)
-    invalidateReaders()
-  }
+  const createReader = useMutation({
+    mutationFn: () =>
+      api.post<RfidReader & { api_token_plain?: string }>('/rfid-readers', {
+        location_id: Number(readerForm.location_id),
+        name: readerForm.name,
+        direction: readerForm.direction,
+      }),
+    onSuccess: ({ data }) => {
+      if (data.api_token_plain) setNewToken(data.api_token_plain)
+      setShowReaderForm(false)
+      setReaderForm(emptyReaderForm)
+      toast.success('Reader registered')
+      invalidateReaders()
+    },
+  })
 
-  const regenerateToken = async (readerId: number) => {
-    const { data } = await api.post<{ api_token_plain: string }>(
-      `/rfid-readers/${readerId}/regenerate-token`
-    )
-    setNewToken(data.api_token_plain)
-  }
+  const regenerate = useMutation({
+    mutationFn: (readerId: number) =>
+      api.post<{ api_token_plain: string }>(`/rfid-readers/${readerId}/regenerate-token`),
+    onSuccess: ({ data }) => {
+      setNewToken(data.api_token_plain)
+      toast.success('Token regenerated')
+    },
+  })
 
-  const assignCard = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedEmployeeId) return
-    await api.post(`/employees/${selectedEmployeeId}/rfid-cards`, {
-      uid: cardUid,
-      label: cardLabel || null,
-    })
-    setCardUid('')
-    setCardLabel('')
-    invalidateCards()
-  }
+  const assignCardMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/employees/${selectedEmployeeId}/rfid-cards`, {
+        uid: cardUid,
+        label: cardLabel || null,
+      }),
+    onSuccess: () => {
+      setCardUid('')
+      setCardLabel('')
+      toast.success('Card assigned')
+      invalidateCards()
+    },
+  })
 
-  const revokeCard = async (cardId: number) => {
-    await api.delete(`/rfid-cards/${cardId}`)
-    invalidateCards()
-  }
+  const revokeCardMutation = useMutation({
+    mutationFn: (cardId: number) => api.delete(`/rfid-cards/${cardId}`),
+    onSuccess: () => {
+      toast.success('Card revoked')
+      invalidateCards()
+    },
+  })
 
-  const simulateTap = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setTapResult(null)
-    try {
-      const { data } = await api.post<TapResult>('/rfid/simulate', {
+  const simulate = useMutation({
+    mutationFn: () =>
+      api.post<TapResult>('/rfid/simulate', {
         rfid_reader_id: Number(simulateReaderId),
         uid: simulateUid,
-      })
+      }),
+    onSuccess: ({ data }) => {
       setTapResult(data)
       invalidateEvents()
       invalidateReaders()
-    } catch (err: unknown) {
+    },
+    onError: (err: unknown) => {
       const axiosErr = err as { response?: { data?: TapResult } }
       setTapResult(axiosErr.response?.data ?? { matched: false, reason: 'request_failed' })
       invalidateEvents()
-    }
+    },
+  })
+
+  const saveReader = (e: React.FormEvent) => {
+    e.preventDefault()
+    createReader.mutate()
+  }
+  const regenerateToken = (readerId: number) => regenerate.mutate(readerId)
+  const assignCard = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedEmployeeId) return
+    assignCardMutation.mutate()
+  }
+  const revokeCard = (cardId: number) => revokeCardMutation.mutate(cardId)
+  const simulateTap = (e: React.FormEvent) => {
+    e.preventDefault()
+    setTapResult(null)
+    simulate.mutate()
   }
 
   const onlineCount = readers.filter((r) => r.online).length

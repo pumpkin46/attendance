@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { getOrgId, getToken } from '../lib/session'
 import { useAuth } from './AuthContext'
 
 export type RealtimeStatus = 'connecting' | 'open' | 'closed'
@@ -28,9 +29,9 @@ const RealtimeContext = createContext<{ status: RealtimeStatus }>({ status: 'clo
  * non-sensitive tenant id stays in the query string.
  */
 function buildWsTarget(): { url: string; protocols: string[] } | null {
-  const token = localStorage.getItem('auth_token')
+  const token = getToken()
   if (!token) return null
-  const org = localStorage.getItem('tenant_organization_id')
+  const org = getOrgId()
   const apiBase = import.meta.env.VITE_API_URL ?? '/api/v1'
   const httpBase = /^https?:\/\//.test(apiBase) ? apiBase : window.location.origin + apiBase
   const wsBase = httpBase.replace(/^http/, 'ws')

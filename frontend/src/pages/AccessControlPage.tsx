@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { useState } from 'react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input, Select } from '../components/ui/Input'
@@ -8,40 +7,26 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { Badge } from '../components/ui/Badge'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
 import { useWebcam } from '../hooks/useWebcam'
-import type { Paginated } from '../types'
-
-interface AccessPoint {
-  id: number
-  name: string
-  device_type: string
-  default_action: string
-  controller_url?: string
-  is_active: boolean
-  camera?: { id: number; name: string }
-}
-
-interface AccessConfig {
-  actions: Record<string, string>
-  device_types: Record<string, string>
-  grant_conditions: Record<string, boolean>
-}
-
-interface FaceGrantResult {
-  granted: boolean
-  identity_type?: string
-  visitor_id?: number
-  employee_id?: number
-  confidence: number
-  deny_reason?: string
-  action?: string
-}
+import {
+  useAccessConfig,
+  useAccessPoints,
+  useCreateAccessPoint,
+  useExecuteAccessAction,
+  useFaceGrant,
+} from './access/queries'
+import type { FaceGrantResult } from './access/types'
 
 export default function AccessControlPage() {
-  const [points, setPoints] = useState<AccessPoint[]>([])
-  const [config, setConfig] = useState<AccessConfig | null>(null)
+  const { data: pointsData } = useAccessPoints()
+  const { data: config } = useAccessConfig()
+  const createAccessPoint = useCreateAccessPoint()
+  const executeAction = useExecuteAccessAction()
+  const faceGrant = useFaceGrant()
+
+  const points = Array.isArray(pointsData) ? pointsData : (pointsData?.data ?? [])
+
   const [faceGrantPoint, setFaceGrantPoint] = useState<number | null>(null)
   const [grantResult, setGrantResult] = useState<FaceGrantResult | null>(null)
-  const [granting, setGranting] = useState(false)
   const { videoRef, active, start, stop, captureFrame } = useWebcam()
   const [form, setForm] = useState({
     organization_id: '1',
@@ -52,33 +37,20 @@ export default function AccessControlPage() {
     camera_id: '',
   })
 
-  const load = () =>
-    api
-      .get<AccessPoint[] | Paginated<AccessPoint>>('/access-points')
-      .then((r) => {
-        const payload = r.data
-        setPoints(Array.isArray(payload) ? payload : (payload.data ?? []))
-      })
-      .catch(() => setPoints([]))
-
-  useEffect(() => {
-    load()
-    api.get<AccessConfig>('/access-points/config').then((r) => setConfig(r.data))
-  }, [])
-
-  const create = async (e: React.FormEvent) => {
+  const create = (e: React.FormEvent) => {
     e.preventDefault()
-    await api.post('/access-points', {
-      ...form,
+    createAccessPoint.mutate({
       organization_id: Number(form.organization_id),
+      name: form.name,
+      device_type: form.device_type,
+      default_action: form.default_action,
       camera_id: form.camera_id ? Number(form.camera_id) : null,
       controller_url: form.controller_url || null,
     })
-    load()
   }
 
-  const execute = async (id: number, action: string) => {
-    await api.post(`/access-points/${id}/execute`, { action })
+  const execute = (id: number, action: string) => {
+    executeAction.mutate({ id, action })
   }
 
   const openFaceGrant = async (id: number) => {
@@ -97,16 +69,8 @@ export default function AccessControlPage() {
     if (!faceGrantPoint) return
     const frame = captureFrame()
     if (!frame) return
-    setGranting(true)
-    try {
-      const { data } = await api.post<FaceGrantResult>(`/access-points/${faceGrantPoint}/face-grant`, {
-        image: frame,
-        require_liveness: false,
-      })
-      setGrantResult(data)
-    } finally {
-      setGranting(false)
-    }
+    const data = await faceGrant.mutateAsync({ id: faceGrantPoint, image: frame })
+    setGrantResult(data)
   }
 
   return (
@@ -236,8 +200,8 @@ export default function AccessControlPage() {
               </div>
             )}
             <div className="flex gap-2">
-              <Button onClick={runFaceGrant} disabled={!active || granting}>
-                {granting ? 'Identifying…' : 'Capture & grant'}
+              <Button onClick={runFaceGrant} disabled={!active || faceGrant.isPending}>
+                {faceGrant.isPending ? 'Identifying…' : 'Capture & grant'}
               </Button>
               <Button variant="ghost" onClick={closeFaceGrant}>Close</Button>
             </div>

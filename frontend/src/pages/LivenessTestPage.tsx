@@ -1,33 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../api/client'
 import { useWebcam } from '../hooks/useWebcam'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
-
-interface LivenessResult {
-  passed: boolean
-  score: number
-  blink_detected: boolean
-  head_movement_detected: boolean
-  frame_count: number
-  reason?: string
-  checks?: Record<string, unknown>
-  processing_ms?: number
-}
-
-interface HealthInfo {
-  liveness_enabled?: boolean
-  active_liveness_enabled?: boolean
-  antispoof_model_loaded?: boolean
-  liveness_methods?: {
-    ai_model?: string
-    blink_detection?: boolean
-    head_movement?: boolean
-    spoof_types?: string[]
-  }
-}
+import { useLivenessHealth, useVerifyLiveness } from './enrollment/queries'
+import type { LivenessResult } from './enrollment/types'
 
 const FRAME_MS = 250
 const MAX_FRAMES = 20
@@ -35,19 +13,13 @@ const MIN_FRAMES = 5
 
 export default function LivenessTestPage() {
   const { videoRef, canvasRef, active, error: camError, start, stop, captureFrame } = useWebcam()
+  const { data: health } = useLivenessHealth()
+  const verify = useVerifyLiveness()
+  const loading = verify.isPending
   const [recording, setRecording] = useState(false)
   const [frames, setFrames] = useState<string[]>([])
   const [result, setResult] = useState<LivenessResult | null>(null)
-  const [health, setHealth] = useState<HealthInfo | null>(null)
-  const [loading, setLoading] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    api
-      .get<HealthInfo>('/health')
-      .then((r) => setHealth(r.data))
-      .catch(() => setHealth(null))
-  }, [])
 
   useEffect(() => {
     return () => {
@@ -80,15 +52,12 @@ export default function LivenessTestPage() {
 
   const runVerify = async () => {
     if (frames.length < MIN_FRAMES) return
-    setLoading(true)
     setResult(null)
     try {
-      const { data } = await api.post<LivenessResult>('/recognition/liveness/verify', {
-        frames,
-      })
+      const data = await verify.mutateAsync(frames)
       setResult(data)
-    } finally {
-      setLoading(false)
+    } catch {
+      // error surfaced via toast
     }
   }
 

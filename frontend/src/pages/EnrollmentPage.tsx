@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { api } from '../api/client'
+import { useCallback, useRef, useState, type FormEvent } from 'react'
 import { useWebcam } from '../hooks/useWebcam'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -8,56 +7,24 @@ import { Label } from '../components/ui/Label'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Select } from '../components/ui/Input'
 import { cn } from '../lib/cn'
-import type { Employee, Paginated } from '../types'
-
-interface EnrollmentConfig {
-  mode: string
-  required_poses: string[]
-  pose_labels?: Record<string, string>
-  min_images: number
-  max_images: number
-  retain_raw_images: boolean
-  quality_thresholds?: Record<string, number>
-}
-
-interface PoseCapture {
-  pose_type: string
-  dataUrl: string
-  accepted: boolean
-  reason?: string
-  quality_score?: number
-  face_metadata?: Record<string, unknown>
-}
-
-const REASON_LABELS: Record<string, string> = {
-  blurry: 'Too blurry',
-  too_dark: 'Image too dark',
-  low_resolution: 'Face too small / low resolution',
-  multiple_faces: 'Multiple faces detected',
-  no_face: 'No face detected',
-  occluded_face: 'Face occluded or partial',
-  covered_face: 'Face covered or partial',
-  low_detection_score: 'Face not clear enough',
-  low_quality: 'Overall quality too low',
-  invalid_image: 'Invalid image',
-  not_smiling: 'Please smile',
-  not_neutral: 'Please use a neutral expression',
-  glasses_not_detected: 'Glasses not visible',
-  glasses_detected: 'Remove glasses for this step',
-  wrong_pose: 'Pose does not match instruction',
-  validation_error: 'Validation failed',
-}
+import { useEnrollFace, useEnrollableEmployees, useEnrollmentConfig, useValidateImage } from './enrollment/queries'
+import { REASON_LABELS, type PoseCapture } from './enrollment/types'
 
 export default function EnrollmentPage() {
-  const [employees, setEmployees] = useState<Employee[]>([])
+  const { data: employeesPage } = useEnrollableEmployees()
+  const { data: config } = useEnrollmentConfig()
+  const employees = employeesPage?.data ?? []
+
   const [employeeId, setEmployeeId] = useState('')
-  const [config, setConfig] = useState<EnrollmentConfig | null>(null)
   const [poses, setPoses] = useState<Record<string, PoseCapture>>({})
   const [stepIndex, setStepIndex] = useState(0)
   const [message, setMessage] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [useCamera, setUseCamera] = useState(true)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const validateImage = useValidateImage()
+  const enrollFace = useEnrollFace()
+  const submitting = enrollFace.isPending
 
   const { videoRef, canvasRef, active, error: camError, start, stop, captureFrame } = useWebcam()
 
@@ -65,24 +32,10 @@ export default function EnrollmentPage() {
   const currentPose = requiredPoses[stepIndex] ?? requiredPoses[0]
   const currentLabel = config?.pose_labels?.[currentPose] ?? currentPose?.replace(/_/g, ' ') ?? ''
 
-  useEffect(() => {
-    api.get<Paginated<Employee>>('/employees', { params: { per_page: 100, is_active: true } })
-      .then((r) => setEmployees(r.data.data))
-    api.get<EnrollmentConfig>('/enrollment/config').then((r) => setConfig(r.data))
-  }, [])
-
   const validateAndSetPose = useCallback(
     async (poseType: string, dataUrl: string) => {
       try {
-        const { data } = await api.post<{
-          accepted: boolean
-          reason?: string
-          quality_score?: number
-          face_metadata?: Record<string, unknown>
-        }>('/enrollment/validate-image', {
-          image: dataUrl,
-          expected_pose: poseType,
-        })
+        const data = await validateImage.mutateAsync({ image: dataUrl, expected_pose: poseType })
 
         setPoses((prev) => ({
           ...prev,
@@ -114,7 +67,7 @@ export default function EnrollmentPage() {
         return false
       }
     },
-    [requiredPoses.length, stepIndex]
+    [validateImage, requiredPoses.length, stepIndex]
   )
 
   const captureFromCamera = async () => {
@@ -157,15 +110,9 @@ export default function EnrollmentPage() {
       if (poses[p]?.accepted) posePayload[p] = poses[p].dataUrl
     }
 
-    setSubmitting(true)
     setMessage('')
     try {
-      const { data } = await api.post<{
-        message: string
-        embeddings_stored: number
-        enrollment_score?: number
-        average_quality_score?: number
-      }>(`/employees/${employeeId}/enroll-face-structured`, { poses: posePayload })
+      const data = await enrollFace.mutateAsync({ employeeId, poses: posePayload })
 
       setMessage(
         `${data.message} — ${data.embeddings_stored} embeddings, ` +
@@ -185,8 +132,6 @@ export default function EnrollmentPage() {
       } else {
         setMessage(body?.error ?? 'Enrollment failed')
       }
-    } finally {
-      setSubmitting(false)
     }
   }
 

@@ -93,3 +93,22 @@ class BuildingConfigResponse(BaseModel):
 class OccupancyPublishRequest(BaseModel):
     location_id: int
     count: int
+
+
+class ConnectorTestResponse(BaseModel):
+    """Result of a connector webhook test ping.
+
+    On success the HTTP status/body are returned; on transport failure only
+    ``success`` and ``error`` are populated.
+    """
+
+    success: bool
+    status_code: int | None = None
+    response_body: str | None = None
+    error: str | None = None
+
+
+class OccupancyPublishResponse(BaseModel):
+    success: bool
+    dispatched_to: int
+    total_connectors: int

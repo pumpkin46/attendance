@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.dependencies import DbSession, TenantOrgId, require_permission
-from app.core.pagination import PaginationParams, paginate, PaginationDep
+from app.core.pagination import PaginatedResponse, paginate, PaginationDep
 from app.models.audit import AuditLog
 
 router = APIRouter(prefix="/api/v1", tags=["audit"])
@@ -28,7 +28,7 @@ class AuditLogOut(BaseModel):
     created_at: datetime | None = None
 
 
-@router.get("/audit-logs")
+@router.get("/audit-logs", response_model=PaginatedResponse[AuditLogOut])
 async def list_audit_logs(
     db: DbSession,
     org_id: TenantOrgId,

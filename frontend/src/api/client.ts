@@ -1,12 +1,19 @@
 import axios from 'axios'
+import { clearToken, getOrgId, getToken } from '../lib/session'
 
 const API_URL = import.meta.env.VITE_API_URL ?? '/api/v1'
 
 /** Extract a human-readable message from an axios/unknown error. */
 export function getApiErrorMessage(error: unknown, fallback = 'Something went wrong'): string {
   if (axios.isAxiosError(error)) {
-    const data = error.response?.data as { error?: string; message?: string } | undefined
-    return data?.error ?? data?.message ?? error.message ?? fallback
+    const data = error.response?.data as
+      | { error?: string | { message?: string }; message?: string; detail?: string }
+      | undefined
+    // New envelope: { error: { code, message } }. Also tolerate legacy shapes
+    // ({ error: "msg" }, FastAPI's { detail }) so older responses still read well.
+    const err = data?.error
+    const fromError = typeof err === 'string' ? err : err?.message
+    return fromError ?? data?.message ?? data?.detail ?? error.message ?? fallback
   }
   return error instanceof Error ? error.message : fallback
 }
@@ -22,11 +29,11 @@ export const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token')
+  const token = getToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
-  const orgId = localStorage.getItem('tenant_organization_id')
+  const orgId = getOrgId()
   if (orgId) {
     config.headers['X-Organization-Id'] = orgId
   }
@@ -37,7 +44,7 @@ api.interceptors.response.use(
   (r) => r,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('auth_token')
+      clearToken()
       if (!window.location.pathname.startsWith('/login')) {
         window.location.href = '/login'
       }

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession
+from app.core.errors import AuthError, PermissionDeniedError
 from app.core.rate_limit import login_rate_limit
 from app.core.security import (
     create_access_token,
@@ -25,6 +27,10 @@ from app.services.audit_service import log_action
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
+class LogoutResponse(BaseModel):
+    message: str
+
+
 @router.post("/login", response_model=LoginResponse, dependencies=[login_rate_limit()])
 async def login(body: LoginRequest, request: Request, db: DbSession):
     stmt = (
@@ -36,16 +42,10 @@ async def login(body: LoginRequest, request: Request, db: DbSession):
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(body.password, user.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
+        raise AuthError("Invalid email or password")
 
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is deactivated",
-        )
+        raise PermissionDeniedError("Account is deactivated")
 
     if needs_rehash(user.password):
         user.password = hash_password(body.password)
@@ -68,7 +68,7 @@ async def login(body: LoginRequest, request: Request, db: DbSession):
     )
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=LogoutResponse)
 async def logout(user: CurrentUser, request: Request, db: DbSession):
     await log_action(
         db,
@@ -79,7 +79,7 @@ async def logout(user: CurrentUser, request: Request, db: DbSession):
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("User-Agent"),
     )
-    return {"message": "Logged out successfully"}
+    return LogoutResponse(message="Logged out successfully")
 
 
 @router.get("/me", response_model=UserOut)

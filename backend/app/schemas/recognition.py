@@ -87,6 +87,11 @@ class DeleteRequest(BaseModel):
     employee_id: str
 
 
+class DeleteResponse(BaseModel):
+    success: bool = True
+    employee_id: str | None = None
+
+
 class EnrollResponse(BaseModel):
     success: bool = True
     employee_id: str | None = None

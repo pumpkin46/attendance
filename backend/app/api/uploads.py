@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from fastapi.responses import FileResponse
 
 from app.core.dependencies import CurrentUser, TenantOrgId
+from app.core.errors import NotFoundError
 from app.services.upload_storage import resolve_upload_path
 
 router = APIRouter(prefix="/api/v1/uploads", tags=["uploads"])
@@ -21,9 +22,9 @@ async def serve_visitor_upload(
     # Enforce tenant isolation: non-super-admins (tenant_org_id is not None)
     # may only read uploads belonging to their own organization.
     if tenant_org_id is not None and tenant_org_id != org_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+        raise NotFoundError("Not found")
     if category not in ("photos", "documents"):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+        raise NotFoundError("Not found")
     path = resolve_upload_path(org_id, visitor_id, category, filename)
     media = "application/pdf" if path.suffix.lower() == ".pdf" else "image/jpeg"
     if path.suffix.lower() == ".png":

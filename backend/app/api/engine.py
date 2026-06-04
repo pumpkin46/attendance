@@ -6,10 +6,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, status
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.errors import NotFoundError
 from app.engine.config import engine_config
 from app.engine.recognition_engine import get_recognition_engine
 from app.engine.stream_manager import (
@@ -23,6 +25,26 @@ from app.engine.unknown_detector import get_unknown_detector
 from app.engine.face_tracker import get_tracker
 from app.engine.vector_search import get_vector_search
 from app.realtime.hub import emit
+from app.schemas.engine import (
+    EngineActionResult,
+    EngineConfigResponse,
+    EngineConfigUpdateResult,
+    EngineStatus,
+    FaceDetectionResult,
+    IndexReloadResult,
+    IndexStats,
+    PerformanceRequirements,
+    PerformanceSummary,
+    RecognitionMetrics,
+    RecognitionResult,
+    SLACompliance,
+    StreamAddResult,
+    StreamControlResult,
+    StreamListStatus,
+    StreamStatus,
+    TrackingStats,
+    UnknownPersonsResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +108,7 @@ class EngineConfigUpdate(BaseModel):
 # ─── Recognition Endpoints ────────────────────────────────────────────────────
 
 
-@router.post("/recognize")
+@router.post("/recognize", response_model=RecognitionResult)
 async def engine_recognize(
     body: EngineRecognizeRequest,
     user: CurrentUser,
@@ -95,7 +117,8 @@ async def engine_recognize(
 ):
     """Run the full 9-stage recognition pipeline on an image."""
     engine = get_recognition_engine()
-    result = engine.recognize_image(
+    result = await run_in_threadpool(
+        engine.recognize_image,
         body.image,
         camera_id=body.camera_id,
         location_id=body.location_id,
@@ -130,14 +153,15 @@ async def engine_recognize(
     return result.to_dict()
 
 
-@router.post("/recognize-stream")
+@router.post("/recognize-stream", response_model=RecognitionResult)
 async def engine_recognize_stream(
     body: EngineStreamRecognizeRequest,
     user: CurrentUser,
 ):
     """Capture a frame from a video stream and run recognition."""
     engine = get_recognition_engine()
-    result = engine.recognize_stream(
+    result = await run_in_threadpool(
+        engine.recognize_stream,
         body.stream_url,
         camera_id=body.camera_id,
         location_id=body.location_id,
@@ -147,17 +171,17 @@ async def engine_recognize_stream(
     return result.to_dict()
 
 
-@router.post("/detect")
+@router.post("/detect", response_model=FaceDetectionResult)
 async def engine_detect(body: EngineDetectRequest, user: CurrentUser):
     """Detect faces in an image without running full recognition."""
     engine = get_recognition_engine()
-    return engine.detect_faces(body.image)
+    return await run_in_threadpool(engine.detect_faces, body.image)
 
 
 # ─── Stream Management ────────────────────────────────────────────────────────
 
 
-@router.post("/streams/add")
+@router.post("/streams/add", response_model=StreamAddResult)
 async def add_stream(
     body: StreamAddRequest,
     user: require_permission("cameras.manage"),
@@ -177,7 +201,8 @@ async def add_stream(
     except ValueError:
         mode = StreamMode.LIVE_STREAM
 
-    stream = manager.add_stream(
+    stream = await run_in_threadpool(
+        manager.add_stream,
         camera_id=body.camera_id,
         stream_url=body.stream_url,
         protocol=protocol,
@@ -193,55 +218,55 @@ async def add_stream(
     return {"success": True, "camera_id": body.camera_id, "status": stream.status.value}
 
 
-@router.post("/streams/start")
+@router.post("/streams/start", response_model=StreamControlResult)
 async def start_stream(body: StreamControlRequest, user: require_permission("cameras.manage")):
     """Start processing a registered stream."""
     manager = get_stream_manager()
     ok = await manager.start_stream(body.camera_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="Stream not found")
+        raise NotFoundError("Stream not found")
     return {"success": True, "camera_id": body.camera_id}
 
 
-@router.post("/streams/stop")
+@router.post("/streams/stop", response_model=StreamControlResult)
 async def stop_stream(body: StreamControlRequest, user: require_permission("cameras.manage")):
     """Stop processing a stream."""
     manager = get_stream_manager()
     ok = await manager.stop_stream(body.camera_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="Stream not found")
+        raise NotFoundError("Stream not found")
     return {"success": True, "camera_id": body.camera_id}
 
 
-@router.delete("/streams/{camera_id}")
+@router.delete("/streams/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_stream(camera_id: int, user: require_permission("cameras.manage")):
     """Remove a stream from the engine."""
     manager = get_stream_manager()
-    manager.remove_stream(camera_id)
-    return {"success": True, "camera_id": camera_id}
+    await run_in_threadpool(manager.remove_stream, camera_id)
+    return None
 
 
-@router.get("/streams")
+@router.get("/streams", response_model=StreamListStatus)
 async def list_streams(user: CurrentUser):
     """Get status of all registered streams."""
     manager = get_stream_manager()
-    return manager.get_all_status()
+    return await run_in_threadpool(manager.get_all_status)
 
 
-@router.get("/streams/{camera_id}")
+@router.get("/streams/{camera_id}", response_model=StreamStatus)
 async def get_stream_status(camera_id: int, user: CurrentUser):
     """Get status of a specific stream."""
     manager = get_stream_manager()
-    status_info = manager.get_stream_status(camera_id)
+    status_info = await run_in_threadpool(manager.get_stream_status, camera_id)
     if not status_info:
-        raise HTTPException(status_code=404, detail="Stream not found")
+        raise NotFoundError("Stream not found")
     return status_info
 
 
 # ─── Engine Control ───────────────────────────────────────────────────────────
 
 
-@router.post("/start")
+@router.post("/start", response_model=EngineActionResult)
 async def start_engine(user: require_permission("recognition.manage")):
     """Start the recognition engine."""
     engine = get_recognition_engine()
@@ -250,7 +275,7 @@ async def start_engine(user: require_permission("recognition.manage")):
     return {"success": True, "status": "running"}
 
 
-@router.post("/stop")
+@router.post("/stop", response_model=EngineActionResult)
 async def stop_engine(user: require_permission("recognition.manage")):
     """Stop the recognition engine."""
     engine = get_recognition_engine()
@@ -259,48 +284,48 @@ async def stop_engine(user: require_permission("recognition.manage")):
     return {"success": True, "status": "stopped"}
 
 
-@router.get("/status")
+@router.get("/status", response_model=EngineStatus)
 async def get_engine_status(user: CurrentUser):
     """Get comprehensive engine status."""
     engine = get_recognition_engine()
-    return engine.get_engine_status()
+    return await run_in_threadpool(engine.get_engine_status)
 
 
 # ─── Metrics & Monitoring ─────────────────────────────────────────────────────
 
 
-@router.get("/metrics")
+@router.get("/metrics", response_model=PerformanceSummary)
 async def get_engine_metrics(user: require_permission("recognition.view")):
     """Get engine performance metrics."""
     metrics = get_metrics()
-    return metrics.get_performance_summary()
+    return await run_in_threadpool(metrics.get_performance_summary)
 
 
-@router.get("/metrics/sla")
+@router.get("/metrics/sla", response_model=SLACompliance)
 async def get_sla_compliance(user: require_permission("recognition.view")):
     """Get SLA compliance report."""
     metrics = get_metrics()
-    return metrics.get_sla_compliance()
+    return await run_in_threadpool(metrics.get_sla_compliance)
 
 
-@router.get("/metrics/recognition")
+@router.get("/metrics/recognition", response_model=RecognitionMetrics)
 async def get_recognition_metrics(user: require_permission("recognition.view")):
     """Get recognition-specific metrics."""
     metrics = get_metrics()
-    return metrics.recognition.to_dict()
+    return await run_in_threadpool(metrics.recognition.to_dict)
 
 
 # ─── Unknown Persons ──────────────────────────────────────────────────────────
 
 
-@router.get("/unknown-persons")
+@router.get("/unknown-persons", response_model=UnknownPersonsResponse)
 async def list_unknown_persons(
     user: require_permission("recognition.view"),
     limit: int = 50,
 ):
     """Get recent unknown person detections."""
     detector = get_unknown_detector()
-    events = detector.get_recent_events(limit)
+    events = await run_in_threadpool(detector.get_recent_events, limit)
     return {
         "events": [e.to_dict() for e in events],
         "total": len(events),
@@ -311,41 +336,42 @@ async def list_unknown_persons(
 # ─── Tracking ─────────────────────────────────────────────────────────────────
 
 
-@router.get("/tracking/stats")
+@router.get("/tracking/stats", response_model=TrackingStats)
 async def get_tracking_stats(user: CurrentUser):
     """Get face tracking statistics."""
     tracker = get_tracker()
-    return tracker.get_stats()
+    return await run_in_threadpool(tracker.get_stats)
 
 
 # ─── Vector Index ─────────────────────────────────────────────────────────────
 
 
-@router.get("/index/stats")
+@router.get("/index/stats", response_model=IndexStats)
 async def get_index_stats(user: CurrentUser):
     """Get vector search index statistics."""
     search = get_vector_search()
-    return search.get_stats()
+    return await run_in_threadpool(search.get_stats)
 
 
-@router.post("/index/reload")
+@router.post("/index/reload", response_model=IndexReloadResult)
 async def reload_index(user: require_permission("recognition.manage")):
     """Reload the FAISS index from disk."""
     search = get_vector_search()
-    search.reload()
-    return {"success": True, **search.get_stats()}
+    await run_in_threadpool(search.reload)
+    stats = await run_in_threadpool(search.get_stats)
+    return {"success": True, **stats}
 
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 
-@router.get("/config")
+@router.get("/config", response_model=EngineConfigResponse)
 async def get_engine_config(user: require_permission("recognition.view")):
     """Get current engine configuration."""
     return engine_config.to_dict()
 
 
-@router.patch("/config")
+@router.patch("/config", response_model=EngineConfigUpdateResult)
 async def update_engine_config(
     body: EngineConfigUpdate,
     user: require_permission("recognition.manage"),
@@ -377,7 +403,7 @@ async def update_engine_config(
 # ─── Performance Requirements ─────────────────────────────────────────────────
 
 
-@router.get("/performance-requirements")
+@router.get("/performance-requirements", response_model=PerformanceRequirements)
 async def get_performance_requirements(user: CurrentUser):
     """Get the performance SLA requirements for the engine."""
     perf = engine_config.performance

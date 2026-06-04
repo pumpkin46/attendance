@@ -27,6 +27,7 @@ insightface==1.0.1
 onnxruntime==1.26.0
 Pillow==12.2.0
 scikit-learn==1.9.0
+scikit-image<0.26
 
 # Utilities
 httpx==0.28.1

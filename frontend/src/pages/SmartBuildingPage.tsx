@@ -1,5 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { api } from '../api/client'
+import { useState, type FormEvent } from 'react'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input, Select } from '../components/ui/Input'
@@ -7,7 +6,14 @@ import { Label } from '../components/ui/Label'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Badge } from '../components/ui/Badge'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
-import type { Paginated } from '../types'
+import {
+  useBuildingConfig,
+  useBuildingEvents,
+  useConnectors,
+  useCreateConnector,
+  usePublishOccupancy,
+  useTestConnector,
+} from './building/queries'
 
 const DRIVER_FALLBACK: Record<string, string> = {
   webhook: 'Webhook',
@@ -15,91 +21,49 @@ const DRIVER_FALLBACK: Record<string, string> = {
   bacnet_gateway: 'BACnet Gateway',
 }
 
-interface BuildingConfig {
-  enabled: boolean
-  webhook_timeout: number
-  business_hours_start: string
-  business_hours_end: string
-  business_timezone: string
-  drivers?: Record<string, string>
-  event_types?: Record<string, string>
-  default_subscribed_events?: string[]
-}
-
-interface Connector {
-  id: number
-  name: string
-  driver: string
-  endpoint_url?: string
-  subscribed_events?: string[]
-  is_active: boolean
-  last_sync_at?: string
-  events_today: number
-}
-
-interface BuildingEvent {
-  id: number
-  event_type: string
-  status: string
-  error_message?: string
-  created_at: string
-  connector?: { id: number; name: string }
-}
-
 export default function SmartBuildingPage() {
-  const [config, setConfig] = useState<BuildingConfig | null>(null)
-  const [connectors, setConnectors] = useState<Connector[]>([])
-  const [events, setEvents] = useState<BuildingEvent[]>([])
+  const { data: config } = useBuildingConfig()
+  const { data: connectorsData, isPending: connectorsLoading } = useConnectors()
+  const { data: eventsData, isPending: eventsLoading } = useBuildingEvents()
+  const createConnector = useCreateConnector()
+  const testConnector = useTestConnector()
+  const publishOccupancyMutation = usePublishOccupancy()
+
   const [form, setForm] = useState({
     name: '',
     driver: 'webhook',
     endpoint_url: '',
   })
 
+  const connectors = connectorsData?.data ?? []
+  const events = eventsData?.data ?? []
   const drivers = config?.drivers ?? DRIVER_FALLBACK
   const eventTypes = config?.event_types ?? {}
 
-  const load = () => {
-    api
-      .get<Paginated<Connector>>('/building/connectors', { params: { per_page: 50 } })
-      .then((r) => setConnectors(r.data.data))
-    api
-      .get<Paginated<BuildingEvent>>('/building/events', { params: { per_page: 30 } })
-      .then((r) => setEvents(r.data.data))
-  }
-
-  useEffect(() => {
-    api.get<BuildingConfig>('/building/config').then((r) => setConfig(r.data))
-    load()
-  }, [])
-
-  const submit = async (e: FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault()
-    await api.post('/building/connectors', {
-      name: form.name,
-      driver: form.driver,
-      endpoint_url: form.endpoint_url || null,
-      subscribed_events: config?.default_subscribed_events,
-    })
-    setForm({ name: '', driver: 'webhook', endpoint_url: '' })
-    load()
+    createConnector.mutate(
+      {
+        name: form.name,
+        driver: form.driver,
+        endpoint_url: form.endpoint_url || null,
+        subscribed_events: config?.default_subscribed_events,
+      },
+      {
+        onSuccess: () => setForm({ name: '', driver: 'webhook', endpoint_url: '' }),
+      }
+    )
   }
 
-  const testConnector = async (id: number) => {
-    await api.post(`/building/connectors/${id}/test`)
-    load()
-  }
-
-  const publishOccupancy = async () => {
+  const publishOccupancy = () => {
     const locationId = window.prompt('Location ID for occupancy update:', '1')
     if (!locationId) return
     const count = window.prompt('Occupant count:', '0')
     if (count === null) return
-    await api.post('/building/occupancy/publish', {
+    publishOccupancyMutation.mutate({
       location_id: Number(locationId),
       count: Number(count),
     })
-    load()
   }
 
   return (
@@ -159,7 +123,9 @@ export default function SmartBuildingPage() {
             />
           </Label>
           <div className="sm:col-span-2">
-            <Button type="submit">Create connector</Button>
+            <Button type="submit" disabled={createConnector.isPending}>
+              Create connector
+            </Button>
           </div>
         </form>
       </Card>
@@ -174,21 +140,33 @@ export default function SmartBuildingPage() {
             <Th>Actions</Th>
           </TableHead>
           <TableBody>
-            {connectors.map((c) => (
-              <tr key={c.id}>
-                <Td>{c.name}</Td>
-                <Td>{c.driver}</Td>
-                <Td>{c.events_today}</Td>
-                <Td>
-                  <Badge tone={c.is_active ? 'ok' : 'neutral'}>{c.is_active ? 'Active' : 'Off'}</Badge>
-                </Td>
-                <Td>
-                  <Button variant="ghost" onClick={() => testConnector(c.id)}>
-                    Test
-                  </Button>
+            {connectorsLoading ? (
+              <tr>
+                <Td colSpan={5} className="text-slate-400">
+                  Loading…
                 </Td>
               </tr>
-            ))}
+            ) : (
+              connectors.map((c) => (
+                <tr key={c.id}>
+                  <Td>{c.name}</Td>
+                  <Td>{c.driver}</Td>
+                  <Td>{c.events_today}</Td>
+                  <Td>
+                    <Badge tone={c.is_active ? 'ok' : 'neutral'}>{c.is_active ? 'Active' : 'Off'}</Badge>
+                  </Td>
+                  <Td>
+                    <Button
+                      variant="ghost"
+                      onClick={() => testConnector.mutate(c.id)}
+                      disabled={testConnector.isPending}
+                    >
+                      Test
+                    </Button>
+                  </Td>
+                </tr>
+              ))
+            )}
           </TableBody>
         </TableShell>
       </div>
@@ -202,20 +180,28 @@ export default function SmartBuildingPage() {
           <Th>Status</Th>
         </TableHead>
         <TableBody>
-          {events.map((ev) => (
-            <tr key={ev.id}>
-              <Td className="text-xs">
-                {ev.created_at ? new Date(ev.created_at).toLocaleString() : '—'}
-              </Td>
-              <Td>{ev.connector?.name ?? '—'}</Td>
-              <Td>{ev.event_type}</Td>
-              <Td>
-                <Badge tone={ev.status === 'sent' ? 'ok' : ev.status === 'failed' ? 'danger' : 'neutral'}>
-                  {ev.status}
-                </Badge>
+          {eventsLoading ? (
+            <tr>
+              <Td colSpan={4} className="text-slate-400">
+                Loading…
               </Td>
             </tr>
-          ))}
+          ) : (
+            events.map((ev) => (
+              <tr key={ev.id}>
+                <Td className="text-xs">
+                  {ev.created_at ? new Date(ev.created_at).toLocaleString() : '—'}
+                </Td>
+                <Td>{ev.connector?.name ?? '—'}</Td>
+                <Td>{ev.event_type}</Td>
+                <Td>
+                  <Badge tone={ev.status === 'sent' ? 'ok' : ev.status === 'failed' ? 'danger' : 'neutral'}>
+                    {ev.status}
+                  </Badge>
+                </Td>
+              </tr>
+            ))
+          )}
         </TableBody>
       </TableShell>
     </div>

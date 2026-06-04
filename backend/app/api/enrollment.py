@@ -14,12 +14,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.errors import NotFoundError, ValidationError
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
 from app.models.face import FaceEmbedding, FaceEnrollmentImage, FaceEnrollmentSession
@@ -118,6 +120,62 @@ class FaceMetadataResponse(BaseModel):
     sharpness_score: float | None = None
 
 
+class EnrollmentRequirementsResponse(BaseModel):
+    model_config = {"extra": "allow"}
+
+    min_images: int
+    recommended_images: dict[str, int]
+    min_resolution: dict[str, int]
+    recommended_resolution: dict[str, int]
+    supported_formats: list[str]
+    required_poses: list[str]
+    optional_poses: list[str]
+    quality_thresholds: dict[str, float]
+
+
+class ValidateImageResponse(BaseModel):
+    accepted: bool
+    reason: str | None = None
+    quality_score: float = 0.0
+    checks: dict[str, Any] = Field(default_factory=dict)
+    bbox: list[float] | None = None
+    face_metadata: dict[str, Any] | None = None
+    processing_ms: int = 0
+
+
+class EnrollResultResponse(BaseModel):
+    """Generic enrollment result envelope shared by the enroll-* endpoints."""
+
+    model_config = {"extra": "ignore"}
+
+    success: bool = False
+    employee_id: str | int | None = None
+    error: str | None = None
+    enrollment_type: str | None = None
+    enrollment_method: str | None = None
+    embeddings_stored: int | None = None
+    faiss_id: str | None = None
+    faiss_ids: list[str] | None = None
+    quality_score: float | None = None
+    average_quality_score: float | None = None
+    enrollment_score: float | dict[str, Any] | None = None
+    accepted: list[dict[str, Any]] | None = None
+    rejected: list[dict[str, Any]] | None = None
+    accepted_count: int | None = None
+    rejected_count: int | None = None
+    missing_poses: list[str] | None = None
+    required_poses: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+    processing_ms: int | None = None
+
+
+class BulkEnrollResponse(BaseModel):
+    total: int
+    success_count: int
+    failure_count: int
+    results: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 
@@ -145,21 +203,24 @@ async def enrollment_config(user: CurrentUser):
     )
 
 
-@router.get("/enrollment/requirements")
+@router.get("/enrollment/requirements", response_model=EnrollmentRequirementsResponse)
 async def enrollment_requirements(user: CurrentUser):
     """Get detailed enrollment quality requirements and approval rules."""
     service = get_enrollment_service()
     return service.get_enrollment_quality_requirements()
 
 
-@router.post("/enrollment/validate-image")
+@router.post("/enrollment/validate-image", response_model=ValidateImageResponse)
 async def validate_image(body: ValidateImageRequest, user: CurrentUser):
     """Validate a single image quality without storing (live preview)."""
     service = get_enrollment_service()
-    return service.validate_single_image(body.image, body.expected_pose)
+    result = await run_in_threadpool(
+        service.validate_single_image, body.image, body.expected_pose
+    )
+    return result
 
 
-@router.post("/employees/{employee_id}/enroll-face")
+@router.post("/employees/{employee_id}/enroll-face", response_model=EnrollResultResponse)
 async def enroll_face_single(
     employee_id: int,
     body: SingleEnrollRequest,
@@ -172,13 +233,10 @@ async def enroll_face_single(
     from app.services import face_service
 
     emp = await _get_employee_or_404(db, employee_id, org_id)
-    result = face_service.enroll(str(emp.id), body.image)
+    result = await run_in_threadpool(face_service.enroll, str(emp.id), body.image)
 
     if not result.get("success"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=result.get("error", "Enrollment failed"),
-        )
+        raise ValidationError(result.get("error", "Enrollment failed"))
 
     await _save_enrollment(
         db, emp, result,
@@ -201,7 +259,7 @@ async def enroll_face_single(
     return result
 
 
-@router.post("/employees/{employee_id}/enroll-face-batch")
+@router.post("/employees/{employee_id}/enroll-face-batch", response_model=EnrollResultResponse)
 async def enroll_face_batch(
     employee_id: int,
     body: BatchEnrollRequest,
@@ -214,7 +272,7 @@ async def enroll_face_batch(
     from app.services import face_service
 
     emp = await _get_employee_or_404(db, employee_id, org_id)
-    result = face_service.enroll_batch(str(emp.id), body.images)
+    result = await run_in_threadpool(face_service.enroll_batch, str(emp.id), body.images)
 
     if not result.get("success"):
         return result
@@ -241,7 +299,7 @@ async def enroll_face_batch(
     return result
 
 
-@router.post("/employees/{employee_id}/enroll-face-structured")
+@router.post("/employees/{employee_id}/enroll-face-structured", response_model=EnrollResultResponse)
 async def enroll_face_structured(
     employee_id: int,
     body: StructuredEnrollRequest,
@@ -254,7 +312,9 @@ async def enroll_face_structured(
     from app.services import face_service
 
     emp = await _get_employee_or_404(db, employee_id, org_id)
-    result = face_service.enroll_structured(str(emp.id), body.poses)
+    result = await run_in_threadpool(
+        face_service.enroll_structured, str(emp.id), body.poses
+    )
 
     if not result.get("success"):
         return result
@@ -293,7 +353,7 @@ async def enroll_face_structured(
     return result
 
 
-@router.post("/employees/{employee_id}/enroll-face-full")
+@router.post("/employees/{employee_id}/enroll-face-full", response_model=EnrollResultResponse)
 async def enroll_face_full(
     employee_id: int,
     body: FullEnrollRequest,
@@ -316,7 +376,8 @@ async def enroll_face_full(
     except ValueError:
         e_method = EnrollmentMethod.IMAGE_UPLOAD
 
-    result = service.enroll(
+    result = await run_in_threadpool(
+        service.enroll,
         str(emp.id),
         body.images,
         enrollment_type=e_type,
@@ -383,7 +444,7 @@ async def enroll_face_full(
     return result.to_dict()
 
 
-@router.post("/employees/{employee_id}/re-enroll")
+@router.post("/employees/{employee_id}/re-enroll", response_model=EnrollResultResponse)
 async def re_enroll_face(
     employee_id: int,
     body: ReEnrollRequest,
@@ -406,7 +467,8 @@ async def re_enroll_face(
     except ValueError:
         e_method = EnrollmentMethod.IMAGE_UPLOAD
 
-    result = service.re_enroll(
+    result = await run_in_threadpool(
+        service.re_enroll,
         str(emp.id),
         body.images,
         trigger=trigger,
@@ -445,7 +507,7 @@ async def re_enroll_face(
     return result.to_dict()
 
 
-@router.post("/employees/bulk-enroll")
+@router.post("/employees/bulk-enroll", response_model=BulkEnrollResponse)
 async def bulk_enroll(
     body: BulkEnrollRequest,
     request: Request,
@@ -472,7 +534,8 @@ async def bulk_enroll(
             })
             continue
 
-        result = service.enroll(
+        result = await run_in_threadpool(
+            service.enroll,
             str(emp.id),
             item.images,
             enrollment_type=EnrollmentType.BULK,
@@ -562,7 +625,10 @@ async def face_status(
     )
 
 
-@router.delete("/employees/{employee_id}/face-enrollment")
+@router.delete(
+    "/employees/{employee_id}/face-enrollment",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
 async def delete_face_enrollment(
     employee_id: int,
     request: Request,
@@ -573,7 +639,7 @@ async def delete_face_enrollment(
     """Delete all face enrollment data for an employee."""
     emp = await _get_employee_or_404(db, employee_id, org_id)
     service = get_enrollment_service()
-    service.delete_enrollment(str(emp.id))
+    await run_in_threadpool(service.delete_enrollment, str(emp.id))
 
     emp.face_enrolled = False
     emp.face_enrolled_at = None
@@ -594,7 +660,7 @@ async def delete_face_enrollment(
         ip_address=request.client.host if request.client else None,
     )
 
-    return {"success": True, "employee_id": employee_id}
+    return None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -610,9 +676,7 @@ async def _get_employee_or_404(
     result = await db.execute(stmt)
     emp = result.scalar_one_or_none()
     if emp is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found"
-        )
+        raise NotFoundError("Employee not found")
     return emp
 
 

@@ -1,9 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 
 from app.core.dependencies import CurrentUser, require_permission
+from app.core.errors import ValidationError
 from app.core.rate_limit import recognition_rate_limit
 from app.schemas.recognition import (
     DeleteRequest,
+    DeleteResponse,
     DetectRequest,
     DetectResponse,
     EnrollBatchRequest,
@@ -37,33 +40,34 @@ router = APIRouter(prefix="/api/v1")
 
 
 @router.post("/enroll", response_model=EnrollResponse)
-def enroll(req: EnrollRequest, user: require_permission("employees.manage")):
-    result = face_service.enroll(req.employee_id, req.image)
+async def enroll(req: EnrollRequest, user: require_permission("employees.manage")):
+    result = await run_in_threadpool(face_service.enroll, req.employee_id, req.image)
     if not result.get("success"):
-        raise HTTPException(422, detail=result.get("error", "Enrollment failed"))
+        raise ValidationError(result.get("error", "Enrollment failed"))
     return EnrollResponse(**result)
 
 
 @router.post("/validate-image", response_model=ValidateImageResponse)
-def validate_image(req: ValidateImageRequest, user: CurrentUser):
-    return ValidateImageResponse(
-        **face_service.validate_image(req.image, req.expected_pose)
+async def validate_image(req: ValidateImageRequest, user: CurrentUser):
+    result = await run_in_threadpool(
+        face_service.validate_image, req.image, req.expected_pose
     )
+    return ValidateImageResponse(**result)
 
 
 @router.post("/enroll-structured", response_model=EnrollStructuredResponse)
-def enroll_structured(req: EnrollStructuredRequest, user: require_permission("employees.manage")):
-    result = face_service.enroll_structured(req.employee_id, req.poses)
-    if not result.get("success"):
-        return EnrollStructuredResponse(**result)
+async def enroll_structured(req: EnrollStructuredRequest, user: require_permission("employees.manage")):
+    result = await run_in_threadpool(
+        face_service.enroll_structured, req.employee_id, req.poses
+    )
     return EnrollStructuredResponse(**result)
 
 
 @router.post("/enroll-batch", response_model=EnrollBatchResponse)
-def enroll_batch(req: EnrollBatchRequest, user: require_permission("employees.manage")):
-    result = face_service.enroll_batch(req.employee_id, req.images)
-    if not result.get("success"):
-        return EnrollBatchResponse(**result)
+async def enroll_batch(req: EnrollBatchRequest, user: require_permission("employees.manage")):
+    result = await run_in_threadpool(
+        face_service.enroll_batch, req.employee_id, req.images
+    )
     return EnrollBatchResponse(**result)
 
 
@@ -72,16 +76,16 @@ def enroll_batch(req: EnrollBatchRequest, user: require_permission("employees.ma
     response_model=RecognizeResponse,
     dependencies=[recognition_rate_limit()],
 )
-def recognize(req: RecognizeRequest, user: CurrentUser):
-    return RecognizeResponse(
-        **face_service.recognize(
-            req.image,
-            require_liveness=req.require_liveness,
-            liveness_frames=req.liveness_frames,
-            session_id=req.session_id,
-            source=req.source,
-        )
+async def recognize(req: RecognizeRequest, user: CurrentUser):
+    result = await run_in_threadpool(
+        face_service.recognize,
+        req.image,
+        require_liveness=req.require_liveness,
+        liveness_frames=req.liveness_frames,
+        session_id=req.session_id,
+        source=req.source,
     )
+    return RecognizeResponse(**result)
 
 
 @router.post(
@@ -89,11 +93,12 @@ def recognize(req: RecognizeRequest, user: CurrentUser):
     response_model=RecognizeResponse,
     dependencies=[recognition_rate_limit()],
 )
-def recognize_stream(req: RecognizeStreamRequest, user: CurrentUser):
-    capture = capture_stream_frame(req.stream_url)
+async def recognize_stream(req: RecognizeStreamRequest, user: CurrentUser):
+    capture = await run_in_threadpool(capture_stream_frame, req.stream_url)
     if not capture.get("success"):
-        raise HTTPException(422, detail=capture.get("error", "Stream capture failed"))
-    result = face_service.recognize(
+        raise ValidationError(capture.get("error", "Stream capture failed"))
+    result = await run_in_threadpool(
+        face_service.recognize,
         capture["image"],
         require_liveness=req.require_liveness,
         session_id=req.session_id,
@@ -108,8 +113,9 @@ def recognize_stream(req: RecognizeStreamRequest, user: CurrentUser):
     response_model=IdentifyResponse,
     dependencies=[recognition_rate_limit()],
 )
-def identify(req: IdentifyRequest, user: CurrentUser):
-    result = face_service.identify(
+async def identify(req: IdentifyRequest, user: CurrentUser):
+    result = await run_in_threadpool(
+        face_service.identify,
         req.image,
         req.require_liveness,
         req.liveness_frames,
@@ -120,48 +126,53 @@ def identify(req: IdentifyRequest, user: CurrentUser):
 
 
 @router.post("/liveness/verify", response_model=LivenessVerifyResponse)
-def liveness_verify(req: LivenessVerifyRequest, user: CurrentUser):
-    result = face_service.verify_liveness_sequence(req.frames)
+async def liveness_verify(req: LivenessVerifyRequest, user: CurrentUser):
+    result = await run_in_threadpool(face_service.verify_liveness_sequence, req.frames)
     return LivenessVerifyResponse(**result)
 
 
 @router.post("/detect", response_model=DetectResponse)
-def detect(req: DetectRequest, user: CurrentUser):
-    result = face_service.detect_faces(req.image)
+async def detect(req: DetectRequest, user: CurrentUser):
+    result = await run_in_threadpool(face_service.detect_faces, req.image)
     return DetectResponse(**result)
 
 
 @router.post("/capture-stream", response_model=StreamCaptureResponse)
-def capture_stream(req: StreamCaptureRequest, user: require_permission("cameras.manage")):
-    result = capture_stream_frame(req.stream_url)
+async def capture_stream(req: StreamCaptureRequest, user: require_permission("cameras.manage")):
+    result = await run_in_threadpool(capture_stream_frame, req.stream_url)
     if not result.get("success"):
-        raise HTTPException(422, detail=result.get("error", "Stream capture failed"))
+        raise ValidationError(result.get("error", "Stream capture failed"))
     return StreamCaptureResponse(**result)
 
 
 @router.get("/embeddings/export", response_model=EmbeddingExportResponse)
-def export_embeddings(user: require_permission("recognition.manage")):
-    return EmbeddingExportResponse(**face_service.export_embeddings())
+async def export_embeddings(user: require_permission("recognition.manage")):
+    result = await run_in_threadpool(face_service.export_embeddings)
+    return EmbeddingExportResponse(**result)
 
 
 @router.post("/embeddings/import", response_model=EmbeddingImportResponse)
-def import_embeddings(req: EmbeddingImportRequest, user: require_permission("recognition.manage")):
-    result = face_service.import_embeddings(req.index_b64, req.metadata)
+async def import_embeddings(req: EmbeddingImportRequest, user: require_permission("recognition.manage")):
+    result = await run_in_threadpool(
+        face_service.import_embeddings, req.index_b64, req.metadata
+    )
     return EmbeddingImportResponse(**result)
 
 
 @router.post("/embeddings/reload", response_model=EmbeddingImportResponse)
-def reload_embeddings(user: require_permission("recognition.manage")):
-    return EmbeddingImportResponse(**face_service.reload_embeddings())
+async def reload_embeddings(user: require_permission("recognition.manage")):
+    result = await run_in_threadpool(face_service.reload_embeddings)
+    return EmbeddingImportResponse(**result)
 
 
 @router.post("/anomalies/analyze", response_model=AnomalyAnalyzeResponse)
-def analyze_anomalies(req: AnomalyAnalyzeRequest, user: CurrentUser):
+async def analyze_anomalies(req: AnomalyAnalyzeRequest, user: CurrentUser):
     records = [r.model_dump() for r in req.records]
-    result = analyze_records(records, req.config)
+    result = await run_in_threadpool(analyze_records, records, req.config)
     return AnomalyAnalyzeResponse(**result)
 
 
-@router.post("/delete")
-def delete_embedding(req: DeleteRequest, user: require_permission("employees.manage")):
-    return face_service.delete_employee(req.employee_id)
+@router.post("/delete", response_model=DeleteResponse)
+async def delete_embedding(req: DeleteRequest, user: require_permission("employees.manage")):
+    result = await run_in_threadpool(face_service.delete_employee, req.employee_id)
+    return DeleteResponse(**result)

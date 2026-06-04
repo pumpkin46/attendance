@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import engine
+from app.core.errors import register_exception_handlers
 
 from app.api.routes import router as ai_router
 from app.api.auth import router as auth_router
@@ -15,8 +16,8 @@ from app.api.attendance import router as attendance_router
 from app.api.shifts import router as shifts_router
 from app.api.anomalies import router as anomalies_router
 from app.api.cameras import router as cameras_router
-from app.api.recognition_api import router as recognition_router
-from app.api.engine_api import router as engine_router
+from app.api.recognition import router as recognition_router
+from app.api.engine import router as engine_router
 from app.api.monitoring import router as monitoring_router
 from app.api.rfid import router as rfid_router
 from app.api.access import router as access_router
@@ -52,6 +53,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version="2.0.0", lifespan=lifespan)
+
+# Global handlers translate every error (typed AppError, HTTPException, request
+# validation) into the single {"error": {code, message, details}} envelope.
+register_exception_handlers(app)
 
 # Wildcard origins and credentialed requests are mutually exclusive (and unsafe
 # together); only allow credentials when origins are explicitly listed.

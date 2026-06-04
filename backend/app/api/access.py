@@ -2,20 +2,24 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.errors import NotFoundError, ValidationError
 from app.middleware.tenant import apply_tenant_filter
 from app.models.access import AccessEvent, AccessPoint, DefaultAction, DeviceType
 from app.models.employee import Employee
 from app.models.visitor import Visitor
 from app.schemas.access import (
     AccessConfigResponse,
+    AccessExecuteResponse,
     AccessPointCreate,
     AccessPointOut,
+    AccessPointWithCamera,
     ExecuteRequest,
     FaceGrantRequest,
     FaceGrantResponse,
@@ -45,14 +49,14 @@ def _enum_value(value) -> str:
     return value.value if hasattr(value, "value") else str(value)
 
 
-def _format_access_point(ap: AccessPoint) -> dict:
+def _format_access_point(ap: AccessPoint) -> AccessPointWithCamera:
     data = AccessPointOut.model_validate(ap, from_attributes=True).model_dump()
     data["device_type"] = _enum_value(ap.device_type)
     data["default_action"] = _enum_value(ap.default_action)
-    data["camera"] = (
+    camera = (
         {"id": ap.camera.id, "name": ap.camera.name} if ap.camera is not None else None
     )
-    return data
+    return AccessPointWithCamera(**data, camera=camera)
 
 
 @router.get("/access-points/config", response_model=AccessConfigResponse)
@@ -68,7 +72,7 @@ async def get_access_config(user: CurrentUser):
     )
 
 
-@router.get("/access-points")
+@router.get("/access-points", response_model=list[AccessPointWithCamera])
 async def list_access_points(
     db: DbSession,
     org_id: TenantOrgId,
@@ -84,7 +88,7 @@ async def list_access_points(
     return [_format_access_point(ap) for ap in points]
 
 
-@router.post("/access-points", response_model=AccessPointOut, status_code=status.HTTP_201_CREATED)
+@router.post("/access-points", response_model=AccessPointWithCamera, status_code=status.HTTP_201_CREATED)
 async def create_access_point(
     body: AccessPointCreate,
     request: Request,
@@ -93,17 +97,17 @@ async def create_access_point(
     user: require_permission("cameras.manage"),
 ):
     if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+        raise ValidationError("Organization context required")
 
     try:
         device_type = DeviceType(body.device_type)
     except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid device type") from exc
+        raise ValidationError("Invalid device type") from exc
 
     try:
         default_action = DefaultAction(body.default_action)
     except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid default action") from exc
+        raise ValidationError("Invalid default action") from exc
 
     ap = AccessPoint(
         organization_id=org_id,
@@ -136,7 +140,7 @@ async def create_access_point(
     return _format_access_point(ap)
 
 
-@router.post("/access-points/{ap_id}/execute")
+@router.post("/access-points/{ap_id}/execute", response_model=AccessExecuteResponse)
 async def execute_access_action(
     ap_id: int,
     body: ExecuteRequest,
@@ -150,7 +154,7 @@ async def execute_access_action(
     result = await db.execute(stmt)
     ap = result.scalar_one_or_none()
     if not ap:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Access point not found")
+        raise NotFoundError("Access point not found")
 
     action = body.action or _enum_value(ap.default_action)
 
@@ -172,7 +176,7 @@ async def execute_access_action(
         ip_address=request.client.host if request.client else None,
         new_values={"action": action},
     )
-    return {"success": True, "action": action, "access_point_id": ap.id}
+    return AccessExecuteResponse(success=True, action=action, access_point_id=ap.id)
 
 
 @router.post("/access-points/{ap_id}/face-grant", response_model=FaceGrantResponse)
@@ -189,12 +193,14 @@ async def face_grant_access(
     stmt = apply_tenant_filter(stmt, org_id, AccessPoint.organization_id)
     ap = (await db.execute(stmt)).scalar_one_or_none()
     if not ap or not ap.is_active:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Access point not found")
+        raise NotFoundError("Access point not found")
 
     require_liveness = (
         body.require_liveness if body.require_liveness is not None else ap.require_liveness
     )
-    result = face_service.identify(body.image, require_liveness=require_liveness)
+    result = await run_in_threadpool(
+        face_service.identify, body.image, require_liveness=require_liveness
+    )
     identity = result.get("employee_id")
     confidence = result.get("confidence", 0.0)
     liveness_passed = result.get("liveness_passed", False)

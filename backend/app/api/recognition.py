@@ -3,14 +3,16 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlalchemy import select, func
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.errors import NotFoundError, ValidationError
 from app.core.rate_limit import recognition_rate_limit
-from app.core.pagination import PaginationParams, paginate, PaginationDep
+from app.core.pagination import PaginatedResponse, paginate, PaginationDep
 from app.models.employee import Employee
 from app.models.recognition import RecognitionEvent
 from app.schemas.recognition import (
@@ -54,7 +56,7 @@ async def get_recognition_config(user: CurrentUser):
 
 @router.post("/recognition/detect", response_model=DetectResponse)
 async def detect_faces(body: DetectRequest, user: CurrentUser):
-    result = face_service.detect_faces(body.image)
+    result = await run_in_threadpool(face_service.detect_faces, body.image)
     return DetectResponse(**result)
 
 
@@ -69,7 +71,8 @@ async def identify_face(
     user: CurrentUser,
     org_id: TenantOrgId,
 ):
-    result = face_service.identify(
+    result = await run_in_threadpool(
+        face_service.identify,
         image_b64=body.image,
         require_liveness=body.require_liveness,
         liveness_frames=body.liveness_frames,
@@ -166,7 +169,8 @@ async def identify_face(
     dependencies=[recognition_rate_limit()],
 )
 async def recognize_face(body: RecognizeRequest, user: CurrentUser):
-    result = face_service.recognize(
+    result = await run_in_threadpool(
+        face_service.recognize,
         image_b64=body.image,
         require_liveness=body.require_liveness,
         liveness_frames=body.liveness_frames,
@@ -178,18 +182,16 @@ async def recognize_face(body: RecognizeRequest, user: CurrentUser):
 
 @router.post("/recognition/recognize-stream", response_model=RecognizeResponse)
 async def recognize_from_stream(body: RecognizeStreamRequest, user: CurrentUser):
-    capture = capture_stream_frame(body.stream_url)
+    capture = await run_in_threadpool(capture_stream_frame, body.stream_url)
     if not capture["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=capture.get("error", "Failed to capture frame from stream"),
-        )
+        raise ValidationError(capture.get("error", "Failed to capture frame from stream"))
 
     image_b64 = capture["image"]
     if image_b64.startswith("data:"):
         image_b64 = image_b64.split(",", 1)[1]
 
-    result = face_service.recognize(
+    result = await run_in_threadpool(
+        face_service.recognize,
         image_b64=image_b64,
         require_liveness=body.require_liveness,
         session_id=body.session_id,
@@ -200,7 +202,7 @@ async def recognize_from_stream(body: RecognizeStreamRequest, user: CurrentUser)
 
 @router.post("/recognition/liveness/verify", response_model=LivenessVerifyResponse)
 async def verify_liveness(body: LivenessVerifyRequest, user: CurrentUser):
-    result = face_service.verify_liveness_sequence(body.frames)
+    result = await run_in_threadpool(face_service.verify_liveness_sequence, body.frames)
     return LivenessVerifyResponse(**result)
 
 
@@ -250,7 +252,7 @@ async def get_recognition_metrics(
     )
 
 
-@router.get("/recognition/events")
+@router.get("/recognition/events", response_model=PaginatedResponse[RecognitionEventOut])
 async def list_recognition_events(
     db: DbSession,
     user: require_permission("recognition.view"),
@@ -274,11 +276,11 @@ async def get_event_snapshot(
     result = await db.execute(stmt)
     event = result.scalar_one_or_none()
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        raise NotFoundError("Event not found")
     if not event.snapshot_path:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No snapshot available")
+        raise NotFoundError("No snapshot available")
     if not os.path.isfile(event.snapshot_path):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot file not found")
+        raise NotFoundError("Snapshot file not found")
     return FileResponse(event.snapshot_path, media_type="image/jpeg")
 
 

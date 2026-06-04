@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter
@@ -16,6 +17,7 @@ from app.models.live_event import LiveEvent
 from app.models.location import Location
 from app.models.recognition import RecognitionEvent, RecognitionResult
 from app.models.visitor import Visitor, VisitorStatus
+from app.schemas.monitoring import LiveFeedOut, MonitoringDashboardOut
 
 router = APIRouter(prefix="/api/v1", tags=["monitoring"])
 
@@ -89,7 +91,7 @@ def _format_camera(camera: Camera, online: bool, recognition_today: int) -> dict
     }
 
 
-@router.get("/monitoring/dashboard")
+@router.get("/monitoring/dashboard", response_model=MonitoringDashboardOut)
 async def monitoring_dashboard(
     db: DbSession,
     user: CurrentUser,
@@ -198,7 +200,7 @@ async def monitoring_dashboard(
     }
 
 
-@router.get("/monitoring/live-feed")
+@router.get("/monitoring/live-feed", response_model=LiveFeedOut)
 async def monitoring_live_feed(
     db: DbSession,
     user: CurrentUser,
@@ -220,7 +222,7 @@ async def monitoring_live_feed(
                 "id": e.id,
                 "event_type": e.event_type,
                 "message": e.message,
-                "payload": e.payload,
+                "payload": _parse_payload(e.payload),
                 "camera_id": e.camera_id,
                 "employee_id": e.employee_id,
                 "visitor_id": e.visitor_id,
@@ -229,3 +231,18 @@ async def monitoring_live_feed(
             for e in events
         ]
     }
+
+
+def _parse_payload(raw: object) -> dict | None:
+    """LiveEvent.payload is stored as a JSON string; deserialize for the API."""
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            value = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        return value if isinstance(value, dict) else None
+    return None

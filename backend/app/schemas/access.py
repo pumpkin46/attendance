@@ -34,6 +34,23 @@ class AccessPointOut(BaseModel):
     updated_at: datetime | None = None
 
 
+class CameraBrief(BaseModel):
+    id: int
+    name: str
+
+
+class AccessPointWithCamera(AccessPointOut):
+    """Access point with an embedded camera summary."""
+
+    camera: CameraBrief | None = None
+
+
+class AccessExecuteResponse(BaseModel):
+    success: bool
+    action: str
+    access_point_id: int
+
+
 class AccessConfigResponse(BaseModel):
     actions: dict[str, str]
     device_types: dict[str, str]

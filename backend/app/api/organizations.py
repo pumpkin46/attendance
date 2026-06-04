@@ -1,21 +1,27 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.errors import NotFoundError, PermissionDeniedError, ValidationError
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
 from app.models.organization import Branch, Department, Organization
 from app.models.location import Location
 from app.schemas.organization import (
+    BranchBrief,
     BranchCreate,
     BranchOut,
     DepartmentCreate,
     DepartmentOut,
+    DepartmentWithBranch,
+    LocationBrief,
     OrganizationCreate,
     OrganizationOut,
+    OrganizationWithCounts,
+    SecurityConfigResponse,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["organizations"])
@@ -35,16 +41,19 @@ async def _count_by_org(
     return {org_id: count for org_id, count in result.all()}
 
 
-def _format_department(dept: Department) -> dict:
-    data = DepartmentOut.model_validate(dept, from_attributes=True).model_dump(mode="json")
-    if dept.branch is not None:
-        data["branch"] = {"id": dept.branch.id, "name": dept.branch.name}
-    return data
+def _format_department(dept: Department) -> DepartmentWithBranch:
+    base = DepartmentOut.model_validate(dept, from_attributes=True)
+    branch = (
+        BranchBrief(id=dept.branch.id, name=dept.branch.name)
+        if dept.branch is not None
+        else None
+    )
+    return DepartmentWithBranch(**base.model_dump(), branch=branch)
 
 
 # ── Organizations ───────────────────────────────────────────────────────────
 
-@router.get("/organizations")
+@router.get("/organizations", response_model=list[OrganizationWithCounts])
 async def list_organizations(
     db: DbSession,
     user: CurrentUser,
@@ -64,12 +73,12 @@ async def list_organizations(
     emp_counts = await _count_by_org(db, Employee, org_ids)
 
     return [
-        {
-            **OrganizationOut.model_validate(org, from_attributes=True).model_dump(mode="json"),
-            "branches_count": branch_counts.get(org.id, 0),
-            "departments_count": dept_counts.get(org.id, 0),
-            "employees_count": emp_counts.get(org.id, 0),
-        }
+        OrganizationWithCounts(
+            **OrganizationOut.model_validate(org, from_attributes=True).model_dump(),
+            branches_count=branch_counts.get(org.id, 0),
+            departments_count=dept_counts.get(org.id, 0),
+            employees_count=emp_counts.get(org.id, 0),
+        )
         for org in orgs
     ]
 
@@ -81,10 +90,7 @@ async def create_organization(
     user: require_permission("organizations.manage"),
 ):
     if not user.has_role(settings.super_admin_role):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins can create organizations",
-        )
+        raise PermissionDeniedError("Only super admins can create organizations")
 
     org = Organization(
         name=body.name,
@@ -101,12 +107,12 @@ async def create_organization(
 @router.get("/organizations/{org_id}", response_model=OrganizationOut)
 async def get_organization(org_id: int, db: DbSession, user: CurrentUser):
     if not user.has_role(settings.super_admin_role) and user.organization_id != org_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise PermissionDeniedError("Access denied")
 
     result = await db.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one_or_none()
     if org is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+        raise NotFoundError("Organization not found")
     return OrganizationOut.model_validate(org, from_attributes=True)
 
 
@@ -138,10 +144,7 @@ async def create_branch(
     user: require_permission("branches.manage"),
 ):
     if org_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organization context required",
-        )
+        raise ValidationError("Organization context required")
 
     branch = Branch(
         organization_id=org_id,
@@ -158,7 +161,7 @@ async def create_branch(
 
 # ── Departments ─────────────────────────────────────────────────────────────
 
-@router.get("/departments")
+@router.get("/departments", response_model=list[DepartmentWithBranch])
 async def list_departments(
     db: DbSession,
     user: CurrentUser,
@@ -184,10 +187,7 @@ async def create_department(
     user: require_permission("departments.manage"),
 ):
     if org_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organization context required",
-        )
+        raise ValidationError("Organization context required")
 
     dept = Department(
         organization_id=org_id,
@@ -203,7 +203,7 @@ async def create_department(
 
 # ── Locations ───────────────────────────────────────────────────────────────
 
-@router.get("/locations")
+@router.get("/locations", response_model=list[LocationBrief])
 async def list_locations(
     db: DbSession,
     user: CurrentUser,
@@ -213,18 +213,14 @@ async def list_locations(
     stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
     result = await db.execute(stmt)
     return [
-        {
-            "id": loc.id,
-            "name": loc.name,
-            "address": loc.address,
-        }
+        LocationBrief(id=loc.id, name=loc.name, address=loc.address)
         for loc in result.scalars().all()
     ]
 
 
 # ── Security config ─────────────────────────────────────────────────────────
 
-@router.get("/security/config")
+@router.get("/security/config", response_model=SecurityConfigResponse)
 async def security_config(
     user: require_permission("security.view"),
 ):

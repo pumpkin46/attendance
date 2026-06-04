@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { useState } from 'react'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
@@ -8,47 +7,21 @@ import { Label } from '../components/ui/Label'
 import { PageHeader } from '../components/ui/PageHeader'
 import { StatCard } from '../components/ui/StatCard'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
-import type { Camera, Paginated } from '../types'
-
-interface Location {
-  id: number
-  name: string
-}
-
-interface CameraConfig {
-  camera_types?: Record<string, string>
-  zones?: Record<string, string>
-  statuses?: string[]
-}
-
-const CAMERA_TYPE_FALLBACK: Record<string, string> = {
-  rtsp: 'RTSP IP Camera',
-  ip: 'IP Camera (HTTP)',
-  usb: 'USB Camera',
-}
-
-const ZONE_FALLBACK: Record<string, string> = {
-  entry: 'Entry',
-  exit: 'Exit',
-  lobby: 'Lobby',
-  office: 'Office',
-}
-
-interface CaptureResult {
-  face_count: number
-  detect_ms: number
-  capture_ms: number
-  latency_ms?: number
-  bandwidth_kbps?: number
-  health?: Camera['health']
-  identify?: { matched: boolean; reason?: string; employee?: { first_name: string; last_name: string } }
-}
-
-const STATUS_LABELS: Record<Camera['status'], string> = {
-  active: 'Active',
-  inactive: 'Inactive',
-  maintenance: 'Maintenance',
-}
+import type { Camera } from '../types'
+import {
+  useCameras,
+  useCameraConfig,
+  useCaptureFromStream,
+  useCreateCamera,
+  useLocations,
+  useUpdateCamera,
+} from './cameras/queries'
+import {
+  CAMERA_TYPE_FALLBACK,
+  STATUS_LABELS,
+  ZONE_FALLBACK,
+  type CaptureResult,
+} from './cameras/types'
 
 const emptyForm = {
   location_id: '',
@@ -66,26 +39,21 @@ const emptyForm = {
 }
 
 export default function CamerasPage() {
-  const [cameras, setCameras] = useState<Camera[]>([])
-  const [locations, setLocations] = useState<Location[]>([])
-  const [config, setConfig] = useState<CameraConfig | null>(null)
+  const { data: camerasData, isPending, isError } = useCameras()
+  const { data: config } = useCameraConfig()
+  const { data: locationsData } = useLocations()
+  const createCamera = useCreateCamera()
+  const updateCamera = useUpdateCamera()
+  const captureMutation = useCaptureFromStream()
+
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [capturing, setCapturing] = useState<number | null>(null)
   const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null)
   const [form, setForm] = useState(emptyForm)
 
-  const load = () => {
-    api
-      .get<Paginated<Camera>>('/cameras', { params: { per_page: 100 } })
-      .then((r) => setCameras(r.data.data ?? []))
-  }
-
-  useEffect(() => {
-    load()
-    api.get<Location[]>('/locations').then((r) => setLocations(r.data ?? []))
-    api.get<CameraConfig>('/cameras/config').then((r) => setConfig(r.data))
-  }, [])
+  const cameras = camerasData?.data ?? []
+  const locations = locationsData ?? []
 
   const cameraTypes = config?.camera_types ?? CAMERA_TYPE_FALLBACK
   const zones = config?.zones ?? ZONE_FALLBACK
@@ -133,25 +101,20 @@ export default function CamerasPage() {
     }
 
     if (editingId) {
-      await api.patch(`/cameras/${editingId}`, payload)
+      await updateCamera.mutateAsync({ id: editingId, payload })
     } else {
-      await api.post('/cameras', payload)
+      await createCamera.mutateAsync(payload)
     }
 
     resetForm()
-    load()
   }
 
   const captureFromStream = async (cameraId: number) => {
     setCapturing(cameraId)
     setCaptureResult(null)
     try {
-      const { data } = await api.post<CaptureResult>(`/cameras/${cameraId}/capture`, {
-        identify: true,
-        require_liveness: false,
-      })
+      const data = await captureMutation.mutateAsync(cameraId)
       setCaptureResult(data)
-      load()
     } finally {
       setCapturing(null)
     }
@@ -368,7 +331,19 @@ export default function CamerasPage() {
           <Th>Actions</Th>
         </TableHead>
         <TableBody>
-          {cameras.length === 0 ? (
+          {isPending ? (
+            <tr>
+              <Td colSpan={14} className="text-slate-400">
+                Loading…
+              </Td>
+            </tr>
+          ) : isError ? (
+            <tr>
+              <Td colSpan={14} className="text-red-400">
+                Failed to load cameras
+              </Td>
+            </tr>
+          ) : cameras.length === 0 ? (
             <tr>
               <Td colSpan={14} className="text-slate-400">
                 No cameras registered yet

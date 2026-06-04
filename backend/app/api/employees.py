@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request, status
 from sqlalchemy import select
 
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.pagination import PaginationDep, paginate
+from app.core.errors import NotFoundError, ValidationError
+from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
 from app.schemas.employee import EmployeeCreate, EmployeeOut, EmployeeUpdate
@@ -13,7 +14,7 @@ from app.services.audit_service import log_action
 router = APIRouter(prefix="/api/v1/employees", tags=["employees"])
 
 
-@router.get("", response_model=dict)
+@router.get("", response_model=PaginatedResponse[EmployeeOut])
 async def list_employees(
     db: DbSession,
     user: CurrentUser,
@@ -35,10 +36,7 @@ async def create_employee(
 ):
     effective_org_id = body.organization_id or org_id
     if effective_org_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organization context required",
-        )
+        raise ValidationError("Organization context required")
 
     emp = Employee(
         organization_id=effective_org_id,
@@ -149,5 +147,5 @@ async def _get_employee_or_404(
     result = await db.execute(stmt)
     emp = result.scalar_one_or_none()
     if emp is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+        raise NotFoundError("Employee not found")
     return emp

@@ -39,6 +39,18 @@ class RfidReaderOut(BaseModel):
     location: LocationBrief | None = None
 
 
+class RfidReaderCreatedOut(RfidReaderOut):
+    """Reader detail plus the one-time plaintext device token."""
+
+    api_token_plain: str
+
+
+class RfidTokenRegeneratedOut(BaseModel):
+    id: int
+    api_token_plain: str
+    message: str
+
+
 class RfidCardCreate(BaseModel):
     uid: str
     label: str | None = None

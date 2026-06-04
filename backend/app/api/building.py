@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Request, status
 from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.pagination import PaginationDep, paginate
+from app.core.errors import NotFoundError, ValidationError
+from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.middleware.tenant import apply_tenant_filter
 from app.models.building import (
     BuildingConnector,
@@ -26,7 +27,9 @@ from app.schemas.building import (
     BuildingConnectorOut,
     BuildingConnectorUpdate,
     BuildingEventOut,
+    ConnectorTestResponse,
     OccupancyPublishRequest,
+    OccupancyPublishResponse,
 )
 from app.services.audit_service import log_action
 
@@ -89,7 +92,7 @@ async def get_building_config(user: CurrentUser):
     )
 
 
-@router.get("/connectors")
+@router.get("/connectors", response_model=PaginatedResponse[BuildingConnectorOut])
 async def list_connectors(
     db: DbSession,
     org_id: TenantOrgId,
@@ -109,7 +112,7 @@ async def list_connectors(
     counts = dict(count_result.all())
 
     page = await paginate(db, stmt, pagination.page, pagination.per_page)
-    page["data"] = [_connector_to_out(c, counts.get(c.id, 0)) for c in page["data"]]
+    page.data = [_connector_to_out(c, counts.get(c.id, 0)) for c in page.data]
     return page
 
 
@@ -122,12 +125,12 @@ async def create_connector(
     user: require_permission("building.manage"),
 ):
     if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+        raise ValidationError("Organization context required")
 
     try:
         driver = ConnectorDriver(body.driver)
     except ValueError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid driver: {body.driver}")
+        raise ValidationError(f"Invalid driver: {body.driver}")
 
     connector = BuildingConnector(
         organization_id=org_id,
@@ -170,7 +173,7 @@ async def update_connector(
         try:
             update_data["driver"] = ConnectorDriver(update_data["driver"])
         except ValueError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid driver: {update_data['driver']}")
+            raise ValidationError(f"Invalid driver: {update_data['driver']}")
     for field, value in update_data.items():
         setattr(connector, field, value)
     await db.flush()
@@ -208,7 +211,7 @@ async def delete_connector(
     await db.delete(connector)
 
 
-@router.post("/connectors/{connector_id}/test")
+@router.post("/connectors/{connector_id}/test", response_model=ConnectorTestResponse)
 async def test_connector(
     connector_id: int,
     db: DbSession,
@@ -217,7 +220,7 @@ async def test_connector(
 ):
     connector = await _get_connector_or_404(db, connector_id, org_id)
     if not connector.endpoint_url:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Connector has no endpoint URL")
+        raise ValidationError("Connector has no endpoint URL")
 
     payload = {
         "event": "test",
@@ -240,7 +243,7 @@ async def test_connector(
         return {"success": False, "error": str(exc)}
 
 
-@router.get("/events")
+@router.get("/events", response_model=PaginatedResponse[BuildingEventOut])
 async def list_building_events(
     db: DbSession,
     org_id: TenantOrgId,
@@ -254,11 +257,11 @@ async def list_building_events(
     )
     stmt = apply_tenant_filter(stmt, org_id, BuildingConnector.organization_id)
     page = await paginate(db, stmt, pagination.page, pagination.per_page)
-    page["data"] = [_event_to_out(e) for e in page["data"]]
+    page.data = [_event_to_out(e) for e in page.data]
     return page
 
 
-@router.post("/occupancy/publish")
+@router.post("/occupancy/publish", response_model=OccupancyPublishResponse)
 async def publish_occupancy(
     body: OccupancyPublishRequest,
     db: DbSession,
@@ -266,7 +269,7 @@ async def publish_occupancy(
     user: require_permission("building.manage"),
 ):
     if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+        raise ValidationError("Organization context required")
 
     stmt = select(BuildingConnector).where(
         BuildingConnector.organization_id == org_id,
@@ -314,7 +317,9 @@ async def publish_occupancy(
         )
 
     await db.flush()
-    return {"success": True, "dispatched_to": dispatched, "total_connectors": len(connectors)}
+    return OccupancyPublishResponse(
+        success=True, dispatched_to=dispatched, total_connectors=len(connectors)
+    )
 
 
 async def _get_connector_or_404(
@@ -325,5 +330,5 @@ async def _get_connector_or_404(
     result = await db.execute(stmt)
     connector = result.scalar_one_or_none()
     if not connector:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Connector not found")
+        raise NotFoundError("Connector not found")
     return connector

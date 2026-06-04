@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import case, func, select
+from fastapi import APIRouter
+from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.pagination import PaginationParams, paginate, PaginationDep
+from app.core.errors import ConflictError, NotFoundError
+from app.core.pagination import PaginatedResponse, paginate, PaginationDep
 from app.middleware.tenant import apply_tenant_filter
 from app.models.security import SecurityAlert
 from app.realtime.hub import emit
@@ -97,7 +98,7 @@ async def get_dashboard(
     )
 
 
-@router.get("/alerts")
+@router.get("/alerts", response_model=PaginatedResponse[SecurityAlertOut])
 async def list_alerts(
     db: DbSession,
     org_id: TenantOrgId,
@@ -129,7 +130,7 @@ async def acknowledge_alert(
 ):
     alert = await _get_alert_or_404(db, alert_id, org_id)
     if alert.status != "open":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Alert is not in open state")
+        raise ConflictError("Alert is not in open state")
     alert.status = "acknowledged"
     alert.acknowledged_at = datetime.now(timezone.utc)
     alert.acknowledged_by = user.id
@@ -148,7 +149,7 @@ async def resolve_alert(
 ):
     alert = await _get_alert_or_404(db, alert_id, org_id)
     if alert.status == "resolved":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Alert already resolved")
+        raise ConflictError("Alert already resolved")
     alert.status = "resolved"
     alert.resolved_at = datetime.now(timezone.utc)
     alert.resolved_by = user.id
@@ -166,5 +167,5 @@ async def _get_alert_or_404(
     result = await db.execute(stmt)
     alert = result.scalar_one_or_none()
     if not alert:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Alert not found")
+        raise NotFoundError("Alert not found")
     return alert

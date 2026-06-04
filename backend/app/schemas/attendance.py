@@ -181,6 +181,14 @@ class ShiftAssignRequest(BaseModel):
     effective_to: str | None = None
 
 
+class ShiftAssignmentOut(BaseModel):
+    id: int
+    shift_id: int
+    employee_id: int
+    effective_from: str
+    effective_to: str | None = None
+
+
 # ── Holidays ──────────────────────────────────────────────────────────────────
 
 
@@ -271,6 +279,14 @@ class AnomalySummary(BaseModel):
 class AnomalyDetectRequest(BaseModel):
     employee_ids: list[int] | None = None
     lookback_days: int | None = None
+
+
+class AnomalyDetectResponse(BaseModel):
+    success: bool
+    detection_run_id: str
+    records_analyzed: int
+    anomalies_detected: int
+    processing_ms: float
 
 
 class AnomalyUpdateRequest(BaseModel):

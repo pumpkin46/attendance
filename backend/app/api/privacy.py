@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.errors import NotFoundError
 from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord
 from app.models.employee import Employee
@@ -16,7 +19,43 @@ from app.services.audit_service import log_action
 router = APIRouter(prefix="/api/v1", tags=["privacy"])
 
 
-@router.get("/privacy/policy")
+class PrivacyPolicyResponse(BaseModel):
+    gdpr_enabled: bool
+    retention_audit_logs_days: int
+    retention_recognition_events_days: int
+    retention_notifications_days: int
+    privacy_contact_email: str | None = None
+    data_collected: list[str]
+    data_purposes: list[str]
+
+
+class PrivacyUser(BaseModel):
+    id: int
+    name: str | None = None
+    email: str | None = None
+
+
+class PrivacyAttendanceRecord(BaseModel):
+    work_date: str
+    check_in_at: str | None = None
+    check_out_at: str | None = None
+    status: str | None = None
+    worked_minutes: int | None = None
+
+
+class MyDataExportResponse(BaseModel):
+    user: PrivacyUser
+    attendance_records: list[PrivacyAttendanceRecord]
+    notifications_count: int
+    audit_logs_count: int
+
+
+class PrivacyEraseResponse(BaseModel):
+    success: bool
+    message: str
+
+
+@router.get("/privacy/policy", response_model=PrivacyPolicyResponse)
 async def get_privacy_policy():
     return {
         "gdpr_enabled": settings.gdpr_enabled,
@@ -38,7 +77,7 @@ async def get_privacy_policy():
     }
 
 
-@router.get("/privacy/my-data")
+@router.get("/privacy/my-data", response_model=MyDataExportResponse)
 async def export_my_data(
     db: DbSession,
     user: CurrentUser,
@@ -84,7 +123,7 @@ async def export_my_data(
     }
 
 
-@router.post("/employees/{employee_id}/privacy/erase")
+@router.post("/employees/{employee_id}/privacy/erase", response_model=PrivacyEraseResponse)
 async def erase_employee_data(
     employee_id: int,
     request: Request,
@@ -97,9 +136,9 @@ async def erase_employee_data(
     result = await db.execute(stmt)
     emp = result.scalar_one_or_none()
     if not emp:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+        raise NotFoundError("Employee not found")
 
-    face_service.delete_employee(str(employee_id))
+    await run_in_threadpool(face_service.delete_employee, str(employee_id))
 
     rec_stmt = select(RecognitionEvent).where(RecognitionEvent.employee_id == employee_id)
     rec_result = await db.execute(rec_stmt)
@@ -130,4 +169,6 @@ async def erase_employee_data(
         ip_address=request.client.host if request.client else None,
     )
 
-    return {"success": True, "message": f"Employee {employee_id} data erased"}
+    return PrivacyEraseResponse(
+        success=True, message=f"Employee {employee_id} data erased"
+    )

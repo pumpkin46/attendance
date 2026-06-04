@@ -219,3 +219,16 @@ class PhotoUploadBase64(BaseModel):
     image: str
     caption: str | None = None
     is_primary: bool = False
+
+
+class VisitorFaceEnrollResult(BaseModel):
+    """Result of a visitor face enrollment attempt (ad-hoc face_service payload)."""
+
+    model_config = {"extra": "allow"}
+
+    success: bool
+    error: str | None = None
+    employee_id: str | None = None
+    faiss_id: str | None = None
+    quality_score: float | None = None
+    processing_ms: int | None = None

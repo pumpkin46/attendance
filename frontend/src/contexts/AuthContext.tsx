@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api } from '../api/client'
+import { clearToken, getToken, setToken } from '../lib/session'
 import type { User } from '../types'
 
 interface AuthContextValue {
@@ -25,10 +26,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   // Only "loading" when there is a token to validate, so the effect never has to
   // synchronously flip loading off for anonymous visitors.
-  const [loading, setLoading] = useState(() => Boolean(localStorage.getItem('auth_token')))
+  const [loading, setLoading] = useState(() => Boolean(getToken()))
 
   useEffect(() => {
-    const token = localStorage.getItem('auth_token')
+    const token = getToken()
     if (!token) return
 
     let cancelled = false
@@ -37,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data } = await api.get<User>('/auth/me')
         if (!cancelled) setUser(data)
       } catch {
-        localStorage.removeItem('auth_token')
+        clearToken()
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -53,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       password,
     })
-    localStorage.setItem('auth_token', data.token)
+    setToken(data.token)
     setUser(data.user)
   }, [])
 
@@ -61,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api.post('/auth/logout')
     } finally {
-      localStorage.removeItem('auth_token')
+      clearToken()
       setUser(null)
     }
   }, [])

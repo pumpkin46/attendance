@@ -40,7 +40,7 @@ async def paginate(
     page: int,
     per_page: int,
     response_model: type | None = None,
-) -> dict[str, Any]:
+) -> PaginatedResponse[Any]:
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = (await db.execute(count_stmt)).scalar() or 0
 
@@ -56,10 +56,10 @@ async def paginate(
     else:
         data = items
 
-    return {
-        "data": data,
-        "current_page": page,
-        "last_page": last_page,
-        "per_page": per_page,
-        "total": total,
-    }
+    return PaginatedResponse(
+        data=data,
+        current_page=page,
+        last_page=last_page,
+        per_page=per_page,
+        total=total,
+    )

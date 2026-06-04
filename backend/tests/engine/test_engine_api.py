@@ -108,7 +108,7 @@ def test_engine_recognize_with_mocks(client, monkeypatch):
     mock_engine = MagicMock()
     mock_engine.recognize_image.return_value = mock_result
     monkeypatch.setattr(
-        "app.api.engine_api.get_recognition_engine",
+        "app.api.engine.get_recognition_engine",
         lambda: mock_engine,
     )
 

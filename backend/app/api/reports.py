@@ -5,13 +5,12 @@ import io
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import case, func, select
 
-from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.pagination import PaginationDep, paginate
+from app.core.dependencies import DbSession, TenantOrgId, require_permission
+from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord, Holiday, LeaveRequest
 from app.models.employee import Employee
@@ -25,6 +24,7 @@ from app.schemas.report import (
     MonthlySummary,
     OvertimeEntry,
     OvertimeReport,
+    UnknownPersonEvent,
 )
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
@@ -314,7 +314,7 @@ async def overtime_report(
     )
 
 
-@router.get("/unknown-persons")
+@router.get("/unknown-persons", response_model=PaginatedResponse[UnknownPersonEvent])
 async def unknown_persons_report(
     db: DbSession,
     org_id: TenantOrgId,
@@ -335,7 +335,7 @@ async def unknown_persons_report(
     stmt = stmt.order_by(RecognitionEvent.recognized_at.desc())
 
     page = await paginate(db, stmt, pagination.page, pagination.per_page)
-    page["data"] = [_format_unknown_person_event(e) for e in page["data"]]
+    page.data = [_format_unknown_person_event(e) for e in page.data]
     return page
 
 
