@@ -26,6 +26,7 @@ from app.schemas.visitor import (
     ApprovalRequest,
     BlacklistCreate,
     BlacklistOut,
+    HostOut,
     PhotoUploadBase64,
     RejectRequest,
     VisitorAccessPermissionOut,
@@ -49,7 +50,8 @@ _expiry_task: asyncio.Task | None = None
 
 def _format_visitor(visitor: Visitor) -> VisitorOut:
     data = VisitorOut.model_validate(visitor, from_attributes=True)
-    data.host = visitor_service.format_host(visitor.host_employee)
+    host = visitor_service.format_host(visitor.host_employee)
+    data.host = HostOut(**host) if host else None
     if visitor.id_type:
         data.id_type = visitor.id_type.value
     if visitor.visitor_category:
@@ -64,6 +66,16 @@ def _format_visitor(visitor: Visitor) -> VisitorOut:
 # ── Admin Visitor Routes ──────────────────────────────────────────────────────
 
 
+_EMPTY_DASHBOARD = VisitorDashboard(
+    on_site=0,
+    expected=0,
+    checked_in_today=0,
+    checked_out_today=0,
+    overdue=0,
+    pending_approval=0,
+)
+
+
 @router.get("/visitors/dashboard", response_model=VisitorDashboard)
 async def visitor_dashboard(
     db: DbSession,
@@ -71,7 +83,7 @@ async def visitor_dashboard(
     org_id: TenantOrgId,
 ):
     if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+        return _EMPTY_DASHBOARD
     stats = await visitor_service.get_dashboard_stats(db, org_id)
     return VisitorDashboard(**stats)
 
@@ -83,7 +95,7 @@ async def list_active_visitors(
     org_id: TenantOrgId,
 ):
     if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+        return []
     visitors = await visitor_service.get_active_visitors(db, org_id)
     return [_format_visitor(v) for v in visitors]
 
@@ -95,10 +107,18 @@ async def visitor_daily_report(
     org_id: TenantOrgId,
     report_date: str | None = None,
 ):
-    if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
     from datetime import date as date_type
-    d = date_type.fromisoformat(report_date) if report_date else None
+
+    d = date_type.fromisoformat(report_date) if report_date else date_type.today()
+    if org_id is None:
+        return VisitorDailyReport(
+            date=d.isoformat(),
+            total=0,
+            checked_in=0,
+            checked_out=0,
+            pending=0,
+            overdue=0,
+        )
     report = await visitor_service.get_daily_report(db, org_id, d)
     return VisitorDailyReport(**report)
 
@@ -110,7 +130,7 @@ async def list_pending_approvals(
     org_id: TenantOrgId,
 ):
     if org_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+        return []
     visitors = await visitor_service.get_pending_approvals(db, org_id)
     return [_format_visitor(v) for v in visitors]
 

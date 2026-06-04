@@ -199,7 +199,7 @@ export default function SidebarNav() {
 
   useEffect(() => {
     if (activeGroupId) {
-      setExpanded((prev) => new Set(prev).add(activeGroupId))
+      setExpanded(new Set([activeGroupId]))
     }
   }, [activeGroupId])
 
@@ -244,7 +244,7 @@ export default function SidebarNav() {
   }, [filteredGroups, expanded])
 
   const openGroup = (group: NavGroup) => {
-    setExpanded((prev) => new Set(prev).add(group.id))
+    setExpanded(new Set([group.id]))
     const first = group.items[0]
     if (first) {
       navigate(first.to)
