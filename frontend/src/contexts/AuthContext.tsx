@@ -1,71 +1,52 @@
+import { useCallback, useEffect, useMemo, type ReactNode } from 'react'
+import { useAppDispatch, useAppSelector } from '../store/hooks'
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react'
-import { api } from '../api/client'
-import { clearToken, getToken, setToken } from '../lib/session'
-import type { User } from '../types'
+  fetchCurrentUser,
+  loginUser,
+  logoutUser,
+  selectAuthLoading,
+  selectUser,
+} from '../store/authSlice'
+import { getToken } from '../lib/session'
 
-interface AuthContextValue {
-  user: User | null
-  loading: boolean
-  login: (email: string, password: string) => Promise<void>
-  logout: () => Promise<void>
-  hasPermission: (name: string) => boolean
-  isSuperAdmin: () => boolean
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null)
-
+/**
+ * Auth state now lives in the Redux store (`store/authSlice`). This module is a
+ * thin compatibility layer:
+ *   - `AuthProvider` bootstraps the session by validating any persisted token.
+ *   - `useAuth` exposes the same shape components already consume, backed by
+ *     Redux selectors/thunks.
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
-  // Only "loading" when there is a token to validate, so the effect never has to
-  // synchronously flip loading off for anonymous visitors.
-  const [loading, setLoading] = useState(() => Boolean(getToken()))
+  const dispatch = useAppDispatch()
 
   useEffect(() => {
-    const token = getToken()
-    if (!token) return
-
-    let cancelled = false
-    void (async () => {
-      try {
-        const { data } = await api.get<User>('/auth/me')
-        if (!cancelled) setUser(data)
-      } catch {
-        clearToken()
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-
-    return () => {
-      cancelled = true
+    // Only validate when a token is present; otherwise the store already starts
+    // in the 'anonymous' state.
+    if (getToken()) {
+      void dispatch(fetchCurrentUser())
     }
-  }, [])
+  }, [dispatch])
 
-  const login = useCallback(async (email: string, password: string) => {
-    const { data } = await api.post<{ token: string; user: User }>('/auth/login', {
-      email,
-      password,
-    })
-    setToken(data.token)
-    setUser(data.user)
-  }, [])
+  return <>{children}</>
+}
+
+// Colocated with the provider by convention; the hook is the sole consumer API.
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAuth() {
+  const dispatch = useAppDispatch()
+  const user = useAppSelector(selectUser)
+  const loading = useAppSelector(selectAuthLoading)
+
+  const login = useCallback(
+    async (email: string, password: string) => {
+      await dispatch(loginUser({ email, password })).unwrap()
+    },
+    [dispatch]
+  )
 
   const logout = useCallback(async () => {
-    try {
-      await api.post('/auth/logout')
-    } finally {
-      clearToken()
-      setUser(null)
-    }
-  }, [])
+    await dispatch(logoutUser())
+  }, [dispatch])
 
   const hasPermission = useCallback(
     (name: string) => {
@@ -80,18 +61,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user]
   )
 
-  const value = useMemo(
+  return useMemo(
     () => ({ user, loading, login, logout, hasPermission, isSuperAdmin }),
     [user, loading, login, logout, hasPermission, isSuperAdmin]
   )
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-// Colocated with the provider by convention; the hook is the sole consumer API.
-// eslint-disable-next-line react-refresh/only-export-components
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
-  return ctx
 }

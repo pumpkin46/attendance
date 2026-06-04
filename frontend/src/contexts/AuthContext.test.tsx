@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react'
+import { Provider } from 'react-redux'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider, useAuth } from './AuthContext'
+import { makeStore } from '../store'
 import { api } from '../api/client'
 import type { User } from '../types'
 
@@ -24,10 +26,15 @@ function Probe({ perm }: { perm: string }) {
 function renderWithUser(user: User, perm: string) {
   localStorage.setItem('auth_token', 'token')
   mockedGet.mockResolvedValueOnce({ data: user } as never)
+  // Fresh store per render so auth state never leaks between tests. Created
+  // after the token is set so it starts in the 'loading' state.
+  const store = makeStore()
   return render(
-    <AuthProvider>
-      <Probe perm={perm} />
-    </AuthProvider>
+    <Provider store={store}>
+      <AuthProvider>
+        <Probe perm={perm} />
+      </AuthProvider>
+    </Provider>
   )
 }
 

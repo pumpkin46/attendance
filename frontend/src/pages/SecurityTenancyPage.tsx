@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { clearOrgId, getOrgId, setOrgId } from '../lib/session'
+import { useAppDispatch, useAppSelector } from '../store/hooks'
+import { clearOrg, selectOrgId, setOrg } from '../store/tenantSlice'
 import { useAuth } from '../contexts/AuthContext'
 import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
@@ -17,21 +18,24 @@ import {
 
 export default function SecurityTenancyPage() {
   const { isSuperAdmin, hasPermission } = useAuth()
+  const dispatch = useAppDispatch()
+  const currentOrgId = useAppSelector(selectOrgId)
   const { data: security } = useSecurityConfig(hasPermission('security.view'))
   const { data: organizations } = useOrganizations()
   const { data: branches } = useBranches()
   const { data: departments } = useDepartments()
   const createOrganization = useCreateOrganization()
 
-  const [tenantOrgId, setTenantOrgId] = useState(() => getOrgId() ?? '')
+  const [tenantOrgId, setTenantOrgId] = useState(() => currentOrgId ?? '')
   const [newOrg, setNewOrg] = useState({ name: '', code: '', timezone: 'UTC' })
 
   const applyTenantHeader = () => {
     if (tenantOrgId) {
-      setOrgId(tenantOrgId)
+      dispatch(setOrg(tenantOrgId))
     } else {
-      clearOrgId()
+      dispatch(clearOrg())
     }
+    // Reload so all cached queries refetch under the new tenant scope.
     window.location.reload()
   }
 

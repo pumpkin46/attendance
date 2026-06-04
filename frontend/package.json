@@ -12,10 +12,12 @@
     "test:run": "vitest run"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.12.0",
     "@tanstack/react-query": "^5.101.0",
     "axios": "^1.9.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-redux": "^9.3.0",
     "react-router-dom": "^7.6.2",
     "sonner": "^2.0.7"
   },
