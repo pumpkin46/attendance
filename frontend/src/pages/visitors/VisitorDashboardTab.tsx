@@ -7,8 +7,9 @@ import { useActiveVisitors, useVisitorStats } from './queries'
 import { formatDuration } from './types'
 
 export function VisitorDashboardTab() {
-  const { data: stats, isLoading } = useVisitorStats(15_000)
-  const { data: activeVisitors = [] } = useActiveVisitors(15_000)
+  // Live via WebSocket 'visitors.changed'; resynced on reconnect.
+  const { data: stats, isLoading } = useVisitorStats()
+  const { data: activeVisitors = [] } = useActiveVisitors()
 
   return (
     <>

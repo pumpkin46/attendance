@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useApiQuery } from '../hooks/useApiQuery'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -36,31 +37,38 @@ const severityTone: Record<string, 'danger' | 'warn' | 'ok' | 'neutral'> = {
 }
 
 export default function SecurityMonitoringPage() {
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null)
-  const [alerts, setAlerts] = useState<SecurityAlert[]>([])
+  const queryClient = useQueryClient()
+  // Live via WebSocket ('recognition.*', 'access.*', 'security.changed');
+  // resynced on reconnect. The 60s poll is a safety net for this always-on
+  // screen in case the socket drops.
+  const { data: dashboard } = useApiQuery<Dashboard>(
+    ['security-monitoring', 'dashboard'],
+    '/security-monitoring/dashboard',
+    undefined,
+    { silent: true, refetchInterval: 60_000 }
+  )
+  const { data: alertsResp } = useApiQuery<{ data: SecurityAlert[] }>(
+    ['security-monitoring', 'alerts'],
+    '/security-monitoring/alerts',
+    { per_page: 50 },
+    { silent: true, refetchInterval: 60_000 }
+  )
+  const alerts = alertsResp?.data ?? []
 
-  const load = () => {
-    api.get<Dashboard>('/security-monitoring/dashboard').then((r) => setDashboard(r.data))
-    api
-      .get<{ data: SecurityAlert[] }>('/security-monitoring/alerts', { params: { per_page: 50 } })
-      .then((r) => setAlerts(r.data.data))
-  }
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ['security-monitoring'] })
 
-  useEffect(() => {
-    load()
-    const timer = setInterval(load, 15_000)
-    return () => clearInterval(timer)
-  }, [])
+  const ackMutation = useMutation({
+    mutationFn: (id: number) => api.post(`/security-monitoring/alerts/${id}/acknowledge`),
+    onSuccess: invalidate,
+  })
+  const resolveMutation = useMutation({
+    mutationFn: (id: number) => api.post(`/security-monitoring/alerts/${id}/resolve`),
+    onSuccess: invalidate,
+  })
 
-  const acknowledge = async (id: number) => {
-    await api.post(`/security-monitoring/alerts/${id}/acknowledge`)
-    load()
-  }
-
-  const resolve = async (id: number) => {
-    await api.post(`/security-monitoring/alerts/${id}/resolve`)
-    load()
-  }
+  const acknowledge = (id: number) => ackMutation.mutate(id)
+  const resolve = (id: number) => resolveMutation.mutate(id)
 
   return (
     <div>

@@ -20,6 +20,7 @@ from app.core.security import generate_device_token
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
 from app.models.location import Location
+from app.realtime.hub import emit
 from app.models.rfid import RfidCard, RfidDirection, RfidEvent, RfidEventResult, RfidReader
 from app.schemas.rfid import (
     DeviceTapResponse,
@@ -520,6 +521,15 @@ async def _record_event(
     )
     db.add(event)
     await db.flush()
+
+    org_row = await db.execute(
+        select(Location.organization_id).where(Location.id == reader.location_id)
+    )
+    await emit(
+        org_row.scalar_one_or_none(),
+        "rfid.tap",
+        {"reader_id": reader.id, "result": getattr(result, "value", str(result))},
+    )
 
 
 async def _employee_in_tenant_or_404(

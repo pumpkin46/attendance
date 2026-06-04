@@ -42,6 +42,11 @@ from app.services.upload_storage import ALLOWED_DOC_EXT, save_visitor_base64, sa
 from app.services import face_service
 from app.services.audit_service import log_action
 from app.services import visitor_service
+from app.realtime.hub import emit
+
+
+async def _emit_visitor_change(visitor) -> None:
+    await emit(visitor.organization_id, "visitors.changed", {"visitor_id": visitor.id})
 
 router = APIRouter(prefix="/api/v1", tags=["visitors"])
 
@@ -192,6 +197,7 @@ async def create_visitor(
         ip_address=request.client.host if request.client else None,
         new_values=body.model_dump(exclude_none=True),
     )
+    await _emit_visitor_change(visitor)
     return _format_visitor(visitor)
 
 
@@ -278,6 +284,7 @@ async def check_in_visitor(
         entity_id=visitor.id,
         ip_address=request.client.host if request.client else None,
     )
+    await _emit_visitor_change(visitor)
     return _format_visitor(visitor)
 
 
@@ -315,6 +322,7 @@ async def check_out_visitor(
         entity_id=visitor.id,
         ip_address=request.client.host if request.client else None,
     )
+    await _emit_visitor_change(visitor)
     return _format_visitor(visitor)
 
 
@@ -371,6 +379,7 @@ async def cancel_visitor(
         entity_id=visitor.id,
         ip_address=request.client.host if request.client else None,
     )
+    await _emit_visitor_change(visitor)
     return _format_visitor(visitor)
 
 

@@ -11,6 +11,7 @@ from app.core.pagination import PaginationParams, paginate, PaginationDep
 from app.middleware.tenant import apply_tenant_filter
 from app.models.camera import Camera, CameraHealthLog
 from app.models.location import Location
+from app.realtime.hub import emit
 from app.schemas.camera import (
     CAMERA_STATUSES,
     CAMERA_TYPES,
@@ -220,6 +221,15 @@ async def camera_heartbeat(
     camera.last_heartbeat_at = datetime.now(timezone.utc)
     await db.flush()
     await db.refresh(camera)
+
+    event_org_id = org_id
+    if event_org_id is None:
+        loc = await db.execute(
+            select(Location.organization_id).where(Location.id == camera.location_id)
+        )
+        event_org_id = loc.scalar_one_or_none()
+    await emit(event_org_id, "cameras.changed", {"camera_id": camera.id})
+
     return CameraOut.model_validate(camera, from_attributes=True)
 
 

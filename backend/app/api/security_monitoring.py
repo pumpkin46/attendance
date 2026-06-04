@@ -10,6 +10,7 @@ from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_p
 from app.core.pagination import PaginationParams, paginate, PaginationDep
 from app.middleware.tenant import apply_tenant_filter
 from app.models.security import SecurityAlert
+from app.realtime.hub import emit
 from app.schemas.security_monitoring import (
     SecurityAlertOut,
     SecurityConfigResponse,
@@ -134,6 +135,7 @@ async def acknowledge_alert(
     alert.acknowledged_by = user.id
     await db.flush()
     await db.refresh(alert)
+    await emit(alert.organization_id, "security.changed", {"alert_id": alert.id})
     return SecurityAlertOut.model_validate(alert, from_attributes=True)
 
 
@@ -152,6 +154,7 @@ async def resolve_alert(
     alert.resolved_by = user.id
     await db.flush()
     await db.refresh(alert)
+    await emit(alert.organization_id, "security.changed", {"alert_id": alert.id})
     return SecurityAlertOut.model_validate(alert, from_attributes=True)
 
 

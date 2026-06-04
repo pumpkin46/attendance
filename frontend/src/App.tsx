@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthProvider } from './contexts/AuthContext'
+import { RealtimeProvider } from './contexts/RealtimeContext'
 import AppLayout from './layouts/AppLayout'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
@@ -36,7 +37,8 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <BrowserRouter>
+        <RealtimeProvider>
+          <BrowserRouter>
           <Suspense fallback={<FullScreenFallback />}>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
@@ -82,7 +84,8 @@ export default function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
-        </BrowserRouter>
+          </BrowserRouter>
+        </RealtimeProvider>
       </AuthProvider>
     </ErrorBoundary>
   )

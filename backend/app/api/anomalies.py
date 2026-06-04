@@ -19,6 +19,7 @@ from app.schemas.attendance import (
     AnomalyUpdateRequest,
 )
 from app.services.anomaly_detector import analyze_records
+from app.realtime.hub import emit
 
 router = APIRouter(prefix="/api/v1", tags=["anomalies"])
 
@@ -174,6 +175,9 @@ async def detect_anomalies(
 
     await db.flush()
 
+    if saved:
+        await emit(org_id, "anomalies.changed", {"detection_run_id": run_id, "count": saved})
+
     return {
         "success": True,
         "detection_run_id": run_id,
@@ -211,4 +215,10 @@ async def update_anomaly(
 
     await db.flush()
     await db.refresh(anomaly)
+
+    emp_org = await db.execute(
+        select(Employee.organization_id).where(Employee.id == anomaly.employee_id)
+    )
+    await emit(emp_org.scalar_one_or_none(), "anomalies.changed", {"anomaly_id": anomaly.id})
+
     return AnomalyOut.model_validate(anomaly, from_attributes=True)

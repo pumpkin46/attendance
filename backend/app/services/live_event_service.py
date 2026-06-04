@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.live_event import LiveEvent
+from app.realtime.hub import emit
 
 
 async def create_live_event(
@@ -32,3 +33,17 @@ async def create_live_event(
     )
     db.add(event)
     await db.flush()
+
+    await emit(
+        organization_id,
+        event_type,
+        {
+            "message": message,
+            "payload": payload,
+            "camera_id": camera_id,
+            "employee_id": employee_id,
+            "visitor_id": visitor_id,
+            "access_point_id": access_point_id,
+            "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+        },
+    )

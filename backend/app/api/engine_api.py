@@ -22,6 +22,7 @@ from app.engine.metrics import get_metrics
 from app.engine.unknown_detector import get_unknown_detector
 from app.engine.face_tracker import get_tracker
 from app.engine.vector_search import get_vector_search
+from app.realtime.hub import emit
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,7 @@ async def start_engine(user: require_permission("recognition.manage")):
     """Start the recognition engine."""
     engine = get_recognition_engine()
     await engine.start()
+    await emit(None, "engine.changed", {"status": "running"})
     return {"success": True, "status": "running"}
 
 
@@ -253,6 +255,7 @@ async def stop_engine(user: require_permission("recognition.manage")):
     """Stop the recognition engine."""
     engine = get_recognition_engine()
     await engine.stop()
+    await emit(None, "engine.changed", {"status": "stopped"})
     return {"success": True, "status": "stopped"}
 
 

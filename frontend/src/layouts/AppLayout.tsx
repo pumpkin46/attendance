@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { AppLogo } from '../components/AppLogo'
 import { Button } from '../components/ui/Button'
 import SidebarNav from '../components/SidebarNav'
+import { RealtimeIndicator } from '../components/RealtimeIndicator'
 
 export default function AppLayout() {
   const { user, logout } = useAuth()
@@ -21,6 +22,7 @@ export default function AppLayout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-slate-950">
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-end border-b border-slate-800 bg-slate-900 px-6">
           <div className="flex items-center gap-4 text-sm text-slate-400">
+            <RealtimeIndicator />
             <span>{user?.name}</span>
             <Button variant="ghost" onClick={() => logout()}>
               Sign out

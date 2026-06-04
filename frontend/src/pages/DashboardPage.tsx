@@ -56,7 +56,7 @@ export default function DashboardPage() {
     ['cameras', 'monitoring'],
     '/cameras/monitoring',
     undefined,
-    { silent: true, refetchInterval: 30_000 }
+    { silent: true } // live via WebSocket 'cameras.changed'; resynced on reconnect
   )
   const { data: health } = useApiQuery<PlatformHealth>(['health'], '/health', undefined, {
     silent: true,

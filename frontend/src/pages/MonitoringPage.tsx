@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../api/client'
 import { Badge } from '../components/ui/Badge'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
 import { StatCard } from '../components/ui/StatCard'
+import { useApiQuery } from '../hooks/useApiQuery'
 import type { Camera } from '../types'
 
 interface MonitoringDashboard {
@@ -33,22 +32,22 @@ interface LiveEvent {
 }
 
 export default function MonitoringPage() {
-  const [dashboard, setDashboard] = useState<MonitoringDashboard | null>(null)
-  const [events, setEvents] = useState<LiveEvent[]>([])
-
-  const refresh = useCallback(() => {
-    api.get<MonitoringDashboard>('/monitoring/dashboard').then((r) => setDashboard(r.data)).catch(() => {})
-    api
-      .get<{ events: LiveEvent[] }>('/monitoring/live-feed', { params: { limit: 40 } })
-      .then((r) => setEvents(r.data.events))
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    refresh()
-    const timer = setInterval(refresh, 5000)
-    return () => clearInterval(timer)
-  }, [refresh])
+  // Live via WebSocket ('recognition.*', 'access.*', 'cameras.changed',
+  // 'visitors.changed'); resynced on reconnect. The 60s poll is a safety net for
+  // this always-on screen in case the socket drops.
+  const { data: dashboard } = useApiQuery<MonitoringDashboard>(
+    ['monitoring', 'dashboard'],
+    '/monitoring/dashboard',
+    undefined,
+    { silent: true, refetchInterval: 60_000 }
+  )
+  const { data: liveFeed } = useApiQuery<{ events: LiveEvent[] }>(
+    ['monitoring', 'live-feed'],
+    '/monitoring/live-feed',
+    { limit: 40 },
+    { silent: true, refetchInterval: 60_000 }
+  )
+  const events = liveFeed?.events ?? []
 
   const eventTone = (type: string) => {
     if (type.includes('unknown')) return 'danger' as const
