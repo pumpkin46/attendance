@@ -49,6 +49,7 @@ async def seed():
             ("cameras.manage", "Manage Cameras"),
             ("rfid.manage", "Manage RFID"),
             ("recognition.view", "View Recognition Events"),
+            ("recognition.manage", "Manage Recognition Engine"),
             ("reports.view", "View Reports"),
             ("reports.export", "Export Reports"),
             ("audit.view", "View Audit Logs"),
@@ -83,7 +84,7 @@ async def seed():
             ]]),
             "employee": ("Employee", []),
             "security_officer": ("Security Officer", [perm_map[n] for n in [
-                "cameras.manage", "rfid.manage", "recognition.view",
+                "cameras.manage", "rfid.manage", "recognition.view", "recognition.manage",
                 "reports.view", "security.view", "building.manage", "security.monitor",
                 "visitors.manage", "visitors.view",
             ]]),

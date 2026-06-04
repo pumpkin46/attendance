@@ -59,7 +59,7 @@ export default function RecognitionEnginePage() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await api.get('/api/v1/engine/status')
+      const res = await api.get('/engine/status')
       setStatus(res.data)
       setError(null)
     } catch (e: any) {
@@ -78,7 +78,7 @@ export default function RecognitionEnginePage() {
   const handleStart = async () => {
     setActionLoading(true)
     try {
-      await api.post('/api/v1/engine/start')
+      await api.post('/engine/start')
       await fetchStatus()
     } catch (e: any) {
       setError(e.message)
@@ -90,7 +90,7 @@ export default function RecognitionEnginePage() {
   const handleStop = async () => {
     setActionLoading(true)
     try {
-      await api.post('/api/v1/engine/stop')
+      await api.post('/engine/stop')
       await fetchStatus()
     } catch (e: any) {
       setError(e.message)
