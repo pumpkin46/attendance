@@ -5,7 +5,9 @@ import { Card } from '../components/ui/Card'
 import { Input, Select } from '../components/ui/Input'
 import { Label } from '../components/ui/Label'
 import { PageHeader } from '../components/ui/PageHeader'
+import { Badge } from '../components/ui/Badge'
 import { TableBody, TableHead, TableShell, Td, Th } from '../components/ui/DataTable'
+import { useWebcam } from '../hooks/useWebcam'
 import type { Paginated } from '../types'
 
 interface AccessPoint {
@@ -24,9 +26,23 @@ interface AccessConfig {
   grant_conditions: Record<string, boolean>
 }
 
+interface FaceGrantResult {
+  granted: boolean
+  identity_type?: string
+  visitor_id?: number
+  employee_id?: number
+  confidence: number
+  deny_reason?: string
+  action?: string
+}
+
 export default function AccessControlPage() {
   const [points, setPoints] = useState<AccessPoint[]>([])
   const [config, setConfig] = useState<AccessConfig | null>(null)
+  const [faceGrantPoint, setFaceGrantPoint] = useState<number | null>(null)
+  const [grantResult, setGrantResult] = useState<FaceGrantResult | null>(null)
+  const [granting, setGranting] = useState(false)
+  const { videoRef, active, start, stop, captureFrame } = useWebcam()
   const [form, setForm] = useState({
     organization_id: '1',
     name: '',
@@ -63,6 +79,34 @@ export default function AccessControlPage() {
 
   const execute = async (id: number, action: string) => {
     await api.post(`/access-points/${id}/execute`, { action })
+  }
+
+  const openFaceGrant = async (id: number) => {
+    setFaceGrantPoint(id)
+    setGrantResult(null)
+    await start()
+  }
+
+  const closeFaceGrant = () => {
+    stop()
+    setFaceGrantPoint(null)
+    setGrantResult(null)
+  }
+
+  const runFaceGrant = async () => {
+    if (!faceGrantPoint) return
+    const frame = captureFrame()
+    if (!frame) return
+    setGranting(true)
+    try {
+      const { data } = await api.post<FaceGrantResult>(`/access-points/${faceGrantPoint}/face-grant`, {
+        image: frame,
+        require_liveness: false,
+      })
+      setGrantResult(data)
+    } finally {
+      setGranting(false)
+    }
   }
 
   return (
@@ -140,6 +184,7 @@ export default function AccessControlPage() {
           <Th>Type</Th>
           <Th>Action</Th>
           <Th>Camera</Th>
+          <Th>Face grant</Th>
           <Th>Manual control</Th>
         </TableHead>
         <TableBody>
@@ -149,6 +194,11 @@ export default function AccessControlPage() {
               <Td>{p.device_type}</Td>
               <Td>{config?.actions[p.default_action] ?? p.default_action}</Td>
               <Td>{p.camera?.name ?? '—'}</Td>
+              <Td>
+                <Button variant="ghost" onClick={() => openFaceGrant(p.id)}>
+                  Test face grant
+                </Button>
+              </Td>
               <Td>
                 <div className="flex flex-wrap gap-1">
                   {config &&
@@ -163,6 +213,37 @@ export default function AccessControlPage() {
           ))}
         </TableBody>
       </TableShell>
+
+      {faceGrantPoint !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <Card className="w-full max-w-lg">
+            <h3 className="mb-4 text-lg font-medium">Face grant test</h3>
+            <p className="mb-3 text-sm text-slate-400">
+              Simulates door camera recognition for employees and checked-in visitors with zone permissions.
+            </p>
+            <video ref={videoRef} autoPlay playsInline muted className="mb-4 w-full rounded-lg bg-black" />
+            {grantResult && (
+              <div className="mb-4 rounded-lg bg-slate-800 p-3 text-sm">
+                <Badge tone={grantResult.granted ? 'ok' : 'danger'}>
+                  {grantResult.granted ? 'Access granted' : 'Access denied'}
+                </Badge>
+                {grantResult.identity_type && (
+                  <p className="mt-2 capitalize">Identity: {grantResult.identity_type}</p>
+                )}
+                {grantResult.deny_reason && <p className="text-red-400">{grantResult.deny_reason}</p>}
+                {grantResult.action && <p>Action: {grantResult.action}</p>}
+                <p className="text-slate-500">Confidence: {(grantResult.confidence * 100).toFixed(1)}%</p>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={runFaceGrant} disabled={!active || granting}>
+                {granting ? 'Identifying…' : 'Capture & grant'}
+              </Button>
+              <Button variant="ghost" onClick={closeFaceGrant}>Close</Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,42 +1,118 @@
 from __future__ import annotations
 
-import re
-import secrets
+import asyncio
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
-from sqlalchemy import select
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
+from sqlalchemy import or_, select
 
-from app.core.config import settings
 from app.core.dependencies import (
     CurrentUser,
     DbSession,
     TenantOrgId,
-    get_visitor_kiosk,
-    require_permission,
 )
-from app.core.pagination import PaginationDep, PaginationParams, paginate
-from app.core.security import generate_device_token
+from app.core.pagination import PaginationDep, paginate
 from app.middleware.tenant import apply_tenant_filter
-from app.models.employee import Employee
-from app.models.visitor import Visitor, VisitorKiosk, VisitorStatus
-from app.schemas.visitor import (
-    HostOut,
-    KioskConfigResponse,
-    VisitorCreate,
-    VisitorKioskCreate,
-    VisitorKioskOut,
-    VisitorLookupRequest,
-    VisitorOut,
-    VisitorRegisterRequest,
+from app.models.visitor import (
+    DocumentType,
+    Visitor,
+    VisitorBlacklist,
+    VisitorDocument,
+    VisitorPhoto,
+    VisitorStatus,
 )
+from app.schemas.visitor import (
+    AccessPermissionSet,
+    ApprovalRequest,
+    BlacklistCreate,
+    BlacklistOut,
+    PhotoUploadBase64,
+    RejectRequest,
+    VisitorAccessPermissionOut,
+    VisitorCreate,
+    VisitorDailyReport,
+    VisitorDashboard,
+    VisitorDocumentOut,
+    VisitorOut,
+    VisitorPhotoOut,
+    VisitorUpdate,
+)
+from app.services.upload_storage import ALLOWED_DOC_EXT, save_visitor_base64, save_visitor_upload
 from app.services import face_service
 from app.services.audit_service import log_action
+from app.services import visitor_service
 
 router = APIRouter(prefix="/api/v1", tags=["visitors"])
 
+_expiry_task: asyncio.Task | None = None
+
+
+def _format_visitor(visitor: Visitor) -> VisitorOut:
+    data = VisitorOut.model_validate(visitor, from_attributes=True)
+    data.host = visitor_service.format_host(visitor.host_employee)
+    if visitor.id_type:
+        data.id_type = visitor.id_type.value
+    if visitor.visitor_category:
+        data.visitor_category = visitor.visitor_category.value
+    if visitor.visit_type:
+        data.visit_type = visitor.visit_type.value
+    if visitor.approval_status:
+        data.approval_status = visitor.approval_status.value
+    return data
+
 
 # ── Admin Visitor Routes ──────────────────────────────────────────────────────
+
+
+@router.get("/visitors/dashboard", response_model=VisitorDashboard)
+async def visitor_dashboard(
+    db: DbSession,
+    user: CurrentUser,
+    org_id: TenantOrgId,
+):
+    if org_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+    stats = await visitor_service.get_dashboard_stats(db, org_id)
+    return VisitorDashboard(**stats)
+
+
+@router.get("/visitors/active", response_model=list[VisitorOut])
+async def list_active_visitors(
+    db: DbSession,
+    user: CurrentUser,
+    org_id: TenantOrgId,
+):
+    if org_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+    visitors = await visitor_service.get_active_visitors(db, org_id)
+    return [_format_visitor(v) for v in visitors]
+
+
+@router.get("/visitors/reports/daily", response_model=VisitorDailyReport)
+async def visitor_daily_report(
+    db: DbSession,
+    user: CurrentUser,
+    org_id: TenantOrgId,
+    report_date: str | None = None,
+):
+    if org_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+    from datetime import date as date_type
+    d = date_type.fromisoformat(report_date) if report_date else None
+    report = await visitor_service.get_daily_report(db, org_id, d)
+    return VisitorDailyReport(**report)
+
+
+@router.get("/visitors/pending-approval", response_model=list[VisitorOut])
+async def list_pending_approvals(
+    db: DbSession,
+    user: CurrentUser,
+    org_id: TenantOrgId,
+):
+    if org_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
+    visitors = await visitor_service.get_pending_approvals(db, org_id)
+    return [_format_visitor(v) for v in visitors]
 
 
 @router.get("/visitors")
@@ -45,10 +121,25 @@ async def list_visitors(
     user: CurrentUser,
     org_id: TenantOrgId,
     pagination: PaginationDep,
+    status_filter: str | None = Query(None, alias="status"),
+    search: str | None = None,
 ):
     stmt = select(Visitor).order_by(Visitor.id.desc())
     stmt = apply_tenant_filter(stmt, org_id, Visitor.organization_id)
-    return await paginate(db, stmt, pagination.page, pagination.per_page, VisitorOut)
+    if status_filter:
+        try:
+            stmt = stmt.where(Visitor.status == VisitorStatus(status_filter))
+        except ValueError:
+            pass
+    if search:
+        like = f"%{search}%"
+        stmt = stmt.where(
+            or_(Visitor.name.ilike(like), Visitor.company.ilike(like), Visitor.check_in_code.ilike(like))
+        )
+
+    result = await paginate(db, stmt, pagination.page, pagination.per_page, None)
+    result["data"] = [_format_visitor(v) for v in result["data"]]
+    return result
 
 
 @router.post("/visitors", response_model=VisitorOut, status_code=status.HTTP_201_CREATED)
@@ -61,34 +152,16 @@ async def create_visitor(
 ):
     if org_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
-
-    check_in_code = _generate_check_in_code()
-    badge_number = f"{settings.visitor_badge_prefix}{secrets.randbelow(999999):06d}"
-    now = datetime.now(timezone.utc)
-    visit_start = body.visit_start_at or now
-    if body.visit_end_at:
-        visit_end = body.visit_end_at
-    elif body.visit_start_at:
-        visit_end = body.visit_start_at + timedelta(hours=settings.visitor_default_visit_hours)
-    else:
-        visit_end = visit_start + timedelta(hours=settings.visitor_default_visit_hours)
-
-    visitor = Visitor(
-        organization_id=org_id,
-        name=body.name,
-        company=body.company,
-        phone=body.phone,
-        purpose=body.purpose,
-        host_employee_id=body.host_employee_id,
-        check_in_code=check_in_code,
-        badge_number=badge_number,
-        visit_start_at=visit_start,
-        visit_end_at=visit_end,
-        status=VisitorStatus.scheduled,
-    )
-    db.add(visitor)
-    await db.flush()
-    await db.refresh(visitor)
+    try:
+        visitor = await visitor_service.create_visitor(
+            db,
+            org_id,
+            body.model_dump(exclude_none=True),
+            user_id=user.id,
+            pre_registered=body.pre_registered,
+        )
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
 
     await log_action(
         db,
@@ -99,7 +172,7 @@ async def create_visitor(
         ip_address=request.client.host if request.client else None,
         new_values=body.model_dump(exclude_none=True),
     )
-    return VisitorOut.model_validate(visitor, from_attributes=True)
+    return _format_visitor(visitor)
 
 
 @router.get("/visitors/{visitor_id}", response_model=VisitorOut)
@@ -110,7 +183,39 @@ async def get_visitor(
     org_id: TenantOrgId,
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
-    return VisitorOut.model_validate(visitor, from_attributes=True)
+    return _format_visitor(visitor)
+
+
+@router.patch("/visitors/{visitor_id}", response_model=VisitorOut)
+async def update_visitor(
+    visitor_id: int,
+    body: VisitorUpdate,
+    request: Request,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    updates = body.model_dump(exclude_none=True)
+    if "first_name" in updates or "last_name" in updates:
+        first = updates.get("first_name", visitor.first_name)
+        last = updates.get("last_name", visitor.last_name)
+        if first and last:
+            updates["name"] = f"{first} {last}"
+    for key, val in updates.items():
+        setattr(visitor, key, val)
+    await db.flush()
+    await db.refresh(visitor)
+    await log_action(
+        db,
+        user_id=user.id,
+        action="visitor.updated",
+        entity_type="visitor",
+        entity_id=visitor.id,
+        ip_address=request.client.host if request.client else None,
+        new_values=updates,
+    )
+    return _format_visitor(visitor)
 
 
 @router.post("/visitors/{visitor_id}/enroll-face")
@@ -126,15 +231,101 @@ async def enroll_visitor_face(
     image = body.get("image")
     if not image:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Image required")
-
-    result = face_service.enroll(f"visitor-{visitor.id}", image)
-    if result.get("success"):
-        visitor.face_registered = True
-        await db.flush()
-    return result
+    method = body.get("method", "admin")
+    return await visitor_service.enroll_visitor_face(db, visitor, image, method=method)
 
 
-@router.post("/visitors/{visitor_id}/cancel")
+@router.post("/visitors/{visitor_id}/check-in", response_model=VisitorOut)
+async def check_in_visitor(
+    visitor_id: int,
+    request: Request,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    try:
+        visitor = await visitor_service.check_in_visitor(
+            db, visitor, user_id=user.id, method="reception"
+        )
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    await log_action(
+        db,
+        user_id=user.id,
+        action="visitor.checked_in",
+        entity_type="visitor",
+        entity_id=visitor.id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return _format_visitor(visitor)
+
+
+@router.post("/visitors/{visitor_id}/check-out", response_model=VisitorOut)
+async def check_out_visitor(
+    visitor_id: int,
+    request: Request,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    notes = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            notes = body.get("notes")
+    except Exception:
+        pass
+    try:
+        visitor = await visitor_service.check_out_visitor(
+            db,
+            visitor,
+            user_id=user.id,
+            method="reception",
+            notes=notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    await log_action(
+        db,
+        user_id=user.id,
+        action="visitor.checked_out",
+        entity_type="visitor",
+        entity_id=visitor.id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return _format_visitor(visitor)
+
+
+@router.post("/visitors/{visitor_id}/approve", response_model=VisitorOut)
+async def approve_visitor(
+    visitor_id: int,
+    body: ApprovalRequest,
+    request: Request,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    try:
+        visitor = await visitor_service.approve_visitor(
+            db, visitor, body.stage, user_id=user.id, notes=body.notes
+        )
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    await log_action(
+        db,
+        user_id=user.id,
+        action=f"visitor.approved.{body.stage}",
+        entity_type="visitor",
+        entity_id=visitor.id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return _format_visitor(visitor)
+
+
+@router.post("/visitors/{visitor_id}/cancel", response_model=VisitorOut)
 async def cancel_visitor(
     visitor_id: int,
     request: Request,
@@ -144,9 +335,14 @@ async def cancel_visitor(
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     visitor.status = VisitorStatus.cancelled
+    identity = f"visitor-{visitor.id}"
+    face_service.delete_employee(identity)
+    visitor.face_registered = False
+    await visitor_service.log_visitor_event(
+        db, visitor.id, "cancelled", "Visit cancelled", user.id
+    )
     await db.flush()
     await db.refresh(visitor)
-
     await log_action(
         db,
         user_id=user.id,
@@ -155,353 +351,379 @@ async def cancel_visitor(
         entity_id=visitor.id,
         ip_address=request.client.host if request.client else None,
     )
-    return VisitorOut.model_validate(visitor, from_attributes=True)
+    return _format_visitor(visitor)
 
 
-# ── Kiosk API Routes ─────────────────────────────────────────────────────────
-
-
-@router.get("/kiosk/visitor/config", response_model=KioskConfigResponse)
-async def kiosk_config(kiosk: VisitorKiosk = Depends(get_visitor_kiosk)):
-    return KioskConfigResponse(
-        default_visit_hours=settings.visitor_kiosk_default_visit_hours,
-        face_expiry_buffer_minutes=settings.visitor_face_expiry_buffer_minutes,
-        badge_prefix=settings.visitor_badge_prefix,
-        require_face_enrollment=True,
-    )
-
-
-@router.get("/kiosk/visitor/hosts", response_model=list[HostOut])
-async def kiosk_list_hosts(
+@router.post("/visitors/{visitor_id}/revoke-access", response_model=VisitorOut)
+async def revoke_visitor_access(
+    visitor_id: int,
+    request: Request,
     db: DbSession,
-    kiosk: VisitorKiosk = Depends(get_visitor_kiosk),
+    org_id: TenantOrgId,
+    user: CurrentUser,
 ):
-    stmt = select(Employee).where(
-        Employee.organization_id == kiosk.organization_id,
-        Employee.is_active == True,  # noqa: E712
-    ).order_by(Employee.last_name, Employee.first_name)
-    result = await db.execute(stmt)
-    employees = result.scalars().all()
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    identity = f"visitor-{visitor.id}"
+    face_service.delete_employee(identity)
+    visitor.face_registered = False
+    visitor.face_expires_at = datetime.now(timezone.utc)
+    visitor.status = VisitorStatus.expired
+    await visitor_service.log_visitor_event(
+        db, visitor.id, "access_revoked", "Access manually revoked", user.id
+    )
+    await db.flush()
+    await db.refresh(visitor)
+    return _format_visitor(visitor)
+
+
+@router.post("/visitors/{visitor_id}/reject", response_model=VisitorOut)
+async def reject_visitor(
+    visitor_id: int,
+    body: RejectRequest,
+    request: Request,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    visitor = await visitor_service.reject_visitor(
+        db, visitor, user_id=user.id, notes=body.notes
+    )
+    await log_action(
+        db,
+        user_id=user.id,
+        action="visitor.rejected",
+        entity_type="visitor",
+        entity_id=visitor.id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return _format_visitor(visitor)
+
+
+# ── Photos & Documents ──────────────────────────────────────────────────────
+
+
+@router.get("/visitors/{visitor_id}/photos", response_model=list[VisitorPhotoOut])
+async def list_visitor_photos(
+    visitor_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    await _get_visitor_or_404(db, visitor_id, org_id)
+    stmt = select(VisitorPhoto).where(VisitorPhoto.visitor_id == visitor_id)
+    photos = list((await db.execute(stmt)).scalars().all())
+    return [VisitorPhotoOut.model_validate(p, from_attributes=True) for p in photos]
+
+
+@router.post("/visitors/{visitor_id}/photos", response_model=VisitorPhotoOut, status_code=status.HTTP_201_CREATED)
+async def upload_visitor_photo(
+    visitor_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+    file: UploadFile | None = File(None),
+    image: str | None = Form(None),
+    caption: str | None = Form(None),
+    is_primary: bool = Form(False),
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    oid = visitor.organization_id
+    if file:
+        _, url = save_visitor_upload(oid, visitor_id, "photos", file)
+    elif image:
+        _, url = save_visitor_base64(oid, visitor_id, "photos", image)
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File or image required")
+
+    if is_primary:
+        visitor.photo_url = url
+    photo = VisitorPhoto(
+        visitor_id=visitor.id,
+        url=url,
+        is_primary=is_primary,
+        caption=caption,
+    )
+    db.add(photo)
+    await visitor_service.log_visitor_event(
+        db, visitor.id, "photo_uploaded", caption or "Photo uploaded", user.id
+    )
+    await db.flush()
+    await db.refresh(photo)
+    return VisitorPhotoOut.model_validate(photo, from_attributes=True)
+
+
+@router.post("/visitors/{visitor_id}/photos/base64", response_model=VisitorPhotoOut, status_code=status.HTTP_201_CREATED)
+async def upload_visitor_photo_base64(
+    visitor_id: int,
+    body: PhotoUploadBase64,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    _, url = save_visitor_base64(visitor.organization_id, visitor_id, "photos", body.image)
+    if body.is_primary:
+        visitor.photo_url = url
+    photo = VisitorPhoto(visitor_id=visitor.id, url=url, is_primary=body.is_primary, caption=body.caption)
+    db.add(photo)
+    await db.flush()
+    await db.refresh(photo)
+    return VisitorPhotoOut.model_validate(photo, from_attributes=True)
+
+
+@router.delete("/visitors/{visitor_id}/photos/{photo_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_visitor_photo(
+    visitor_id: int,
+    photo_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    await _get_visitor_or_404(db, visitor_id, org_id)
+    photo = await db.get(VisitorPhoto, photo_id)
+    if not photo or photo.visitor_id != visitor_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Photo not found")
+    await db.delete(photo)
+    await db.flush()
+
+
+@router.get("/visitors/{visitor_id}/documents", response_model=list[VisitorDocumentOut])
+async def list_visitor_documents(
+    visitor_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    await _get_visitor_or_404(db, visitor_id, org_id)
+    stmt = select(VisitorDocument).where(VisitorDocument.visitor_id == visitor_id)
+    docs = list((await db.execute(stmt)).scalars().all())
     return [
-        HostOut(
-            id=e.id,
-            name=f"{e.first_name} {e.last_name}",
-            department=e.department,
-            email=e.email,
+        VisitorDocumentOut(
+            id=d.id,
+            visitor_id=d.visitor_id,
+            document_type=d.document_type.value,
+            url=d.url,
+            filename=d.filename,
+            notes=d.notes,
+            created_at=d.created_at,
         )
-        for e in employees
+        for d in docs
     ]
 
 
-@router.post("/kiosk/visitor/lookup", response_model=VisitorOut)
-async def kiosk_lookup_visitor(
-    body: VisitorLookupRequest,
-    db: DbSession,
-    kiosk: VisitorKiosk = Depends(get_visitor_kiosk),
-):
-    stmt = select(Visitor).where(
-        Visitor.organization_id == kiosk.organization_id,
-        Visitor.check_in_code == body.check_in_code,
-    )
-    result = await db.execute(stmt)
-    visitor = result.scalar_one_or_none()
-    if not visitor:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Visitor not found")
-    return VisitorOut.model_validate(visitor, from_attributes=True)
-
-
-@router.post("/kiosk/visitor/register", response_model=VisitorOut, status_code=status.HTTP_201_CREATED)
-async def kiosk_register_visitor(
-    body: VisitorRegisterRequest,
-    db: DbSession,
-    kiosk: VisitorKiosk = Depends(get_visitor_kiosk),
-):
-    now = datetime.now(timezone.utc)
-    check_in_code = _generate_check_in_code()
-    badge_number = f"{settings.visitor_badge_prefix}{secrets.randbelow(999999):06d}"
-    expires_at = now + timedelta(hours=settings.visitor_kiosk_default_visit_hours)
-
-    visitor = Visitor(
-        organization_id=kiosk.organization_id,
-        name=body.name,
-        company=body.company,
-        phone=body.phone,
-        purpose=body.purpose,
-        host_employee_id=body.host_employee_id,
-        check_in_code=check_in_code,
-        badge_number=badge_number,
-        status=VisitorStatus.scheduled,
-        visit_start_at=now,
-        visit_end_at=expires_at,
-    )
-    db.add(visitor)
-    await db.flush()
-    await db.refresh(visitor)
-    return VisitorOut.model_validate(visitor, from_attributes=True)
-
-
-@router.post("/kiosk/visitor/identify")
-async def kiosk_identify_visitor(
-    request: Request,
-    db: DbSession,
-    kiosk: VisitorKiosk = Depends(get_visitor_kiosk),
-):
-    body = await request.json()
-    image = body.get("image")
-    if not image:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Image required")
-
-    result = face_service.identify(image, require_liveness=True)
-    emp_id = result.get("employee_id")
-    if emp_id and str(emp_id).startswith("visitor-"):
-        visitor_id = int(str(emp_id).replace("visitor-", ""))
-        visitor = await db.get(Visitor, visitor_id)
-        if visitor and visitor.organization_id == kiosk.organization_id:
-            return {
-                "found": True,
-                "visitor": VisitorOut.model_validate(visitor, from_attributes=True).model_dump(),
-                **result,
-            }
-    return {"found": False, **result}
-
-
-@router.post("/kiosk/visitor/visitors/{visitor_id}/enroll-face")
-async def kiosk_enroll_visitor_face(
+@router.post("/visitors/{visitor_id}/documents", response_model=VisitorDocumentOut, status_code=status.HTTP_201_CREATED)
+async def upload_visitor_document(
     visitor_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+    file: UploadFile = File(...),
+    document_type: str = Form("other"),
+    notes: str | None = Form(None),
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    try:
+        doc_type = DocumentType(document_type)
+    except ValueError:
+        doc_type = DocumentType.other
+
+    _, url = save_visitor_upload(visitor.organization_id, visitor_id, "documents", file, allowed_ext=ALLOWED_DOC_EXT)
+    doc = VisitorDocument(
+        visitor_id=visitor.id,
+        document_type=doc_type,
+        url=url,
+        filename=file.filename,
+        notes=notes,
+    )
+    db.add(doc)
+    await visitor_service.log_visitor_event(
+        db, visitor.id, "document_uploaded", f"{doc_type.value} uploaded", user.id
+    )
+    await db.flush()
+    await db.refresh(doc)
+    return VisitorDocumentOut(
+        id=doc.id,
+        visitor_id=doc.visitor_id,
+        document_type=doc.document_type.value,
+        url=doc.url,
+        filename=doc.filename,
+        notes=doc.notes,
+        created_at=doc.created_at,
+    )
+
+
+@router.delete("/visitors/{visitor_id}/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_visitor_document(
+    visitor_id: int,
+    doc_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    await _get_visitor_or_404(db, visitor_id, org_id)
+    doc = await db.get(VisitorDocument, doc_id)
+    if not doc or doc.visitor_id != visitor_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+    await db.delete(doc)
+    await db.flush()
+
+
+# ── Access permissions ────────────────────────────────────────────────────────
+
+
+@router.get("/visitors/{visitor_id}/access-permissions", response_model=list[VisitorAccessPermissionOut])
+async def list_visitor_access_permissions(
+    visitor_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    from app.models.visitor import VisitorAccessPermission
+    await _get_visitor_or_404(db, visitor_id, org_id)
+    stmt = select(VisitorAccessPermission).where(
+        VisitorAccessPermission.visitor_id == visitor_id
+    )
+    perms = list((await db.execute(stmt)).scalars().all())
+    return [VisitorAccessPermissionOut.model_validate(p, from_attributes=True) for p in perms]
+
+
+@router.put("/visitors/{visitor_id}/access-permissions", response_model=list[VisitorAccessPermissionOut])
+async def set_visitor_access_permissions(
+    visitor_id: int,
+    body: AccessPermissionSet,
     request: Request,
     db: DbSession,
-    kiosk: VisitorKiosk = Depends(get_visitor_kiosk),
+    org_id: TenantOrgId,
+    user: CurrentUser,
 ):
-    visitor = await db.get(Visitor, visitor_id)
-    if not visitor or visitor.organization_id != kiosk.organization_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Visitor not found")
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    perms = await visitor_service.set_access_permissions(
+        db, visitor, body.zones, body.access_point_id
+    )
+    await log_action(
+        db,
+        user_id=user.id,
+        action="visitor.access_permissions_set",
+        entity_type="visitor",
+        entity_id=visitor.id,
+        ip_address=request.client.host if request.client else None,
+        new_values={"zones": body.zones},
+    )
+    return [VisitorAccessPermissionOut.model_validate(p, from_attributes=True) for p in perms]
 
-    body = await request.json()
-    image = body.get("image")
-    if not image:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Image required")
 
-    result = face_service.enroll(f"visitor-{visitor.id}", image)
-    if result.get("success"):
-        visitor.face_registered = True
-        await db.flush()
+# ── Blacklist ─────────────────────────────────────────────────────────────────
+
+
+@router.get("/visitor-blacklist")
+async def list_blacklist(
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+    pagination: PaginationDep,
+):
+    stmt = select(VisitorBlacklist).where(VisitorBlacklist.is_active == True).order_by(VisitorBlacklist.id.desc())  # noqa: E712
+    stmt = apply_tenant_filter(stmt, org_id, VisitorBlacklist.organization_id)
+    result = await paginate(db, stmt, pagination.page, pagination.per_page, None)
+    result["data"] = [
+        BlacklistOut(
+            id=e.id,
+            organization_id=e.organization_id,
+            visitor_id=e.visitor_id,
+            name=e.name,
+            id_number=e.id_number,
+            reason=e.reason.value,
+            notes=e.notes,
+            is_active=e.is_active,
+            created_at=e.created_at,
+        )
+        for e in result["data"]
+    ]
     return result
 
 
-@router.post("/kiosk/visitor/visitors/{visitor_id}/check-in", response_model=VisitorOut)
-async def kiosk_check_in_visitor(
-    visitor_id: int,
-    db: DbSession,
-    kiosk: VisitorKiosk = Depends(get_visitor_kiosk),
-):
-    visitor = await db.get(Visitor, visitor_id)
-    if not visitor or visitor.organization_id != kiosk.organization_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Visitor not found")
-    if visitor.status == VisitorStatus.checked_in:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Visitor already checked in")
-
-    now = datetime.now(timezone.utc)
-    visitor.status = VisitorStatus.checked_in
-    visitor.checked_in_at = now
-    if not visitor.visit_end_at or visitor.visit_end_at < now:
-        visitor.visit_end_at = now + timedelta(hours=settings.visitor_kiosk_default_visit_hours)
-    visitor.face_expires_at = visitor.visit_end_at + timedelta(
-        minutes=settings.visitor_face_expiry_buffer_minutes
-    )
-    await db.flush()
-    await db.refresh(visitor)
-    return VisitorOut.model_validate(visitor, from_attributes=True)
-
-
-@router.post("/kiosk/visitor/heartbeat")
-async def kiosk_heartbeat(
-    db: DbSession,
-    kiosk: VisitorKiosk = Depends(get_visitor_kiosk),
-):
-    kiosk.last_heartbeat_at = datetime.now(timezone.utc)
-    await db.flush()
-    return {"status": "ok"}
-
-
-# ── Kiosk Management ─────────────────────────────────────────────────────────
-
-
-def _kiosk_is_online(kiosk: VisitorKiosk) -> bool:
-    if not kiosk.is_active or not kiosk.last_heartbeat_at:
-        return False
-    threshold = datetime.now(timezone.utc) - timedelta(
-        seconds=settings.visitor_kiosk_offline_seconds
-    )
-    return kiosk.last_heartbeat_at >= threshold
-
-
-def _format_kiosk(kiosk: VisitorKiosk) -> dict:
-    data = VisitorKioskOut.model_validate(kiosk, from_attributes=True).model_dump()
-    data["online"] = _kiosk_is_online(kiosk)
-    return data
-
-
-def _slugify_kiosk_name(name: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", name.strip()).strip("-").upper()
-    return slug[:30] or "KIOSK"
-
-
-async def _generate_kiosk_device_id(db: DbSession, name: str) -> str:
-    base = f"VK-{_slugify_kiosk_name(name)}"
-    candidate = base
-    suffix = 1
-    while True:
-        exists = (
-            await db.execute(select(VisitorKiosk.id).where(VisitorKiosk.device_id == candidate))
-        ).scalar_one_or_none()
-        if exists is None:
-            return candidate
-        candidate = f"{base}-{suffix}"
-        suffix += 1
-
-
-def _kiosk_url(request: Request, plain_token: str) -> str:
-    origin = request.headers.get("origin")
-    if origin:
-        return f"{origin.rstrip('/')}/visitor-kiosk?token={plain_token}"
-    return f"/visitor-kiosk?token={plain_token}"
-
-
-@router.get("/visitor-kiosks")
-async def list_kiosks(
-    db: DbSession,
-    org_id: TenantOrgId,
-    _: require_permission("visitor_kiosks.manage"),
-):
-    stmt = select(VisitorKiosk).order_by(VisitorKiosk.name)
-    stmt = apply_tenant_filter(stmt, org_id, VisitorKiosk.organization_id)
-    kiosks = list((await db.execute(stmt)).scalars().all())
-    return [_format_kiosk(k) for k in kiosks]
-
-
-@router.post("/visitor-kiosks", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_kiosk(
-    body: VisitorKioskCreate,
+@router.post("/visitor-blacklist", response_model=BlacklistOut, status_code=status.HTTP_201_CREATED)
+async def add_to_blacklist(
+    body: BlacklistCreate,
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("visitor_kiosks.manage"),
+    user: CurrentUser,
 ):
     if org_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Organization context required")
-
-    plain_token, hashed_token = generate_device_token()
-    device_id = await _generate_kiosk_device_id(db, body.name)
-    kiosk = VisitorKiosk(
+    from app.models.visitor import BlacklistReason
+    try:
+        reason = BlacklistReason(body.reason)
+    except ValueError:
+        reason = BlacklistReason.blocked
+    entry = VisitorBlacklist(
         organization_id=org_id,
+        visitor_id=body.visitor_id,
         name=body.name,
-        location_id=body.location_id,
-        device_id=device_id,
-        api_token=hashed_token,
-        allow_walk_in=body.allow_walk_in,
-        require_host=body.require_host,
-        require_liveness=body.require_liveness,
+        id_number=body.id_number,
+        reason=reason,
+        notes=body.notes,
+        added_by_user_id=user.id,
     )
-    db.add(kiosk)
+    db.add(entry)
     await db.flush()
-    await db.refresh(kiosk)
-
+    await db.refresh(entry)
     await log_action(
         db,
         user_id=user.id,
-        action="visitor_kiosk.created",
-        entity_type="visitor_kiosk",
-        entity_id=kiosk.id,
+        action="visitor.blacklisted",
+        entity_type="visitor_blacklist",
+        entity_id=entry.id,
         ip_address=request.client.host if request.client else None,
-        new_values=body.model_dump(),
     )
-    return {
-        **_format_kiosk(kiosk),
-        "api_token_plain": plain_token,
-        "kiosk_url": _kiosk_url(request, plain_token),
-    }
+    out = BlacklistOut.model_validate(entry, from_attributes=True)
+    out.reason = entry.reason.value
+    return out
 
 
-@router.patch("/visitor-kiosks/{kiosk_id}", response_model=VisitorKioskOut)
-async def update_kiosk(
-    kiosk_id: int,
-    request: Request,
+@router.delete("/visitor-blacklist/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_from_blacklist(
+    entry_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("visitor_kiosks.manage"),
+    user: CurrentUser,
 ):
-    stmt = select(VisitorKiosk).where(VisitorKiosk.id == kiosk_id)
-    stmt = apply_tenant_filter(stmt, org_id, VisitorKiosk.organization_id)
-    result = await db.execute(stmt)
-    kiosk = result.scalar_one_or_none()
-    if not kiosk:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kiosk not found")
-
-    body = await request.json()
-    for field in ("name", "location_id", "is_active"):
-        if field in body:
-            setattr(kiosk, field, body[field])
+    stmt = select(VisitorBlacklist).where(VisitorBlacklist.id == entry_id)
+    stmt = apply_tenant_filter(stmt, org_id, VisitorBlacklist.organization_id)
+    entry = (await db.execute(stmt)).scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Blacklist entry not found")
+    entry.is_active = False
     await db.flush()
-    await db.refresh(kiosk)
-
-    await log_action(
-        db,
-        user_id=user.id,
-        action="visitor_kiosk.updated",
-        entity_type="visitor_kiosk",
-        entity_id=kiosk.id,
-        ip_address=request.client.host if request.client else None,
-        new_values=body,
-    )
-    return _format_kiosk(kiosk)
 
 
-@router.post("/visitor-kiosks/{kiosk_id}/regenerate-token", response_model=dict)
-async def regenerate_kiosk_token(
-    kiosk_id: int,
-    request: Request,
-    db: DbSession,
-    org_id: TenantOrgId,
-    user: require_permission("visitor_kiosks.manage"),
-):
-    stmt = select(VisitorKiosk).where(VisitorKiosk.id == kiosk_id)
-    stmt = apply_tenant_filter(stmt, org_id, VisitorKiosk.organization_id)
-    result = await db.execute(stmt)
-    kiosk = result.scalar_one_or_none()
-    if not kiosk:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kiosk not found")
+# ── Background expiry task ────────────────────────────────────────────────────
 
-    plain_token, hashed_token = generate_device_token()
-    kiosk.api_token = hashed_token
-    await db.flush()
-    await db.refresh(kiosk)
 
-    await log_action(
-        db,
-        user_id=user.id,
-        action="visitor_kiosk.token_regenerated",
-        entity_type="visitor_kiosk",
-        entity_id=kiosk.id,
-        ip_address=request.client.host if request.client else None,
-    )
-    return {
-        "id": kiosk.id,
-        "api_token_plain": plain_token,
-        "kiosk_url": _kiosk_url(request, plain_token),
-    }
+async def _run_visitor_expiry_loop() -> None:
+    from app.core.database import async_session_factory
+    while True:
+        try:
+            async with async_session_factory() as db:
+                count = await visitor_service.expire_visitors(db)
+                await db.commit()
+                if count:
+                    print(f"[visitor-expiry] Expired {count} visitor(s)")
+        except Exception as exc:
+            print(f"[visitor-expiry] Error: {exc}")
+        await asyncio.sleep(60)
+
+
+def start_visitor_expiry_task() -> asyncio.Task:
+    global _expiry_task
+    if _expiry_task is None or _expiry_task.done():
+        _expiry_task = asyncio.create_task(_run_visitor_expiry_loop())
+    return _expiry_task
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-_CHECK_IN_CODE_LEN = 12
-
-
-def _generate_check_in_code() -> str:
-    """URL-safe code that fits visitors.check_in_code VARCHAR(12)."""
-    code = secrets.token_urlsafe(9)
-    if len(code) > _CHECK_IN_CODE_LEN:
-        code = code[:_CHECK_IN_CODE_LEN]
-    return code
 
 
 async def _get_visitor_or_404(
@@ -509,8 +731,7 @@ async def _get_visitor_or_404(
 ) -> Visitor:
     stmt = select(Visitor).where(Visitor.id == visitor_id)
     stmt = apply_tenant_filter(stmt, org_id, Visitor.organization_id)
-    result = await db.execute(stmt)
-    visitor = result.scalar_one_or_none()
+    visitor = (await db.execute(stmt)).scalar_one_or_none()
     if not visitor:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Visitor not found")
     return visitor

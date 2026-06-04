@@ -18,7 +18,20 @@ from app.models.recognition import RecognitionEvent
 from app.models.rfid import RfidReader, RfidCard, RfidEvent
 from app.models.edge import EdgeDevice
 from app.models.access import AccessPoint, AccessEvent
-from app.models.visitor import Visitor, VisitorKiosk
+from app.models.visitor import (
+    Visitor,
+    VisitorPhoto,
+    VisitorDocument,
+    VisitorFace,
+    VisitorBadge,
+    VisitorAccessPermission,
+    VisitorCheckin,
+    VisitorCheckout,
+    VisitorHost,
+    VisitorNotification,
+    VisitorBlacklist,
+    VisitorLog,
+)
 from app.models.building import BuildingConnector, BuildingEvent
 from app.models.security import SecurityAlert
 from app.models.notification import Notification
@@ -59,7 +72,17 @@ __all__ = [
     "AccessPoint",
     "AccessEvent",
     "Visitor",
-    "VisitorKiosk",
+    "VisitorPhoto",
+    "VisitorDocument",
+    "VisitorFace",
+    "VisitorBadge",
+    "VisitorAccessPermission",
+    "VisitorCheckin",
+    "VisitorCheckout",
+    "VisitorHost",
+    "VisitorNotification",
+    "VisitorBlacklist",
+    "VisitorLog",
     "BuildingConnector",
     "BuildingEvent",
     "SecurityAlert",

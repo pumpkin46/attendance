@@ -44,7 +44,6 @@ const navGroups: NavGroup[] = [
     ),
     items: [
       { to: '/visitors', label: 'Visitors' },
-      { to: '/visitor-kiosks', label: 'Visitor Kiosks' },
       { to: '/access-control', label: 'Access Control' },
     ],
   },

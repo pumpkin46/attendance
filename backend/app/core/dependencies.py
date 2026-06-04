@@ -88,24 +88,3 @@ async def get_rfid_reader(
     if reader is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid RFID reader token")
     return reader
-
-
-async def get_visitor_kiosk(
-    request: Request,
-    db: DbSession,
-):
-    from app.models.visitor import VisitorKiosk
-
-    auth = request.headers.get("Authorization", "")
-    token = request.query_params.get("kiosk_token")
-    if auth.startswith("Bearer "):
-        token = auth[7:]
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing kiosk token")
-    token_hash = hash_device_token(token)
-    stmt = select(VisitorKiosk).where(VisitorKiosk.api_token == token_hash, VisitorKiosk.is_active == True)  # noqa: E712
-    result = await db.execute(stmt)
-    kiosk = result.scalar_one_or_none()
-    if kiosk is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid kiosk token")
-    return kiosk

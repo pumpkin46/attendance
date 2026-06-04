@@ -75,19 +75,34 @@ async def identify_face(
     )
 
     if result.get("success") and result.get("employee_id"):
-        employee_id = int(result["employee_id"])
-        confidence = result.get("confidence", 0.0)
-        liveness_passed = result.get("liveness_passed", False)
-        processing_ms = result.get("processing_ms", 0)
+        emp_id_str = str(result["employee_id"])
+        if emp_id_str.startswith("visitor-"):
+            from app.models.visitor import Visitor
+            visitor_id = int(emp_id_str.replace("visitor-", ""))
+            visitor = await db.get(Visitor, visitor_id)
+            if visitor and (org_id is None or visitor.organization_id == org_id):
+                await create_live_event(
+                    db=db,
+                    organization_id=visitor.organization_id,
+                    event_type="recognition.visitor",
+                    message=f"Visitor {visitor.name} recognized",
+                    visitor_id=visitor.id,
+                    payload={"confidence": result.get("confidence")},
+                )
+        else:
+            employee_id = int(emp_id_str)
+            confidence = result.get("confidence", 0.0)
+            liveness_passed = result.get("liveness_passed", False)
+            processing_ms = result.get("processing_ms", 0)
 
-        await attendance_service.process_recognition(
-            db=db,
-            employee_id=employee_id,
-            confidence=confidence,
-            liveness_passed=liveness_passed,
-            processing_ms=processing_ms,
-            organization_id=org_id,
-        )
+            await attendance_service.process_recognition(
+                db=db,
+                employee_id=employee_id,
+                confidence=confidence,
+                liveness_passed=liveness_passed,
+                processing_ms=processing_ms,
+                organization_id=org_id,
+            )
     else:
         event = RecognitionEvent(
             employee_id=None,

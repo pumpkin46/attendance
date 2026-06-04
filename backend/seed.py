@@ -58,7 +58,8 @@ async def seed():
             ("security.view", "View Security Configuration"),
             ("building.manage", "Manage Smart Building Integrations"),
             ("security.monitor", "AI Security Monitoring"),
-            ("visitor_kiosks.manage", "Manage Visitor Kiosks"),
+            ("visitors.manage", "Manage Visitors"),
+            ("visitors.view", "View Visitors"),
         ]
 
         perm_map = {}
@@ -84,7 +85,7 @@ async def seed():
             "security_officer": ("Security Officer", [perm_map[n] for n in [
                 "cameras.manage", "rfid.manage", "recognition.view",
                 "reports.view", "security.view", "building.manage", "security.monitor",
-                "visitor_kiosks.manage",
+                "visitors.manage", "visitors.view",
             ]]),
         }
 

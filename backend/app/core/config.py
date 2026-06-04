@@ -98,9 +98,8 @@ class Settings(BaseSettings):
     # ── Visitors ──────────────────────────────────────────────────────────
     visitor_default_visit_hours: int = 8
     visitor_face_expiry_buffer_minutes: int = 30
-    visitor_kiosk_offline_seconds: int = 300
-    visitor_kiosk_default_visit_hours: int = 4
     visitor_badge_prefix: str = "V"
+    visitor_upload_dir: str = "data/uploads"
 
     # ── Building integration ──────────────────────────────────────────────
     building_integration_enabled: bool = True
@@ -175,6 +174,10 @@ class Settings(BaseSettings):
     enrollment_structured_poses: str = (
         "front,left,right,up,down,smiling,neutral,glasses,without_glasses"
     )
+
+    @property
+    def upload_dir(self) -> str:
+        return self.visitor_upload_dir
 
 
 settings = Settings()
