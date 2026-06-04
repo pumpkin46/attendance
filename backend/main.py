@@ -16,6 +16,7 @@ from app.api.shifts import router as shifts_router
 from app.api.anomalies import router as anomalies_router
 from app.api.cameras import router as cameras_router
 from app.api.recognition_api import router as recognition_router
+from app.api.engine_api import router as engine_router
 from app.api.monitoring import router as monitoring_router
 from app.api.rfid import router as rfid_router
 from app.api.access import router as access_router
@@ -33,7 +34,19 @@ from app.api.health import build_health_response, router as health_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_visitor_expiry_task()
+
+    if settings.engine_enabled and settings.engine_auto_start:
+        from app.engine.recognition_engine import get_recognition_engine
+        recognition_engine = get_recognition_engine()
+        await recognition_engine.start()
+
     yield
+
+    if settings.engine_enabled and settings.engine_auto_start:
+        from app.engine.recognition_engine import get_recognition_engine
+        recognition_engine = get_recognition_engine()
+        await recognition_engine.stop()
+
     await engine.dispose()
 
 
@@ -60,6 +73,7 @@ app.include_router(shifts_router)
 app.include_router(anomalies_router)
 app.include_router(cameras_router)
 app.include_router(recognition_router)
+app.include_router(engine_router)
 app.include_router(monitoring_router)
 app.include_router(rfid_router)
 app.include_router(access_router)

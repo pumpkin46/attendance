@@ -90,6 +90,7 @@ const navGroups: NavGroup[] = [
       </Icon>
     ),
     items: [
+      { to: '/recognition-engine', label: 'AI Engine' },
       { to: '/live-kiosk', label: 'Live Kiosk' },
       { to: '/liveness-test', label: 'Liveness Test' },
       { to: '/recognition-test', label: 'Test Recognition' },

@@ -175,6 +175,19 @@ class Settings(BaseSettings):
         "front,left,right,up,down,smiling,neutral,glasses,without_glasses"
     )
 
+    # ── Recognition Engine ────────────────────────────────────────────────
+    engine_enabled: bool = True
+    engine_auto_start: bool = False
+    engine_max_concurrent_recognitions: int = 50
+    engine_snapshot_dir: str = "data/snapshots/unknown"
+    engine_liveness_threshold: float = 0.85
+    engine_duplicate_window_seconds: int = 300
+    engine_unknown_alert_cooldown: int = 300
+    engine_max_tracks_per_camera: int = 200
+    engine_track_cooldown_seconds: float = 5.0
+    engine_auto_accept_threshold: float = 0.90
+    engine_review_threshold: float = 0.80
+
     @property
     def upload_dir(self) -> str:
         return self.visitor_upload_dir

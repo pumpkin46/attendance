@@ -23,6 +23,7 @@ import UnknownFacesPage from './pages/UnknownFacesPage'
 import SecurityTenancyPage from './pages/SecurityTenancyPage'
 import SmartBuildingPage from './pages/SmartBuildingPage'
 import SecurityMonitoringPage from './pages/SecurityMonitoringPage'
+import RecognitionEnginePage from './pages/RecognitionEnginePage'
 
 export default function App() {
   return (
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="security" element={<SecurityTenancyPage />} />
             <Route path="smart-building" element={<SmartBuildingPage />} />
             <Route path="security-monitoring" element={<SecurityMonitoringPage />} />
+            <Route path="recognition-engine" element={<RecognitionEnginePage />} />
           </Route>
           <Route
             path="/kiosk"

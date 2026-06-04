@@ -38,6 +38,12 @@ from app.models.notification import Notification
 from app.models.audit import AuditLog
 from app.models.token import PersonalAccessToken
 from app.models.live_event import LiveEvent
+from app.models.engine import (
+    EngineStream,
+    EngineRecognitionLog,
+    UnknownPersonLog,
+    EngineMetricsSnapshot,
+)
 
 __all__ = [
     "Base",
@@ -90,4 +96,8 @@ __all__ = [
     "AuditLog",
     "PersonalAccessToken",
     "LiveEvent",
+    "EngineStream",
+    "EngineRecognitionLog",
+    "UnknownPersonLog",
+    "EngineMetricsSnapshot",
 ]
