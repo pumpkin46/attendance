@@ -1,6 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit'
-import authReducer from './authSlice'
-import tenantReducer from './tenantSlice'
+import authReducer from '@/features/auth/authSlice'
+import tenantReducer from '@/features/tenant/tenantSlice'
 
 /**
  * Factory so tests can spin up an isolated store; the app uses the shared

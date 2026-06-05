@@ -1,73 +1,59 @@
-# React + TypeScript + Vite
+# Attendance Platform — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19 + TypeScript + Vite admin UI.
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev        # start dev server (proxies /api -> :8000)
+npm run build      # type-check (tsc -b) + production build
+npm run lint       # eslint
+npm run test       # vitest (watch)
+npm run test:run   # vitest (once)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Architecture
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+The codebase is organized **by feature** rather than by file type. Each feature
+owns its pages, data-access, and types; cross-cutting building blocks live under
+`shared/`.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+src/
+  app/                 # entry point + root component (providers + router)
+    main.tsx           #   ReactDOM root: <Provider> + <QueryClientProvider>
+    App.tsx            #   routes, ErrorBoundary, Auth/Realtime providers
+  store/               # Redux store wiring
+    index.ts           #   configureStore + makeStore() + RootState/AppDispatch
+    hooks.ts           #   typed useAppDispatch / useAppSelector
+  features/            # one folder per domain
+    auth/              #   AuthProvider + useAuth, authSlice, LoginPage, ProtectedRoute
+    tenant/            #   tenantSlice (super-admin org context)
+    realtime/          #   WebSocket -> react-query cache invalidation
+    visitors/          #   VisitorsPage + components/ (tabs) + api/queries + types
+    cameras/  shifts/  enrollment/  access/  building/  security/   # api/ + types + page(s)
+    dashboard/ monitoring/ employees/ kiosk/ recognition/ attendance/
+    anomalies/ rfid/ reports/ audit/
+  shared/              # reusable, feature-agnostic code
+    ui/                #   design-system primitives (Button, Card, DataTable, ...)
+    components/        #   shared widgets (AppLogo, ErrorBoundary, FaceCaptureModal, ...)
+    hooks/             #   useApiQuery, useWebcam
+    lib/               #   cn, session, queryClient, authMedia, inputClass
+    api/               #   axios client + error helpers
+    types/             #   shared domain types
+  layouts/             # authenticated app shell (AppLayout)
+  test/                # vitest setup
+```
+
+### Conventions
+
+- **Imports use the `@/` alias** (`@/* -> src/*`), configured in
+  `tsconfig.app.json` (`paths`) and `vite.config.ts` (`resolve.alias`). Prefer
+  `@/shared/ui/Button` over deep relative paths.
+- **State**: Redux Toolkit owns global client state (auth user, tenant context);
+  **TanStack Query** owns server state (per-feature `api/queries.ts`). The token
+  itself is persisted in `shared/lib/session.ts` (localStorage) and attached by
+  the axios interceptor.
+- A feature's `api/queries.ts` holds its react-query hooks; `types.ts` holds its
+  request/response types; `components/` holds feature-local components.
+- Anything imported by two or more features belongs in `shared/`.

@@ -1,5 +1,5 @@
 import { useDispatch, useSelector } from 'react-redux'
-import type { AppDispatch, RootState } from './index'
+import type { AppDispatch, RootState } from '@/store'
 
 /** Typed `useDispatch` — knows about thunks (login/logout/fetchCurrentUser). */
 export const useAppDispatch = useDispatch.withTypes<AppDispatch>()

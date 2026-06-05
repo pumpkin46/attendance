@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, status
@@ -112,11 +113,25 @@ async def create_camera(
     db: DbSession,
     user: require_permission("cameras.manage"),
 ):
-    camera = Camera(**body.model_dump())
+    data = body.model_dump()
+    data["device_id"] = data.get("device_id") or await _generate_device_id(db, body.name)
+    camera = Camera(**data)
     db.add(camera)
     await db.flush()
     await db.refresh(camera)
     return CameraOut.model_validate(camera, from_attributes=True)
+
+
+async def _generate_device_id(db: DbSession, name: str) -> str:
+    base = re.sub(r"[^A-Z0-9]+", "-", name.upper()).strip("-") or "CAMERA"
+    candidate = base
+    suffix = 1
+    while True:
+        existing = await db.execute(select(Camera.id).where(Camera.device_id == candidate))
+        if existing.scalar_one_or_none() is None:
+            return candidate
+        candidate = f"{base}-{suffix}"
+        suffix += 1
 
 
 @router.get("/cameras/{camera_id}", response_model=CameraOut)

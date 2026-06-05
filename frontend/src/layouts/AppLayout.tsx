@@ -1,10 +1,10 @@
 import { Suspense } from 'react'
 import { Outlet } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
-import { AppLogo } from '../components/AppLogo'
-import { Button } from '../components/ui/Button'
-import SidebarNav from '../components/SidebarNav'
-import { RealtimeIndicator } from '../components/RealtimeIndicator'
+import { useAuth } from '@/features/auth/AuthProvider'
+import { AppLogo } from '@/shared/components/AppLogo'
+import { Button } from '@/shared/ui/Button'
+import SidebarNav from '@/shared/components/SidebarNav'
+import { RealtimeIndicator } from '@/shared/components/RealtimeIndicator'
 
 export default function AppLayout() {
   const { user, logout } = useAuth()
