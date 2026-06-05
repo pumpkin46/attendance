@@ -33,6 +33,7 @@ import numpy as np
 
 from app.engine.config import engine_config
 from app.engine.face_detector import DetectedFace
+from app.services import face_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -216,8 +217,7 @@ class LivenessDetector:
 
     def _texture_analysis(self, crop: np.ndarray) -> float:
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        blur_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        return min(1.0, blur_var / 120.0)
+        return face_metrics.blur_score(gray, 120.0)
 
     def _moire_detection(self, crop: np.ndarray) -> float:
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)

@@ -207,7 +207,7 @@ class HolidayOut(BaseModel):
 
 class HolidayCreate(BaseModel):
     name: str
-    date: str
+    date: date
     location_id: int | None = None
     is_recurring: bool = False
 

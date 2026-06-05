@@ -20,6 +20,7 @@ import numpy as np
 
 from app.engine.config import engine_config
 from app.engine.face_detector import DetectedFace
+from app.services import face_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -77,10 +78,15 @@ class QualityAssessor:
 
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
-        blur_score = self._assess_blur(gray)
-        brightness_score = self._assess_brightness(gray)
-        resolution_score = self._assess_resolution(face, frame.shape)
-        occlusion_score = self._assess_occlusion(face, frame.shape)
+        bbox_dims = face.bounding_box
+        blur_score = face_metrics.blur_score(gray, 120.0)
+        brightness_score = face_metrics.brightness_score(gray, clamp_extreme=True)
+        resolution_score = face_metrics.resolution_score(
+            min(bbox_dims["width"], bbox_dims["height"]), 80.0
+        )
+        occlusion_score = face_metrics.occlusion_score(
+            face.landmarks, bbox_dims["width"], frame.shape
+        )
         yaw, pitch, roll = self._estimate_pose(face)
         angle_valid = self._validate_angles(yaw, pitch, roll, cfg)
 
@@ -148,49 +154,8 @@ class QualityAssessor:
             assessment_ms=assessment_ms,
         )
 
-    def _assess_blur(self, gray: np.ndarray) -> float:
-        if gray.size == 0:
-            return 0.0
-        variance = cv2.Laplacian(gray, cv2.CV_64F).var()
-        return float(min(1.0, variance / 120.0))
-
-    def _assess_brightness(self, gray: np.ndarray) -> float:
-        if gray.size == 0:
-            return 0.0
-        mean = float(np.mean(gray))
-        if mean < 40 or mean > 220:
-            return max(0.0, 1.0 - abs(mean - 130) / 130.0)
-        return float(np.clip((mean - 40.0) / 140.0, 0.0, 1.0))
-
     def _is_overexposed(self, gray: np.ndarray) -> bool:
         return float(np.mean(gray)) > 180
-
-    def _assess_resolution(self, face: DetectedFace, img_shape: tuple) -> float:
-        min_dim = min(face.bounding_box["width"], face.bounding_box["height"])
-        return float(min(1.0, min_dim / 80.0))
-
-    def _assess_occlusion(self, face: DetectedFace, img_shape: tuple) -> float:
-        if face.landmarks is None or len(face.landmarks) < 5:
-            return 0.75
-
-        h, w = img_shape[:2]
-        pts = face.landmarks
-        xs, ys = pts[:, 0], pts[:, 1]
-
-        if np.any(xs < 0) or np.any(ys < 0) or np.any(xs >= w) or np.any(ys >= h):
-            return 0.2
-
-        left_eye, right_eye, nose = pts[0], pts[1], pts[2]
-        eye_dist = float(np.linalg.norm(right_eye - left_eye))
-        if eye_dist < 10:
-            return 0.25
-
-        face_w = max(face.bounding_box["width"], 1.0)
-        ratio = eye_dist / face_w
-        if ratio < 0.18 or ratio > 0.55:
-            return 0.35
-
-        return min(1.0, 0.5 + ratio)
 
     def _estimate_pose(self, face: DetectedFace) -> tuple[float, float, float]:
         """Estimate yaw, pitch, roll from 5-point landmarks."""

@@ -6,63 +6,13 @@ import cv2
 import numpy as np
 
 from app.core.config import settings
+from app.services.face_metrics import (
+    blur_score,
+    brightness_score,
+    occlusion_score,
+    resolution_score,
+)
 from app.services.face_pose import analyze_face_metadata, pose_matches_expected
-
-
-def _blur_score(gray_crop: np.ndarray) -> float:
-    if gray_crop.size == 0:
-        return 0.0
-    variance = cv2.Laplacian(gray_crop, cv2.CV_64F).var()
-    return float(min(1.0, variance / settings.quality_blur_variance_ref))
-
-
-def _brightness_score(gray_crop: np.ndarray) -> float:
-    if gray_crop.size == 0:
-        return 0.0
-    mean = float(np.mean(gray_crop))
-    # Map 40–180 mean luminance to 0–1
-    return float(np.clip((mean - 40.0) / 140.0, 0.0, 1.0))
-
-
-def _resolution_score(face, img_shape: tuple[int, int, int]) -> float:
-    bb = face.bbox
-    face_w = float(bb[2] - bb[0])
-    face_h = float(bb[3] - bb[1])
-    min_dim = min(face_w, face_h)
-    return float(min(1.0, min_dim / settings.quality_min_face_pixels))
-
-
-def _occlusion_score(face, img_shape: tuple[int, int, int]) -> float:
-    """
-    Estimate face visibility using landmarks when available.
-    Low score suggests covered/partial face.
-    """
-    kps = getattr(face, "kps", None)
-    if kps is None or len(kps) < 5:
-        return 0.75
-
-    h, w = img_shape[:2]
-    pts = np.array(kps, dtype=np.float32)
-    xs, ys = pts[:, 0], pts[:, 1]
-
-    if np.any(xs < 0) or np.any(ys < 0) or np.any(xs >= w) or np.any(ys >= h):
-        return 0.2
-
-    left_eye, right_eye, nose, left_mouth, right_mouth = pts[:5]
-    eye_dist = float(np.linalg.norm(right_eye - left_eye))
-    mouth_dist = float(np.linalg.norm(right_mouth - left_mouth))
-    nose_to_eyes = float(np.linalg.norm(nose - (left_eye + right_eye) / 2))
-
-    if eye_dist < 10 or mouth_dist < 5 or nose_to_eyes < 5:
-        return 0.25
-
-    bb = face.bbox
-    face_w = max(float(bb[2] - bb[0]), 1.0)
-    ratio = eye_dist / face_w
-    if ratio < 0.18 or ratio > 0.55:
-        return 0.35
-
-    return min(1.0, 0.5 + ratio)
 
 
 def validate_face_image(
@@ -93,10 +43,12 @@ def validate_face_image(
     crop = img[y1:y2, x1:x2]
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.size else np.array([])
 
-    blur = _blur_score(gray)
-    brightness = _brightness_score(gray)
-    occlusion = _occlusion_score(face, img.shape)
-    resolution = _resolution_score(face, img.shape)
+    face_w = float(face.bbox[2] - face.bbox[0])
+    face_h = float(face.bbox[3] - face.bbox[1])
+    blur = blur_score(gray, settings.quality_blur_variance_ref)
+    brightness = brightness_score(gray)
+    occlusion = occlusion_score(getattr(face, "kps", None), face_w, img.shape, strict=True)
+    resolution = resolution_score(min(face_w, face_h), settings.quality_min_face_pixels)
 
     checks = {
         "face_count": 1,

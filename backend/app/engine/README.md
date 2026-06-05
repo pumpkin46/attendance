@@ -14,12 +14,22 @@ the request path. Keep the two worlds distinct:
    FAISS search are implemented **once** and imported by both worlds. The engine
    may wrap them with stream-specific concerns (tracking, batching, throttling),
    but must not reimplement the underlying model calls.
-   - Known historical overlaps to keep consolidated, not forked:
-     `services/face_quality.py` ↔ `engine/quality_assessor.py`,
-     `services/liveness.py` ↔ `engine/liveness_detector.py`.
-     These differ by *purpose* (single-shot verification vs. per-frame stream
-     gating); the shared model/inference code underneath them is the same and
-     stays shared.
+   - **Quality scoring** (`services/face_quality.py` ↔ `engine/quality_assessor.py`):
+     the low-level CV math — blur, brightness, resolution, occlusion — lives once
+     in `services/face_metrics.py` and is imported by both. Each caller passes its
+     own reference constants and strictness (single-shot enrollment is stricter;
+     per-frame gating is faster/looser), so tuning stays per-purpose while the
+     math stays shared. The two files keep only their own orchestration:
+     thresholds, score weights, rejection reasons, and result shapes.
+   - **Liveness** (`services/liveness.py` ↔ `engine/liveness_detector.py`) is
+     **intentionally two different algorithms, not a shared fork.** The service
+     path runs the real MiniFASNet ONNX anti-spoof model (`services/antispoof.py`)
+     plus active-liveness frame checks. The engine path runs a deliberately
+     lightweight CV heuristic (texture/moiré/colour, blink + head-movement) sized
+     for per-frame throughput and does **not** load the ONNX model. The only
+     shared primitive is the Laplacian blur score (via `face_metrics.blur_score`).
+     If the engine ever needs model-grade passive liveness, it should call
+     `get_antispoof_verifier()` rather than re-deriving it.
 
 2. **Engine never imports route handlers.** It depends on services and models
    only. Routes may *control* the engine (start/stop/metrics) via the engine's
