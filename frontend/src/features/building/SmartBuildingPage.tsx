@@ -11,6 +11,7 @@ import {
   useBuildingEvents,
   useConnectors,
   useCreateConnector,
+  useDeleteConnector,
   usePublishOccupancy,
   useTestConnector,
 } from '@/features/building/api/queries'
@@ -27,6 +28,7 @@ export default function SmartBuildingPage() {
   const { data: eventsData, isPending: eventsLoading } = useBuildingEvents()
   const createConnector = useCreateConnector()
   const testConnector = useTestConnector()
+  const deleteConnector = useDeleteConnector()
   const publishOccupancyMutation = usePublishOccupancy()
 
   const [form, setForm] = useState({
@@ -156,13 +158,24 @@ export default function SmartBuildingPage() {
                     <Badge tone={c.is_active ? 'ok' : 'neutral'}>{c.is_active ? 'Active' : 'Off'}</Badge>
                   </Td>
                   <Td>
-                    <Button
-                      variant="ghost"
-                      onClick={() => testConnector.mutate(c.id)}
-                      disabled={testConnector.isPending}
-                    >
-                      Test
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        onClick={() => testConnector.mutate(c.id)}
+                        disabled={testConnector.isPending}
+                      >
+                        Test
+                      </Button>
+                      <Button
+                        variant="danger"
+                        disabled={deleteConnector.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Delete connector "${c.name}"?`)) deleteConnector.mutate(c.id)
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </Td>
                 </tr>
               ))

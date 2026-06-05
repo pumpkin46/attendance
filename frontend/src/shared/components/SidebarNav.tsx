@@ -143,6 +143,8 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/reports', label: 'Reports' },
       { to: '/audit-logs', label: 'Audit Logs' },
+      { to: '/notifications', label: 'Notifications' },
+      { to: '/privacy', label: 'Privacy & GDPR' },
     ],
   },
   {

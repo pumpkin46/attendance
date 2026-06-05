@@ -100,6 +100,14 @@ export default function RfidPage() {
     },
   })
 
+  const deleteReader = useMutation({
+    mutationFn: (readerId: number) => api.delete(`/rfid-readers/${readerId}`),
+    onSuccess: () => {
+      toast.success('Reader deactivated')
+      invalidateReaders()
+    },
+  })
+
   const assignCardMutation = useMutation({
     mutationFn: () =>
       api.post(`/employees/${selectedEmployeeId}/rfid-cards`, {
@@ -392,9 +400,20 @@ export default function RfidPage() {
                 </Td>
                 <Td>{r.taps_today ?? 0}</Td>
                 <Td>
-                  <Button variant="ghost" onClick={() => regenerateToken(r.id)}>
-                    New token
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" onClick={() => regenerateToken(r.id)}>
+                      New token
+                    </Button>
+                    <Button
+                      variant="danger"
+                      disabled={deleteReader.isPending}
+                      onClick={() => {
+                        if (window.confirm(`Deactivate reader "${r.name}"?`)) deleteReader.mutate(r.id)
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </Td>
               </tr>
             ))

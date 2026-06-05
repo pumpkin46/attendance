@@ -53,6 +53,17 @@ export function useUpdateCamera() {
   })
 }
 
+export function useDeleteCamera() {
+  const invalidate = useInvalidateCameras()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/cameras/${id}`),
+    onSuccess: () => {
+      toast.success('Camera removed')
+      invalidate()
+    },
+  })
+}
+
 export function useCaptureFromStream() {
   const invalidate = useInvalidateCameras()
   return useMutation({

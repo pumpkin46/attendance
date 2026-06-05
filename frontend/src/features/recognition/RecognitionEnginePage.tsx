@@ -1,11 +1,40 @@
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api, getApiErrorMessage } from '@/shared/api/client'
 import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { Badge } from '@/shared/ui/Badge'
+import { Button } from '@/shared/ui/Button'
+import { Card } from '@/shared/ui/Card'
+import { Input, Select } from '@/shared/ui/Input'
+import { Label } from '@/shared/ui/Label'
+import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
 
 interface EngineAlert {
   severity: string
   message: string
   timestamp: string
+}
+
+interface StreamStatus {
+  camera_id: number
+  status: string
+  protocol?: string
+  health?: { fps?: number; latency_ms?: number | null }
+}
+
+interface StreamsResponse {
+  total_streams: number
+  active_streams: number
+  streams: Record<string, StreamStatus>
+}
+
+interface EngineConfigDict {
+  search?: { auto_accept_threshold?: number }
+  liveness?: { min_score?: number; enabled?: boolean }
+  attendance?: { duplicate_window_seconds?: number }
+  unknown_person?: { enabled?: boolean }
+  detection?: { max_faces_per_frame?: number }
 }
 
 interface EngineStatus {
@@ -72,6 +101,64 @@ export default function RecognitionEnginePage() {
   const toggleEngine = useMutation({
     mutationFn: (action: 'start' | 'stop') => api.post(`/engine/${action}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['engine', 'status'] }),
+  })
+
+  const { data: streamsData } = useApiQuery<StreamsResponse>(
+    ['engine', 'streams'],
+    '/engine/streams',
+    undefined,
+    { refetchInterval: 5000, silent: true }
+  )
+  const { data: engineConfig } = useApiQuery<EngineConfigDict>(
+    ['engine', 'config'],
+    '/engine/config',
+    undefined,
+    { silent: true }
+  )
+  const streams = Object.values(streamsData?.streams ?? {})
+
+  const invalidateEngine = () => queryClient.invalidateQueries({ queryKey: ['engine'] })
+
+  const [streamForm, setStreamForm] = useState({ camera_id: '', stream_url: '', protocol: 'rtsp' })
+
+  const addStream = useMutation({
+    mutationFn: () =>
+      api.post('/engine/streams/add', {
+        camera_id: Number(streamForm.camera_id),
+        stream_url: streamForm.stream_url,
+        protocol: streamForm.protocol,
+      }),
+    onSuccess: () => {
+      toast.success('Stream registered')
+      setStreamForm({ camera_id: '', stream_url: '', protocol: 'rtsp' })
+      invalidateEngine()
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err)),
+  })
+
+  const controlStream = useMutation({
+    mutationFn: ({ action, camera_id }: { action: 'start' | 'stop'; camera_id: number }) =>
+      api.post(`/engine/streams/${action}`, { camera_id }),
+    onSuccess: invalidateEngine,
+    onError: (err) => toast.error(getApiErrorMessage(err)),
+  })
+
+  const removeStream = useMutation({
+    mutationFn: (camera_id: number) => api.delete(`/engine/streams/${camera_id}`),
+    onSuccess: () => {
+      toast.success('Stream removed')
+      invalidateEngine()
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err)),
+  })
+
+  const reloadIndex = useMutation({
+    mutationFn: () => api.post('/engine/index/reload'),
+    onSuccess: () => {
+      toast.success('Vector index reloaded')
+      invalidateEngine()
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err)),
   })
 
   const error = toggleEngine.error
@@ -256,6 +343,236 @@ export default function RecognitionEnginePage() {
           </div>
         </div>
       )}
+
+      {/* Stream Management */}
+      <Card>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-medium text-slate-100">Camera streams</h2>
+          <Button variant="ghost" disabled={reloadIndex.isPending} onClick={() => reloadIndex.mutate()}>
+            Reload index
+          </Button>
+        </div>
+        <form
+          className="mb-4 grid items-end gap-3 sm:grid-cols-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (streamForm.camera_id && streamForm.stream_url) addStream.mutate()
+          }}
+        >
+          <Label>
+            Camera ID
+            <Input
+              type="number"
+              value={streamForm.camera_id}
+              onChange={(e) => setStreamForm({ ...streamForm, camera_id: e.target.value })}
+              required
+            />
+          </Label>
+          <Label className="sm:col-span-2">
+            Stream URL
+            <Input
+              value={streamForm.stream_url}
+              onChange={(e) => setStreamForm({ ...streamForm, stream_url: e.target.value })}
+              placeholder="rtsp://user:pass@host:554/stream"
+              required
+            />
+          </Label>
+          <Label>
+            Protocol
+            <Select
+              value={streamForm.protocol}
+              onChange={(e) => setStreamForm({ ...streamForm, protocol: e.target.value })}
+            >
+              <option value="rtsp">RTSP</option>
+              <option value="http">HTTP</option>
+              <option value="webrtc">WebRTC</option>
+            </Select>
+          </Label>
+          <div className="sm:col-span-4">
+            <Button type="submit" disabled={addStream.isPending}>
+              Add stream
+            </Button>
+          </div>
+        </form>
+        <TableShell>
+          <TableHead>
+            <Th>Camera</Th>
+            <Th>Status</Th>
+            <Th>FPS</Th>
+            <Th>Latency</Th>
+            <Th>Actions</Th>
+          </TableHead>
+          <TableBody>
+            {streams.length === 0 ? (
+              <tr>
+                <Td colSpan={5} className="text-slate-400">
+                  No streams registered
+                </Td>
+              </tr>
+            ) : (
+              streams.map((s) => (
+                <tr key={s.camera_id}>
+                  <Td>#{s.camera_id}</Td>
+                  <Td>
+                    <Badge
+                      tone={
+                        s.status === 'streaming' || s.status === 'active'
+                          ? 'ok'
+                          : s.status === 'error'
+                            ? 'danger'
+                            : 'neutral'
+                      }
+                    >
+                      {s.status}
+                    </Badge>
+                  </Td>
+                  <Td>{s.health?.fps ?? '—'}</Td>
+                  <Td>{s.health?.latency_ms != null ? `${s.health.latency_ms}ms` : '—'}</Td>
+                  <Td>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        disabled={controlStream.isPending}
+                        onClick={() => controlStream.mutate({ action: 'start', camera_id: s.camera_id })}
+                      >
+                        Start
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={controlStream.isPending}
+                        onClick={() => controlStream.mutate({ action: 'stop', camera_id: s.camera_id })}
+                      >
+                        Stop
+                      </Button>
+                      <Button
+                        variant="danger"
+                        disabled={removeStream.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Remove stream #${s.camera_id}?`)) removeStream.mutate(s.camera_id)
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </Td>
+                </tr>
+              ))
+            )}
+          </TableBody>
+        </TableShell>
+      </Card>
+
+      {/* Runtime configuration */}
+      {engineConfig && <EngineConfigForm initial={engineConfig} onSaved={invalidateEngine} />}
     </div>
+  )
+}
+
+function EngineConfigForm({
+  initial,
+  onSaved,
+}: {
+  initial: EngineConfigDict
+  onSaved: () => void
+}) {
+  const [form, setForm] = useState({
+    recognition_threshold: String(initial.search?.auto_accept_threshold ?? 0.9),
+    liveness_min_score: String(initial.liveness?.min_score ?? 0.85),
+    liveness_enabled: initial.liveness?.enabled ?? true,
+    duplicate_window_seconds: String(initial.attendance?.duplicate_window_seconds ?? 300),
+    unknown_person_enabled: initial.unknown_person?.enabled ?? true,
+    max_faces_per_frame: String(initial.detection?.max_faces_per_frame ?? 10),
+  })
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.patch('/engine/config', {
+        recognition_threshold: Number(form.recognition_threshold),
+        liveness_min_score: Number(form.liveness_min_score),
+        liveness_enabled: form.liveness_enabled,
+        duplicate_window_seconds: Number(form.duplicate_window_seconds),
+        unknown_person_enabled: form.unknown_person_enabled,
+        max_faces_per_frame: Number(form.max_faces_per_frame),
+      }),
+    onSuccess: () => {
+      toast.success('Engine configuration updated')
+      onSaved()
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err)),
+  })
+
+  return (
+    <Card>
+      <h2 className="mb-4 text-lg font-medium text-slate-100">Runtime configuration</h2>
+      <form
+        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          save.mutate()
+        }}
+      >
+        <Label>
+          Recognition threshold
+          <Input
+            type="number"
+            step="0.01"
+            min={0}
+            max={1}
+            value={form.recognition_threshold}
+            onChange={(e) => setForm({ ...form, recognition_threshold: e.target.value })}
+          />
+        </Label>
+        <Label>
+          Liveness min score
+          <Input
+            type="number"
+            step="0.01"
+            min={0}
+            max={1}
+            value={form.liveness_min_score}
+            onChange={(e) => setForm({ ...form, liveness_min_score: e.target.value })}
+          />
+        </Label>
+        <Label>
+          Duplicate window (s)
+          <Input
+            type="number"
+            min={0}
+            value={form.duplicate_window_seconds}
+            onChange={(e) => setForm({ ...form, duplicate_window_seconds: e.target.value })}
+          />
+        </Label>
+        <Label>
+          Max faces / frame
+          <Input
+            type="number"
+            min={1}
+            value={form.max_faces_per_frame}
+            onChange={(e) => setForm({ ...form, max_faces_per_frame: e.target.value })}
+          />
+        </Label>
+        <Label className="flex-row items-center gap-2">
+          <input
+            type="checkbox"
+            checked={form.liveness_enabled}
+            onChange={(e) => setForm({ ...form, liveness_enabled: e.target.checked })}
+          />
+          Liveness enabled
+        </Label>
+        <Label className="flex-row items-center gap-2">
+          <input
+            type="checkbox"
+            checked={form.unknown_person_enabled}
+            onChange={(e) => setForm({ ...form, unknown_person_enabled: e.target.checked })}
+          />
+          Unknown-person alerts
+        </Label>
+        <div className="sm:col-span-2 lg:col-span-3">
+          <Button type="submit" disabled={save.isPending}>
+            Save configuration
+          </Button>
+        </div>
+      </form>
+    </Card>
   )
 }

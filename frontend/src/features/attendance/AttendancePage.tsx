@@ -1,19 +1,35 @@
 import { useState } from 'react'
-import { getApiErrorMessage } from '@/shared/api/client'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { api, getApiErrorMessage } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
-import { Input } from '@/shared/ui/Input'
+import { Button } from '@/shared/ui/Button'
+import { Card } from '@/shared/ui/Card'
+import { Input, Select } from '@/shared/ui/Input'
+import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
 import { useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { AttendanceRecord, Paginated } from '@/shared/types'
+import type { AttendanceRecord, Employee, Paginated } from '@/shared/types'
+
+const emptyManual = {
+  employee_id: '',
+  work_date: new Date().toISOString().slice(0, 10),
+  check_in_at: '',
+  check_out_at: '',
+  notes: '',
+}
 
 export default function AttendancePage() {
+  const queryClient = useQueryClient()
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() - 7)
     return d.toISOString().slice(0, 10)
   })
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [formOpen, setFormOpen] = useState(false)
+  const [manual, setManual] = useState(emptyManual)
 
   const { data, isPending, isError, error } = useApiQuery<Paginated<AttendanceRecord>>(
     ['attendance', 'list', { dateFrom, dateTo }],
@@ -21,6 +37,37 @@ export default function AttendancePage() {
     { date_from: dateFrom, date_to: dateTo, per_page: 100 }
   )
   const records = data?.data ?? []
+
+  const { data: employeesResp } = useApiQuery<Paginated<Employee>>(
+    ['employees', 'active'],
+    '/employees',
+    { per_page: 100, is_active: true }
+  )
+  const employees = employeesResp?.data ?? []
+
+  const createManual = useMutation({
+    mutationFn: () =>
+      api.post('/attendance/manual', {
+        employee_id: Number(manual.employee_id),
+        work_date: manual.work_date,
+        check_in_at: manual.check_in_at || null,
+        check_out_at: manual.check_out_at || null,
+        notes: manual.notes.trim() || null,
+      }),
+    onSuccess: () => {
+      toast.success('Attendance recorded')
+      queryClient.invalidateQueries({ queryKey: ['attendance'] })
+      setManual(emptyManual)
+      setFormOpen(false)
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err)),
+  })
+
+  const submitManual = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manual.employee_id) return
+    createManual.mutate()
+  }
 
   const fmt = (v?: string) => (v ? new Date(v).toLocaleString() : '—')
 
@@ -30,13 +77,77 @@ export default function AttendancePage() {
         title="Attendance"
         description="Auto check-in when recognized with confidence and liveness; auto check-out at exit cameras per policy rules."
         actions={
-          <>
+          <div className="flex items-center gap-2">
             <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
             <span className="text-slate-500">to</span>
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </>
+            <Button onClick={() => setFormOpen((v) => !v)}>
+              {formOpen ? 'Cancel' : 'Record manually'}
+            </Button>
+          </div>
         }
       />
+
+      {formOpen && (
+        <Card className="mb-6">
+          <h2 className="mb-4 text-lg font-medium">Manual attendance entry</h2>
+          <form className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" onSubmit={submitManual}>
+            <Label>
+              Employee *
+              <Select
+                value={manual.employee_id}
+                onChange={(e) => setManual({ ...manual, employee_id: e.target.value })}
+                required
+              >
+                <option value="">Select employee</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.employee_code} — {e.first_name} {e.last_name}
+                  </option>
+                ))}
+              </Select>
+            </Label>
+            <Label>
+              Work date *
+              <Input
+                type="date"
+                value={manual.work_date}
+                onChange={(e) => setManual({ ...manual, work_date: e.target.value })}
+                required
+              />
+            </Label>
+            <Label>
+              Check in
+              <Input
+                type="datetime-local"
+                value={manual.check_in_at}
+                onChange={(e) => setManual({ ...manual, check_in_at: e.target.value })}
+              />
+            </Label>
+            <Label>
+              Check out
+              <Input
+                type="datetime-local"
+                value={manual.check_out_at}
+                onChange={(e) => setManual({ ...manual, check_out_at: e.target.value })}
+              />
+            </Label>
+            <Label className="sm:col-span-2">
+              Notes
+              <Input
+                value={manual.notes}
+                onChange={(e) => setManual({ ...manual, notes: e.target.value })}
+                placeholder="Reason for manual entry"
+              />
+            </Label>
+            <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
+              <Button type="submit" disabled={createManual.isPending}>
+                Save record
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
 
       <TableShell>
         <TableHead>

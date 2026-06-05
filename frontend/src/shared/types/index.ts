@@ -27,6 +27,7 @@ export interface Employee {
   email?: string
   department?: string
   job_title?: string
+  hire_date?: string
   is_active: boolean
   face_enrolled: boolean
   face_enrolled_at?: string

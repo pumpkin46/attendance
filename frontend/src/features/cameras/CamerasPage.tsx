@@ -13,6 +13,7 @@ import {
   useCameraConfig,
   useCaptureFromStream,
   useCreateCamera,
+  useDeleteCamera,
   useLocations,
   useUpdateCamera,
 } from '@/features/cameras/api/queries'
@@ -44,6 +45,7 @@ export default function CamerasPage() {
   const { data: locationsData } = useLocations()
   const createCamera = useCreateCamera()
   const updateCamera = useUpdateCamera()
+  const deleteCamera = useDeleteCamera()
   const captureMutation = useCaptureFromStream()
 
   const [showForm, setShowForm] = useState(false)
@@ -408,6 +410,15 @@ export default function CamerasPage() {
                           {capturing === c.id ? '…' : 'Test'}
                         </Button>
                       )}
+                      <Button
+                        variant="danger"
+                        disabled={deleteCamera.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Remove camera "${c.name}"?`)) deleteCamera.mutate(c.id)
+                        }}
+                      >
+                        Delete
+                      </Button>
                     </div>
                   </Td>
                 </tr>

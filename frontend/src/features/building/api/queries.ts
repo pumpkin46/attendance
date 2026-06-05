@@ -51,6 +51,17 @@ export function useCreateConnector() {
   })
 }
 
+export function useDeleteConnector() {
+  const invalidate = useInvalidateBuilding()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/building/connectors/${id}`),
+    onSuccess: () => {
+      toast.success('Connector deleted')
+      invalidate()
+    },
+  })
+}
+
 export function useTestConnector() {
   const invalidate = useInvalidateBuilding()
   return useMutation({
