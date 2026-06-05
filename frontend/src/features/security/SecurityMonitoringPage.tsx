@@ -1,6 +1,3 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import { useFallbackPoll } from '@/features/realtime/useFallbackPoll'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -8,66 +5,25 @@ import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { Badge } from '@/shared/ui/Badge'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-
-interface Dashboard {
-  open_total: number
-  critical_open: number
-  high_open: number
-  today_total: number
-  by_type: Record<string, number>
-  recent: SecurityAlert[]
-}
-
-interface SecurityAlert {
-  id: number
-  alert_type: string
-  severity: string
-  title: string
-  message: string
-  status: string
-  occurred_at: string
-  camera?: { name: string }
-  employee?: { first_name: string; last_name: string }
-}
-
-const severityTone: Record<string, 'danger' | 'warn' | 'ok' | 'neutral'> = {
-  critical: 'danger',
-  high: 'danger',
-  medium: 'warn',
-  low: 'neutral',
-}
+import {
+  useAcknowledgeAlert,
+  useResolveAlert,
+  useSecurityAlerts,
+  useSecurityDashboard,
+} from '@/features/security/api/queries'
+import { SECURITY_SEVERITY_TONE as severityTone } from '@/features/security/types'
 
 export default function SecurityMonitoringPage() {
-  const queryClient = useQueryClient()
   // Live via WebSocket ('recognition.*', 'access.*', 'security.changed');
   // resynced on reconnect. Only poll as a fallback when the socket is down —
   // while it's healthy, events keep this screen fresh.
   const poll = useFallbackPoll(60_000)
-  const { data: dashboard } = useApiQuery<Dashboard>(
-    ['security-monitoring', 'dashboard'],
-    '/security-monitoring/dashboard',
-    undefined,
-    { silent: true, refetchInterval: poll }
-  )
-  const { data: alertsResp } = useApiQuery<{ data: SecurityAlert[] }>(
-    ['security-monitoring', 'alerts'],
-    '/security-monitoring/alerts',
-    { per_page: 50 },
-    { silent: true, refetchInterval: poll }
-  )
+  const { data: dashboard } = useSecurityDashboard(poll)
+  const { data: alertsResp } = useSecurityAlerts(poll)
   const alerts = alertsResp?.data ?? []
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ['security-monitoring'] })
-
-  const ackMutation = useMutation({
-    mutationFn: (id: number) => api.post(`/security-monitoring/alerts/${id}/acknowledge`),
-    onSuccess: invalidate,
-  })
-  const resolveMutation = useMutation({
-    mutationFn: (id: number) => api.post(`/security-monitoring/alerts/${id}/resolve`),
-    onSuccess: invalidate,
-  })
+  const ackMutation = useAcknowledgeAlert()
+  const resolveMutation = useResolveAlert()
 
   const acknowledge = (id: number) => ackMutation.mutate(id)
   const resolve = (id: number) => resolveMutation.mutate(id)

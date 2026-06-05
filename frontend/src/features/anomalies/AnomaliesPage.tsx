@@ -1,7 +1,4 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -9,75 +6,37 @@ import { Select } from '@/shared/ui/Input'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import type { AttendanceAnomaly, AnomalySummary, Paginated } from '@/shared/types'
-
-const SEVERITY_TONE: Record<string, 'danger' | 'warn' | 'neutral' | 'ok'> = {
-  critical: 'danger',
-  high: 'danger',
-  medium: 'warn',
-  low: 'neutral',
-}
-
-const TYPE_LABELS: Record<string, string> = {
-  missing_check_out: 'Missing check-out',
-  excessive_overtime: 'Excessive overtime',
-  unusual_check_in_time: 'Unusual check-in',
-  weekend_work: 'Weekend work',
-  short_work_day: 'Short work day',
-  rapid_recheck: 'High recheck frequency',
-  statistical_outlier: 'Statistical outlier',
-  absence_pattern: 'Absence pattern',
-}
+import {
+  useAnomalies,
+  useAnomalySummary,
+  useRunDetection,
+  useUpdateAnomalyStatus,
+} from '@/features/anomalies/api/queries'
+import { SEVERITY_TONE, TYPE_LABELS, type AnomalyDecision } from '@/features/anomalies/types'
 
 export default function AnomaliesPage() {
-  const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState('open')
   const [severityFilter, setSeverityFilter] = useState('')
   const [detectResult, setDetectResult] = useState<string | null>(null)
 
-  const { data: summary } = useApiQuery<AnomalySummary>(
-    ['anomalies', 'summary'],
-    '/anomalies/summary'
-  )
-  const { data: list, isPending: loading } = useApiQuery<Paginated<AttendanceAnomaly>>(
-    ['anomalies', 'list', statusFilter, severityFilter],
-    '/anomalies',
-    {
-      status: statusFilter || undefined,
-      severity: severityFilter || undefined,
-      per_page: 50,
-    }
-  )
+  const { data: summary } = useAnomalySummary()
+  const { data: list, isPending: loading } = useAnomalies(statusFilter, severityFilter)
   const anomalies = list?.data ?? []
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['anomalies'] })
-
-  const detection = useMutation({
-    mutationFn: () =>
-      api.post<{ anomalies_found: number; records_analyzed: number; processing_ms: number }>(
-        '/anomalies/detect',
-        { lookback_days: 30 }
-      ),
-    onSuccess: ({ data }) => {
-      setDetectResult(
-        `Analyzed ${data.records_analyzed} records — ${data.anomalies_found} anomalies found (${data.processing_ms}ms)`
-      )
-      invalidate()
-    },
-  })
-
-  const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: string }) =>
-      api.patch(`/anomalies/${id}`, { status }),
-    onSuccess: invalidate,
-  })
+  const detection = useRunDetection()
+  const statusMutation = useUpdateAnomalyStatus()
 
   const detecting = detection.isPending
   const runDetection = () => {
     setDetectResult(null)
-    detection.mutate()
+    detection.mutate(undefined, {
+      onSuccess: (data) =>
+        setDetectResult(
+          `Analyzed ${data.records_analyzed} records — ${data.anomalies_found} anomalies found (${data.processing_ms}ms)`
+        ),
+    })
   }
-  const updateStatus = (id: number, status: 'acknowledged' | 'resolved' | 'false_positive') =>
+  const updateStatus = (id: number, status: AnomalyDecision) =>
     statusMutation.mutate({ id, status })
 
   return (

@@ -1,8 +1,7 @@
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { Employee, Paginated } from '@/shared/types'
+import { useActiveEmployees } from '@/features/employees/api/queries'
 import { useDecideLeave, useLeaveRequests } from '@/features/shifts/api/queries'
 
 const STATUS_TONE = { approved: 'ok', rejected: 'danger', pending: 'warn' } as const
@@ -10,11 +9,7 @@ const STATUS_TONE = { approved: 'ok', rejected: 'danger', pending: 'warn' } as c
 export function LeaveTab() {
   const { data: leaveResp, isPending } = useLeaveRequests()
   const decide = useDecideLeave()
-  const { data: employeesResp } = useApiQuery<Paginated<Employee>>(
-    ['employees', 'active'],
-    '/employees',
-    { per_page: 100, is_active: true }
-  )
+  const { data: employeesResp } = useActiveEmployees()
 
   const leave = leaveResp?.data ?? []
   const empName = new Map(

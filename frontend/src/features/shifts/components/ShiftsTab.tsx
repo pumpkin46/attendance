@@ -5,8 +5,8 @@ import { Card } from '@/shared/ui/Card'
 import { Input, Select } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { Employee, Paginated, Shift } from '@/shared/types'
+import type { Shift } from '@/shared/types'
+import { useActiveEmployees } from '@/features/employees/api/queries'
 import {
   useAssignShift,
   useAttendanceConfig,
@@ -33,11 +33,7 @@ export function ShiftsTab() {
   const { data: shifts = [], isPending } = useShifts()
   const { data: config } = useAttendanceConfig()
   const { data: policies = [] } = usePolicies()
-  const { data: employeesResp } = useApiQuery<Paginated<Employee>>(
-    ['employees', 'active'],
-    '/employees',
-    { per_page: 100, is_active: true }
-  )
+  const { data: employeesResp } = useActiveEmployees()
   const employees = employeesResp?.data ?? []
 
   const saveShift = useSaveShift()

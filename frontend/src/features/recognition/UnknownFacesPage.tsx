@@ -5,8 +5,7 @@ import { Input } from '@/shared/ui/Input'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { SnapshotImage } from '@/shared/components/SnapshotImage'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { Paginated, RecognitionEvent } from '@/shared/types'
+import { useUnknownFaces } from '@/features/recognition/api/queries'
 
 export default function UnknownFacesPage() {
   const [dateFrom, setDateFrom] = useState(() => {
@@ -16,11 +15,7 @@ export default function UnknownFacesPage() {
   })
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
 
-  const { data, isPending, isError, error } = useApiQuery<Paginated<RecognitionEvent>>(
-    ['unknown-faces', 'list', { dateFrom, dateTo }],
-    '/reports/unknown-persons',
-    { date_from: dateFrom, date_to: dateTo, per_page: 50 }
-  )
+  const { data, isPending, isError, error } = useUnknownFaces(dateFrom, dateTo)
   const events = data?.data ?? []
 
   return (

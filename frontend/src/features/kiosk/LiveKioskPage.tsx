@@ -1,33 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '@/shared/api/client'
 import { useWebcam } from '@/shared/hooks/useWebcam'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Input } from '@/shared/ui/Input'
 import { cn } from '@/shared/lib/cn'
-
-interface FaceBox {
-  bbox: [number, number, number, number]
-  det_score: number
-}
-
-interface DetectResponse {
-  faces: FaceBox[]
-  face_count: number
-  processing_ms: number
-}
-
-interface IdentifyResult {
-  matched: boolean
-  reason?: string
-  spoof_type?: string
-  confidence?: number
-  processing_ms?: number
-  liveness_score?: number
-  liveness_checks?: Record<string, unknown>
-  employee?: { id: number; employee_code: string; first_name: string; last_name: string }
-  attendance?: { action: string }
-}
+import { detectFaces, identifyFace } from '@/features/recognition/api/recognitionApi'
+import type { FaceBox, IdentifyResult } from '@/features/recognition/types'
 
 type KioskStatus = 'idle' | 'scanning' | 'face_detected' | 'recognized' | 'unknown' | 'spoof' | 'duplicate'
 
@@ -155,7 +133,7 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
       if (!frame) return
       inFlightDetect.current = true
       try {
-        const { data } = await api.post<DetectResponse>('/recognition/detect', { image: frame })
+        const data = await detectFaces(frame)
         setFaces(data.faces ?? [])
         setDetectMs(data.processing_ms ?? 0)
         faceCountRef.current = data.face_count ?? 0
@@ -202,7 +180,7 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           payload.liveness_frames = frameBufferRef.current
         }
 
-        const { data } = await api.post<IdentifyResult>('/recognition/identify', payload)
+        const data = await identifyFace(payload)
         setIdentifyMs(data.processing_ms ?? 0)
         setLastMatch(data)
 

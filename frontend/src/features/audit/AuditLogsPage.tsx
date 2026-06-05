@@ -1,25 +1,10 @@
 import { getApiErrorMessage } from '@/shared/api/client'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { Paginated } from '@/shared/types'
-
-interface AuditLog {
-  id: number
-  action: string
-  entity_type?: string
-  entity_id?: number
-  ip_address?: string
-  created_at: string
-  user?: { name: string; email: string }
-}
+import { useAuditLogs } from '@/features/audit/api/queries'
 
 export default function AuditLogsPage() {
-  const { data, isPending, isError, error } = useApiQuery<Paginated<AuditLog>>(
-    ['audit-logs', 'list'],
-    '/audit-logs',
-    { per_page: 100 }
-  )
+  const { data, isPending, isError, error } = useAuditLogs()
   const logs = data?.data ?? []
 
   return (

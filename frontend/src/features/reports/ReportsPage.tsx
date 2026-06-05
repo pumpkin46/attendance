@@ -1,6 +1,4 @@
 import { useState } from 'react'
-import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -8,49 +6,8 @@ import { Input, Select } from '@/shared/ui/Input'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-
-interface DailyReport {
-  date: string
-  present: number
-  absent: number
-  late: number
-  on_leave: number
-  employees: Array<{
-    employee_code: string
-    employee_name: string
-    status: string
-    check_in_at?: string
-    check_out_at?: string
-    worked_minutes: number
-    overtime_minutes: number
-  }>
-}
-
-interface MonthlyReport {
-  year: number
-  month: number
-  total_working_days: number
-  summary: {
-    total_working_days: number
-    attendance_percent: number
-    overtime_minutes: number
-    absence_count: number
-  }
-  employees: Array<{
-    employee_code: string
-    employee_name: string
-    department?: string
-    total_working_days: number
-    attendance_percent: number
-    overtime_hours: number
-    absence_count: number
-    late_count: number
-    on_leave_count: number
-  }>
-}
-
-type ReportTab = 'daily' | 'monthly'
-type ExportFormat = 'csv' | 'xlsx' | 'pdf'
+import { fetchReportExport, useDailyReport, useMonthlyReport } from '@/features/reports/api/queries'
+import type { ExportFormat, ReportTab } from '@/features/reports/types'
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<ReportTab>('daily')
@@ -59,18 +16,8 @@ export default function ReportsPage() {
   const [monthNum, setMonthNum] = useState(() => String(new Date().getMonth() + 1).padStart(2, '0'))
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
 
-  const dailyQuery = useApiQuery<DailyReport>(
-    ['reports', 'daily', dailyDate],
-    '/reports/daily',
-    { date: dailyDate },
-    { enabled: tab === 'daily' }
-  )
-  const monthlyQuery = useApiQuery<MonthlyReport>(
-    ['reports', 'monthly', monthYear, monthNum],
-    '/reports/monthly',
-    { year: monthYear, month: monthNum },
-    { enabled: tab === 'monthly' }
-  )
+  const dailyQuery = useDailyReport(dailyDate, tab === 'daily')
+  const monthlyQuery = useMonthlyReport(monthYear, monthNum, tab === 'monthly')
 
   const dailyReport = dailyQuery.data
   const monthlyReport = monthlyQuery.data
@@ -86,10 +33,7 @@ export default function ReportsPage() {
           ? { format, report_type: 'daily', date: dailyDate }
           : { format, report_type: 'monthly', year: monthYear, month: monthNum }
 
-      const { data } = await api.get<Blob>('/reports/export', {
-        params,
-        responseType: 'blob',
-      })
+      const data = await fetchReportExport(params)
 
       const ext = format === 'xlsx' ? 'xls' : format
       const basename =

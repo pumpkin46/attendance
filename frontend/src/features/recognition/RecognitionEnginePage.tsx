@@ -1,67 +1,24 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { api, getApiErrorMessage } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { getApiErrorMessage } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Input, Select } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-
-interface EngineAlert {
-  severity: string
-  message: string
-  timestamp: string
-}
-
-interface StreamStatus {
-  camera_id: number
-  status: string
-  protocol?: string
-  health?: { fps?: number; latency_ms?: number | null }
-}
-
-interface StreamsResponse {
-  total_streams: number
-  active_streams: number
-  streams: Record<string, StreamStatus>
-}
-
-interface EngineConfigDict {
-  search?: { auto_accept_threshold?: number }
-  liveness?: { min_score?: number; enabled?: boolean }
-  attendance?: { duplicate_window_seconds?: number }
-  unknown_person?: { enabled?: boolean }
-  detection?: { max_faces_per_frame?: number }
-}
-
-interface EngineStatus {
-  running: boolean
-  streams: { total_streams: number; active_streams: number }
-  tracking: { total_tracks: number; recognized_tracks: number; unknown_tracks: number }
-  search_index: { total_embeddings: number; total_employees: number }
-  attendance: { total_events_generated: number; duplicates_prevented: number }
-  unknown_persons: { total_detections: number; alerts_generated: number }
-  metrics: {
-    uptime_seconds: number
-    recognition_metrics: {
-      total_detections: number
-      total_recognized: number
-      total_unknown: number
-      total_liveness_passed: number
-      total_liveness_failed: number
-      total_quality_rejected: number
-      recognition_rate: number
-      unknown_rate: number
-    }
-    pipeline_performance: { stage_averages_ms: Record<string, number>; total_pipeline_avg_ms: number }
-    camera_health: { cameras_reporting: number; avg_fps: number; avg_latency_ms: number }
-    alerts: { total: number; recent: EngineAlert[] }
-  }
-  sla_compliance: Record<string, { target_ms: number; actual_ms: number; met: boolean }>
-}
+import {
+  useAddStream,
+  useControlStream,
+  useEngineConfig,
+  useEngineStatus,
+  useEngineStreams,
+  useInvalidateEngine,
+  useReloadIndex,
+  useRemoveStream,
+  useSaveEngineConfig,
+  useToggleEngine,
+} from '@/features/recognition/api/queries'
+import type { EngineAlert, EngineConfigDict } from '@/features/recognition/types'
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
@@ -88,78 +45,19 @@ function SlaIndicator({ name, target, actual, met }: { name: string; target: num
 }
 
 export default function RecognitionEnginePage() {
-  const queryClient = useQueryClient()
-  const {
-    data: status,
-    isPending: loading,
-    error: queryError,
-  } = useApiQuery<EngineStatus>(['engine', 'status'], '/engine/status', undefined, {
-    refetchInterval: 5000,
-    silent: true,
-  })
-
-  const toggleEngine = useMutation({
-    mutationFn: (action: 'start' | 'stop') => api.post(`/engine/${action}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['engine', 'status'] }),
-  })
-
-  const { data: streamsData } = useApiQuery<StreamsResponse>(
-    ['engine', 'streams'],
-    '/engine/streams',
-    undefined,
-    { refetchInterval: 5000, silent: true }
-  )
-  const { data: engineConfig } = useApiQuery<EngineConfigDict>(
-    ['engine', 'config'],
-    '/engine/config',
-    undefined,
-    { silent: true }
-  )
+  const { data: status, isPending: loading, error: queryError } = useEngineStatus()
+  const toggleEngine = useToggleEngine()
+  const { data: streamsData } = useEngineStreams()
+  const { data: engineConfig } = useEngineConfig()
   const streams = Object.values(streamsData?.streams ?? {})
-
-  const invalidateEngine = () => queryClient.invalidateQueries({ queryKey: ['engine'] })
+  const invalidateEngine = useInvalidateEngine()
 
   const [streamForm, setStreamForm] = useState({ camera_id: '', stream_url: '', protocol: 'rtsp' })
 
-  const addStream = useMutation({
-    mutationFn: () =>
-      api.post('/engine/streams/add', {
-        camera_id: Number(streamForm.camera_id),
-        stream_url: streamForm.stream_url,
-        protocol: streamForm.protocol,
-      }),
-    onSuccess: () => {
-      toast.success('Stream registered')
-      setStreamForm({ camera_id: '', stream_url: '', protocol: 'rtsp' })
-      invalidateEngine()
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
-
-  const controlStream = useMutation({
-    mutationFn: ({ action, camera_id }: { action: 'start' | 'stop'; camera_id: number }) =>
-      api.post(`/engine/streams/${action}`, { camera_id }),
-    onSuccess: invalidateEngine,
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
-
-  const removeStream = useMutation({
-    mutationFn: (camera_id: number) => api.delete(`/engine/streams/${camera_id}`),
-    onSuccess: () => {
-      toast.success('Stream removed')
-      invalidateEngine()
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
-
-  const reloadIndex = useMutation({
-    mutationFn: () => api.post('/engine/index/reload'),
-    onSuccess: () => {
-      toast.success('Vector index reloaded')
-      invalidateEngine()
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
+  const addStream = useAddStream()
+  const controlStream = useControlStream()
+  const removeStream = useRemoveStream()
+  const reloadIndex = useReloadIndex()
 
   const error = toggleEngine.error
     ? getApiErrorMessage(toggleEngine.error)
@@ -356,7 +254,10 @@ export default function RecognitionEnginePage() {
           className="mb-4 grid items-end gap-3 sm:grid-cols-4"
           onSubmit={(e) => {
             e.preventDefault()
-            if (streamForm.camera_id && streamForm.stream_url) addStream.mutate()
+            if (streamForm.camera_id && streamForm.stream_url)
+              addStream.mutate(streamForm, {
+                onSuccess: () => setStreamForm({ camera_id: '', stream_url: '', protocol: 'rtsp' }),
+              })
           }}
         >
           <Label>
@@ -484,22 +385,20 @@ function EngineConfigForm({
     max_faces_per_frame: String(initial.detection?.max_faces_per_frame ?? 10),
   })
 
-  const save = useMutation({
-    mutationFn: () =>
-      api.patch('/engine/config', {
+  const save = useSaveEngineConfig()
+
+  const submit = () =>
+    save.mutate(
+      {
         recognition_threshold: Number(form.recognition_threshold),
         liveness_min_score: Number(form.liveness_min_score),
         liveness_enabled: form.liveness_enabled,
         duplicate_window_seconds: Number(form.duplicate_window_seconds),
         unknown_person_enabled: form.unknown_person_enabled,
         max_faces_per_frame: Number(form.max_faces_per_frame),
-      }),
-    onSuccess: () => {
-      toast.success('Engine configuration updated')
-      onSaved()
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
+      },
+      { onSuccess: onSaved }
+    )
 
   return (
     <Card>
@@ -508,7 +407,7 @@ function EngineConfigForm({
         className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
         onSubmit={(e) => {
           e.preventDefault()
-          save.mutate()
+          submit()
         }}
       >
         <Label>

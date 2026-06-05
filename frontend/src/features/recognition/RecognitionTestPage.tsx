@@ -1,22 +1,11 @@
 import { useRef, useState, type FormEvent } from 'react'
-import { api } from '@/shared/api/client'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
-
-interface IdentifyResult {
-  matched: boolean
-  reason?: string
-  spoof_type?: string
-  confidence?: number
-  processing_ms?: number
-  liveness_score?: number
-  liveness_checks?: Record<string, unknown>
-  employee?: { id: number; employee_code: string; first_name: string; last_name: string }
-  attendance?: { action: string; employee_id?: number }
-}
+import { identifyFace } from '@/features/recognition/api/recognitionApi'
+import type { IdentifyResult } from '@/features/recognition/types'
 
 export default function RecognitionTestPage() {
   const [preview, setPreview] = useState<string | null>(null)
@@ -42,7 +31,7 @@ export default function RecognitionTestPage() {
     setError('')
     setResult(null)
     try {
-      const { data } = await api.post<IdentifyResult>('/recognition/identify', {
+      const data = await identifyFace({
         image: preview,
         camera_id: cameraId ? Number(cameraId) : undefined,
         require_liveness: requireLiveness,

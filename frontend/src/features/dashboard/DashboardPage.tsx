@@ -5,68 +5,22 @@ import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { StatCardSkeleton } from '@/shared/ui/Skeleton'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { AnomalySummary, CameraMonitoringSummary, PlatformHealth } from '@/shared/types'
-
-interface TodaySummary {
-  date: string
-  present: number
-  absent: number
-  late: number
-  on_leave: number
-}
-
-interface UnknownSummary {
-  today: number
-  unreviewed: number
-}
-
-interface AppNotification {
-  id: string
-  data: {
-    type: string
-    message: string
-    recognized_at: string
-    camera_name?: string
-  }
-  read_at?: string
-  created_at: string
-}
+import {
+  useAnomalySummary,
+  useCameraMonitoring,
+  usePlatformHealth,
+  useTodaySummary,
+  useUnknownSummary,
+  useUnreadAlerts,
+} from '@/features/dashboard/api/queries'
 
 export default function DashboardPage() {
-  const { data: summary, isLoading: summaryLoading } = useApiQuery<TodaySummary>(
-    ['attendance', 'today'],
-    '/attendance/today',
-    undefined,
-    { silent: true }
-  )
-  const { data: anomalySummary } = useApiQuery<AnomalySummary>(
-    ['anomalies', 'summary'],
-    '/anomalies/summary',
-    undefined,
-    { silent: true }
-  )
-  const { data: unknown } = useApiQuery<UnknownSummary>(
-    ['recognition', 'unknown-summary'],
-    '/recognition/unknown-summary',
-    undefined,
-    { silent: true }
-  )
-  const { data: cameraMonitoring } = useApiQuery<CameraMonitoringSummary>(
-    ['cameras', 'monitoring'],
-    '/cameras/monitoring',
-    undefined,
-    { silent: true } // live via WebSocket 'cameras.changed'; resynced on reconnect
-  )
-  const { data: health } = useApiQuery<PlatformHealth>(['health'], '/health', undefined, {
-    silent: true,
-  })
-  const { data: notificationsResp } = useApiQuery<{ data: AppNotification[] }>(
-    ['notifications', 'unread'],
-    '/notifications',
-    { unread_only: true, per_page: 5 },
-    { silent: true }
-  )
+  const { data: summary, isLoading: summaryLoading } = useTodaySummary()
+  const { data: anomalySummary } = useAnomalySummary()
+  const { data: unknown } = useUnknownSummary()
+  const { data: cameraMonitoring } = useCameraMonitoring()
+  const { data: health } = usePlatformHealth()
+  const { data: notificationsResp } = useUnreadAlerts()
   const notifications = notificationsResp?.data ?? []
 
   const nfr = health?.nfr_compliance?.nfr

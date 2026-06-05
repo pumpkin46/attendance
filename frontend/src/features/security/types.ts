@@ -45,3 +45,33 @@ export interface CreateOrganizationPayload {
   code: string
   timezone: string
 }
+
+// ── AI security monitoring ───────────────────────────────────────────────────
+
+export interface SecurityAlert {
+  id: number
+  alert_type: string
+  severity: string
+  title: string
+  message: string
+  status: string
+  occurred_at: string
+  camera?: { name: string }
+  employee?: { first_name: string; last_name: string }
+}
+
+export interface SecurityDashboard {
+  open_total: number
+  critical_open: number
+  high_open: number
+  today_total: number
+  by_type: Record<string, number>
+  recent: SecurityAlert[]
+}
+
+export const SECURITY_SEVERITY_TONE: Record<string, 'danger' | 'warn' | 'ok' | 'neutral'> = {
+  critical: 'danger',
+  high: 'danger',
+  medium: 'warn',
+  low: 'neutral',
+}

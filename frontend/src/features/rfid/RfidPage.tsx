@@ -1,8 +1,4 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -11,36 +7,22 @@ import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import type { Employee, Paginated, RfidEvent, RfidReader } from '@/shared/types'
-
-interface Location {
-  id: number
-  name: string
-}
-
-interface RfidCard {
-  id: number
-  uid: string
-  label?: string
-  is_active: boolean
-  assigned_at: string
-}
-
-interface TapResult {
-  matched: boolean
-  reason?: string
-  attendance_action?: string
-  employee?: { first_name: string; last_name: string; employee_code: string }
-}
-
-const emptyReaderForm = {
-  location_id: '',
-  name: '',
-  direction: 'both' as RfidReader['direction'],
-}
+import { useActiveEmployees } from '@/features/employees/api/queries'
+import {
+  useAssignCard,
+  useCreateReader,
+  useDeleteReader,
+  useEmployeeCards,
+  useReaders,
+  useRegenerateToken,
+  useRevokeCard,
+  useRfidEvents,
+  useRfidLocations,
+  useSimulateTap,
+} from '@/features/rfid/api/queries'
+import { emptyReaderForm, type ReaderForm, type TapResult } from '@/features/rfid/types'
 
 export default function RfidPage() {
-  const queryClient = useQueryClient()
   const [showReaderForm, setShowReaderForm] = useState(false)
   const [readerForm, setReaderForm] = useState(emptyReaderForm)
   const [newToken, setNewToken] = useState<string | null>(null)
@@ -51,118 +33,60 @@ export default function RfidPage() {
   const [simulateUid, setSimulateUid] = useState('')
   const [tapResult, setTapResult] = useState<TapResult | null>(null)
 
-  const { data: readers = [] } = useApiQuery<RfidReader[]>(['rfid', 'readers'], '/rfid-readers')
-  const { data: eventsResp } = useApiQuery<Paginated<RfidEvent>>(['rfid', 'events'], '/rfid-events', {
-    per_page: 25,
-  })
+  const { data: readers = [] } = useReaders()
+  const { data: eventsResp } = useRfidEvents()
   const events = eventsResp?.data ?? []
-  const { data: locations = [] } = useApiQuery<Location[]>(['locations'], '/locations')
-  const { data: employeesResp } = useApiQuery<Paginated<Employee>>(
-    ['employees', 'active'],
-    '/employees',
-    { per_page: 100, is_active: true }
-  )
+  const { data: locations = [] } = useRfidLocations()
+  const { data: employeesResp } = useActiveEmployees()
   const employees = employeesResp?.data ?? []
-  const { data: employeeCards = [] } = useApiQuery<RfidCard[]>(
-    ['rfid', 'cards', selectedEmployeeId],
-    `/employees/${selectedEmployeeId}/rfid-cards`,
-    undefined,
-    { enabled: Boolean(selectedEmployeeId) }
-  )
+  const { data: employeeCards = [] } = useEmployeeCards(selectedEmployeeId)
 
-  const invalidateReaders = () => queryClient.invalidateQueries({ queryKey: ['rfid', 'readers'] })
-  const invalidateEvents = () => queryClient.invalidateQueries({ queryKey: ['rfid', 'events'] })
-  const invalidateCards = () =>
-    queryClient.invalidateQueries({ queryKey: ['rfid', 'cards', selectedEmployeeId] })
-
-  const createReader = useMutation({
-    mutationFn: () =>
-      api.post<RfidReader & { api_token_plain?: string }>('/rfid-readers', {
-        location_id: Number(readerForm.location_id),
-        name: readerForm.name,
-        direction: readerForm.direction,
-      }),
-    onSuccess: ({ data }) => {
-      if (data.api_token_plain) setNewToken(data.api_token_plain)
-      setShowReaderForm(false)
-      setReaderForm(emptyReaderForm)
-      toast.success('Reader registered')
-      invalidateReaders()
-    },
-  })
-
-  const regenerate = useMutation({
-    mutationFn: (readerId: number) =>
-      api.post<{ api_token_plain: string }>(`/rfid-readers/${readerId}/regenerate-token`),
-    onSuccess: ({ data }) => {
-      setNewToken(data.api_token_plain)
-      toast.success('Token regenerated')
-    },
-  })
-
-  const deleteReader = useMutation({
-    mutationFn: (readerId: number) => api.delete(`/rfid-readers/${readerId}`),
-    onSuccess: () => {
-      toast.success('Reader deactivated')
-      invalidateReaders()
-    },
-  })
-
-  const assignCardMutation = useMutation({
-    mutationFn: () =>
-      api.post(`/employees/${selectedEmployeeId}/rfid-cards`, {
-        uid: cardUid,
-        label: cardLabel || null,
-      }),
-    onSuccess: () => {
-      setCardUid('')
-      setCardLabel('')
-      toast.success('Card assigned')
-      invalidateCards()
-    },
-  })
-
-  const revokeCardMutation = useMutation({
-    mutationFn: (cardId: number) => api.delete(`/rfid-cards/${cardId}`),
-    onSuccess: () => {
-      toast.success('Card revoked')
-      invalidateCards()
-    },
-  })
-
-  const simulate = useMutation({
-    mutationFn: () =>
-      api.post<TapResult>('/rfid/simulate', {
-        rfid_reader_id: Number(simulateReaderId),
-        uid: simulateUid,
-      }),
-    onSuccess: ({ data }) => {
-      setTapResult(data)
-      invalidateEvents()
-      invalidateReaders()
-    },
-    onError: (err: unknown) => {
-      const axiosErr = err as { response?: { data?: TapResult } }
-      setTapResult(axiosErr.response?.data ?? { matched: false, reason: 'request_failed' })
-      invalidateEvents()
-    },
-  })
+  const createReader = useCreateReader()
+  const regenerate = useRegenerateToken()
+  const deleteReader = useDeleteReader()
+  const assignCardMutation = useAssignCard()
+  const revokeCardMutation = useRevokeCard()
+  const simulate = useSimulateTap()
 
   const saveReader = (e: React.FormEvent) => {
     e.preventDefault()
-    createReader.mutate()
+    createReader.mutate(readerForm, {
+      onSuccess: (data) => {
+        if (data.api_token_plain) setNewToken(data.api_token_plain)
+        setShowReaderForm(false)
+        setReaderForm(emptyReaderForm)
+      },
+    })
   }
-  const regenerateToken = (readerId: number) => regenerate.mutate(readerId)
+  const regenerateToken = (readerId: number) =>
+    regenerate.mutate(readerId, { onSuccess: (data) => setNewToken(data.api_token_plain) })
   const assignCard = (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedEmployeeId) return
-    assignCardMutation.mutate()
+    assignCardMutation.mutate(
+      { employeeId: selectedEmployeeId, uid: cardUid, label: cardLabel },
+      {
+        onSuccess: () => {
+          setCardUid('')
+          setCardLabel('')
+        },
+      }
+    )
   }
   const revokeCard = (cardId: number) => revokeCardMutation.mutate(cardId)
   const simulateTap = (e: React.FormEvent) => {
     e.preventDefault()
     setTapResult(null)
-    simulate.mutate()
+    simulate.mutate(
+      { readerId: simulateReaderId, uid: simulateUid },
+      {
+        onSuccess: (data) => setTapResult(data),
+        onError: (err: unknown) => {
+          const axiosErr = err as { response?: { data?: TapResult } }
+          setTapResult(axiosErr.response?.data ?? { matched: false, reason: 'request_failed' })
+        },
+      }
+    )
   }
 
   const onlineCount = readers.filter((r) => r.online).length
@@ -235,7 +159,7 @@ export default function RfidPage() {
               <Select
                 value={readerForm.direction}
                 onChange={(e) =>
-                  setReaderForm({ ...readerForm, direction: e.target.value as RfidReader['direction'] })
+                  setReaderForm({ ...readerForm, direction: e.target.value as ReaderForm['direction'] })
                 }
               >
                 <option value="both">Check in &amp; out</option>

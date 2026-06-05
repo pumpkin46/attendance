@@ -1,48 +1,22 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { api } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { Paginated } from '@/shared/types'
-
-interface Notification {
-  id: string
-  type: string
-  data?: { message?: string; title?: string } & Record<string, unknown>
-  read_at: string | null
-  created_at: string | null
-}
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+  useUnreadCount,
+} from '@/features/notifications/api/queries'
+import type { Notification } from '@/features/notifications/types'
 
 export default function NotificationsPage() {
-  const queryClient = useQueryClient()
-  const { data, isPending } = useApiQuery<Paginated<Notification>>(
-    ['notifications', 'list'],
-    '/notifications',
-    { per_page: 50 }
-  )
-  const { data: unread } = useApiQuery<{ unread_count: number }>(
-    ['notifications', 'unread-count'],
-    '/notifications/unread-count',
-    undefined,
-    { silent: true }
-  )
+  const { data, isPending } = useNotifications()
+  const { data: unread } = useUnreadCount()
   const notifications = data?.data ?? []
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['notifications'] })
 
-  const markRead = useMutation({
-    mutationFn: (id: string) => api.post(`/notifications/${id}/read`),
-    onSuccess: invalidate,
-  })
-  const markAll = useMutation({
-    mutationFn: () => api.post('/notifications/read-all'),
-    onSuccess: (res: { data: { marked_read: number } }) => {
-      toast.success(`Marked ${res.data.marked_read} as read`)
-      invalidate()
-    },
-  })
+  const markRead = useMarkNotificationRead()
+  const markAll = useMarkAllNotificationsRead()
 
   const label = (n: Notification) =>
     n.data?.message ?? n.data?.title ?? n.type.replace(/[._]/g, ' ')

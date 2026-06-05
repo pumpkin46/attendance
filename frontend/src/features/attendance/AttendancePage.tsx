@@ -1,7 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { api, getApiErrorMessage } from '@/shared/api/client'
+import { getApiErrorMessage } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -9,8 +7,8 @@ import { Input, Select } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { AttendanceRecord, Employee, Paginated } from '@/shared/types'
+import { useActiveEmployees } from '@/features/employees/api/queries'
+import { useAttendanceRecords, useRecordManualAttendance } from '@/features/attendance/api/queries'
 
 const emptyManual = {
   employee_id: '',
@@ -21,7 +19,6 @@ const emptyManual = {
 }
 
 export default function AttendancePage() {
-  const queryClient = useQueryClient()
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() - 7)
@@ -31,42 +28,23 @@ export default function AttendancePage() {
   const [formOpen, setFormOpen] = useState(false)
   const [manual, setManual] = useState(emptyManual)
 
-  const { data, isPending, isError, error } = useApiQuery<Paginated<AttendanceRecord>>(
-    ['attendance', 'list', { dateFrom, dateTo }],
-    '/attendance',
-    { date_from: dateFrom, date_to: dateTo, per_page: 100 }
-  )
+  const { data, isPending, isError, error } = useAttendanceRecords(dateFrom, dateTo)
   const records = data?.data ?? []
 
-  const { data: employeesResp } = useApiQuery<Paginated<Employee>>(
-    ['employees', 'active'],
-    '/employees',
-    { per_page: 100, is_active: true }
-  )
+  const { data: employeesResp } = useActiveEmployees()
   const employees = employeesResp?.data ?? []
 
-  const createManual = useMutation({
-    mutationFn: () =>
-      api.post('/attendance/manual', {
-        employee_id: Number(manual.employee_id),
-        work_date: manual.work_date,
-        check_in_at: manual.check_in_at || null,
-        check_out_at: manual.check_out_at || null,
-        notes: manual.notes.trim() || null,
-      }),
-    onSuccess: () => {
-      toast.success('Attendance recorded')
-      queryClient.invalidateQueries({ queryKey: ['attendance'] })
-      setManual(emptyManual)
-      setFormOpen(false)
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
+  const createManual = useRecordManualAttendance()
 
   const submitManual = (e: React.FormEvent) => {
     e.preventDefault()
     if (!manual.employee_id) return
-    createManual.mutate()
+    createManual.mutate(manual, {
+      onSuccess: () => {
+        setManual(emptyManual)
+        setFormOpen(false)
+      },
+    })
   }
 
   const fmt = (v?: string) => (v ? new Date(v).toLocaleString() : '—')

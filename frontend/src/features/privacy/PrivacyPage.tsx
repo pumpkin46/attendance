@@ -1,59 +1,25 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { api, getApiErrorMessage } from '@/shared/api/client'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Select } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import { useAuth } from '@/features/auth/AuthProvider'
-import type { Employee, Paginated } from '@/shared/types'
-
-interface PrivacyPolicy {
-  gdpr_enabled: boolean
-  retention_audit_logs_days: number
-  retention_recognition_events_days: number
-  retention_notifications_days: number
-  privacy_contact_email: string | null
-  data_collected: string[]
-  data_purposes: string[]
-}
-
-interface MyData {
-  user: { id: number; name: string | null; email: string | null }
-  attendance_records: unknown[]
-  notifications_count: number
-  audit_logs_count: number
-}
+import { useActiveEmployees } from '@/features/employees/api/queries'
+import { useEraseEmployeeData, useMyData, usePrivacyPolicy } from '@/features/privacy/api/queries'
 
 export default function PrivacyPage() {
   const { hasPermission } = useAuth()
   const canErase = hasPermission('employees.manage')
 
-  const { data: policy } = useApiQuery<PrivacyPolicy>(['privacy', 'policy'], '/privacy/policy')
-  const { data: myData } = useApiQuery<MyData>(['privacy', 'my-data'], '/privacy/my-data', undefined, {
-    silent: true,
-  })
-  const { data: employeesResp } = useApiQuery<Paginated<Employee>>(
-    ['employees', 'active'],
-    '/employees',
-    { per_page: 100, is_active: true },
-    { enabled: canErase }
-  )
+  const { data: policy } = usePrivacyPolicy()
+  const { data: myData } = useMyData()
+  const { data: employeesResp } = useActiveEmployees(canErase)
   const employees = employeesResp?.data ?? []
 
   const [eraseId, setEraseId] = useState('')
 
-  const erase = useMutation({
-    mutationFn: (id: number) => api.post(`/employees/${id}/privacy/erase`),
-    onSuccess: (res: { data: { message: string } }) => {
-      toast.success(res.data.message)
-      setEraseId('')
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
+  const erase = useEraseEmployeeData()
 
   const downloadMyData = () => {
     if (!myData) return
@@ -75,7 +41,7 @@ export default function PrivacyPage() {
         `Permanently erase ${name}'s biometric data, attendance, and PII? This anonymizes the record and cannot be undone.`
       )
     ) {
-      erase.mutate(Number(eraseId))
+      erase.mutate(Number(eraseId), { onSuccess: () => setEraseId('') })
     }
   }
 

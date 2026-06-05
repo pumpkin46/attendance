@@ -1,7 +1,4 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { api, getApiErrorMessage } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -9,94 +6,39 @@ import { Input, Select } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue'
-import type { Employee, Paginated } from '@/shared/types'
-
-interface Location {
-  id: number
-  name: string
-}
-
-const emptyForm = {
-  employee_code: '',
-  first_name: '',
-  last_name: '',
-  email: '',
-  department: '',
-  job_title: '',
-  hire_date: '',
-  location_id: '',
-  is_active: 'true',
-}
-
-type EmployeeForm = typeof emptyForm
-
-/** Build an API payload, dropping empty optionals and coercing types. */
-function toPayload(form: EmployeeForm, includeStatus: boolean) {
-  return {
-    employee_code: form.employee_code.trim(),
-    first_name: form.first_name.trim(),
-    last_name: form.last_name.trim(),
-    email: form.email.trim() || null,
-    department: form.department.trim() || null,
-    job_title: form.job_title.trim() || null,
-    hire_date: form.hire_date || null,
-    location_id: form.location_id ? Number(form.location_id) : null,
-    ...(includeStatus ? { is_active: form.is_active === 'true' } : {}),
-  }
-}
+import type { Employee } from '@/shared/types'
+import {
+  useDeleteEmployee,
+  useEmployeeLocations,
+  useEmployees,
+  useSaveEmployee,
+} from '@/features/employees/api/queries'
+import { emptyEmployeeForm, type EmployeeForm } from '@/features/employees/types'
 
 export default function EmployeesPage() {
-  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search)
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
-  const [form, setForm] = useState<EmployeeForm>(emptyForm)
+  const [form, setForm] = useState<EmployeeForm>(emptyEmployeeForm)
 
-  const { data, isPending: loading } = useApiQuery<Paginated<Employee>>(
-    ['employees', 'list', debouncedSearch],
-    '/employees',
-    { search: debouncedSearch, per_page: 50 },
-    { keepPreviousData: true }
-  )
+  const { data, isPending: loading } = useEmployees(debouncedSearch)
   const employees = data?.data ?? []
-  const { data: locations = [] } = useApiQuery<Location[]>(['locations'], '/locations')
+  const { data: locations = [] } = useEmployeeLocations()
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['employees'] })
+  const saveEmployee = useSaveEmployee()
+  const deleteMutation = useDeleteEmployee()
 
   const closeForm = () => {
     setFormOpen(false)
     setEditingId(null)
-    setForm(emptyForm)
+    setForm(emptyEmployeeForm)
   }
-
-  const saveMutation = useMutation({
-    mutationFn: () =>
-      editingId === null
-        ? api.post('/employees', toPayload(form, false))
-        : api.put(`/employees/${editingId}`, toPayload(form, true)),
-    onSuccess: () => {
-      toast.success(editingId === null ? 'Employee created' : 'Employee updated')
-      invalidate()
-      closeForm()
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.delete(`/employees/${id}`),
-    onSuccess: () => {
-      toast.success('Employee deleted')
-      invalidate()
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err)),
-  })
 
   const openCreate = () => {
     setEditingId(null)
-    setForm(emptyForm)
+    setForm(emptyEmployeeForm)
     setFormOpen(true)
   }
 
@@ -124,7 +66,7 @@ export default function EmployeesPage() {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    saveMutation.mutate()
+    saveEmployee.mutate({ id: editingId, form }, { onSuccess: closeForm })
   }
 
   return (
@@ -234,7 +176,7 @@ export default function EmployeesPage() {
               </Label>
             )}
             <div className="flex items-end gap-2 sm:col-span-2">
-              <Button type="submit" disabled={saveMutation.isPending}>
+              <Button type="submit" disabled={saveEmployee.isPending}>
                 {editingId === null ? 'Create employee' : 'Save changes'}
               </Button>
               <Button type="button" variant="ghost" onClick={closeForm}>

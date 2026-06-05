@@ -3,52 +3,16 @@ import { Badge } from '@/shared/ui/Badge'
 import { Card } from '@/shared/ui/Card'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import { useFallbackPoll } from '@/features/realtime/useFallbackPoll'
-import type { Camera } from '@/shared/types'
-
-interface MonitoringDashboard {
-  active_cameras: number
-  total_cameras: number
-  employees_present: number
-  employees_absent: number
-  employees_late: number
-  unknown_persons_today: number
-  active_visitors: number
-  camera_health: {
-    online: number
-    offline: number
-    avg_fps: number | null
-    avg_latency_ms: number | null
-    total_dropped_frames: number
-  }
-  cameras: Camera[]
-}
-
-interface LiveEvent {
-  id: string | number
-  event_type: string
-  message: string
-  occurred_at: string
-}
+import { useMonitoringDashboard, useMonitoringLiveFeed } from '@/features/monitoring/api/queries'
 
 export default function MonitoringPage() {
   // Live via WebSocket ('recognition.*', 'access.*', 'cameras.changed',
   // 'visitors.changed'); resynced on reconnect. Only poll as a fallback when the
   // socket is down — while it's healthy, events keep this screen fresh.
   const poll = useFallbackPoll(60_000)
-  const { data: dashboard } = useApiQuery<MonitoringDashboard>(
-    ['monitoring', 'dashboard'],
-    '/monitoring/dashboard',
-    undefined,
-    { silent: true, refetchInterval: poll }
-  )
-  const { data: liveFeed } = useApiQuery<{ events: LiveEvent[] }>(
-    ['monitoring', 'live-feed'],
-    '/monitoring/live-feed',
-    { limit: 40 },
-    { silent: true, refetchInterval: poll }
-  )
+  const { data: dashboard } = useMonitoringDashboard(poll)
+  const { data: liveFeed } = useMonitoringLiveFeed(poll)
   const events = liveFeed?.events ?? []
 
   const eventTone = (type: string) => {
