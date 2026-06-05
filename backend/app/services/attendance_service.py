@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.redis import get_redis
 from app.models.attendance import (
     AttendancePolicy,
     AttendanceRecord,
@@ -35,6 +37,24 @@ def _is_duplicate(key: str, window_seconds: int) -> bool:
         return True
     _dup_cache[key] = now
     return False
+
+
+async def _is_duplicate_shared(key: str, window_seconds: int) -> bool:
+    """Cross-worker duplicate fast-path.
+
+    Uses an atomic Redis ``SET key 1 NX EX window`` when Redis is enabled — the
+    key is created only on the first call within the window, so a second call
+    (from any worker) sees it already present and is flagged as a duplicate. Falls
+    back to the in-process cache when Redis is disabled or unreachable.
+    """
+    redis = get_redis()
+    if redis is not None:
+        try:
+            created = await redis.set(f"dupwin:{key}", "1", nx=True, ex=window_seconds)
+            return not created
+        except RedisError:
+            pass  # fall through to the local cache
+    return _is_duplicate(key, window_seconds)
 
 
 def _prune_dup_cache(now: datetime) -> None:
@@ -230,7 +250,7 @@ async def process_recognition(
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None
 
-    fast_dup = _is_duplicate(dup_key, window)
+    fast_dup = await _is_duplicate_shared(dup_key, window)
     record = await _get_or_create_today_record(
         db,
         employee_id,
@@ -285,7 +305,7 @@ async def process_rfid_tap(
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None
 
-    fast_dup = _is_duplicate(dup_key, window)
+    fast_dup = await _is_duplicate_shared(dup_key, window)
     record = await _get_or_create_today_record(
         db,
         employee_id,

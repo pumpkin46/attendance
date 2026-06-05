@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import engine
 from app.core.errors import register_exception_handlers
+from app.core.redis import close_redis
+from app.realtime.hub import get_hub
 
 from app.api.routes import router as ai_router
 from app.api.auth import router as auth_router
@@ -35,7 +37,14 @@ from app.api.ws import router as ws_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    start_visitor_expiry_task()
+    # When Celery is enabled, Beat runs visitor expiry (and other periodic jobs);
+    # otherwise fall back to the in-process loop so single-process deploys still work.
+    if not settings.celery_enabled:
+        start_visitor_expiry_task()
+
+    # Multi-worker realtime: each worker subscribes to Redis and fans events out
+    # to its local connections. No-op when Redis is disabled (local-only mode).
+    await get_hub().start_subscriber()
 
     if settings.engine_enabled and settings.engine_auto_start:
         from app.engine.recognition_engine import get_recognition_engine
@@ -49,6 +58,8 @@ async def lifespan(app: FastAPI):
         recognition_engine = get_recognition_engine()
         await recognition_engine.stop()
 
+    await get_hub().stop_subscriber()
+    await close_redis()
     await engine.dispose()
 
 

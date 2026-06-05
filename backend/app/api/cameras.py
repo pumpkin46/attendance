@@ -1,20 +1,10 @@
 from __future__ import annotations
 
-import re
-from datetime import datetime, timedelta, timezone
-
 from fastapi import APIRouter, status
-from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.errors import NotFoundError, ValidationError
-from app.core.pagination import PaginatedResponse, paginate, PaginationDep
-from app.middleware.tenant import apply_tenant_filter
-from app.models.camera import Camera, CameraHealthLog
-from app.models.location import Location
-from app.realtime.hub import emit
+from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.schemas.camera import (
     CAMERA_STATUSES,
     CAMERA_TYPES,
@@ -28,8 +18,7 @@ from app.schemas.camera import (
     CaptureResult,
 )
 from app.schemas.monitoring import MonitoringCameraOut
-from app.api.monitoring import _camera_is_online, _format_camera
-from app.services.stream_capture import capture_stream_frame
+from app.services import camera_service
 
 router = APIRouter(prefix="/api/v1", tags=["cameras"])
 
@@ -49,41 +38,8 @@ async def get_camera_config(user: CurrentUser):
 
 
 @router.get("/cameras/monitoring", response_model=CameraMonitoringSummary)
-async def get_camera_monitoring(
-    db: DbSession,
-    user: CurrentUser,
-    org_id: TenantOrgId,
-):
-    threshold = datetime.now(timezone.utc) - timedelta(seconds=settings.camera_online_threshold_seconds)
-
-    stmt = select(Camera).join(Location, Camera.location_id == Location.id)
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-
-    result = await db.execute(stmt)
-    cameras = list(result.scalars().all())
-
-    online = 0
-    offline = 0
-    camera_list = []
-    for cam in cameras:
-        is_online = cam.last_heartbeat_at is not None and cam.last_heartbeat_at >= threshold
-        if is_online:
-            online += 1
-        else:
-            offline += 1
-        camera_list.append({
-            "id": cam.id,
-            "name": cam.name,
-            "status": "online" if is_online else "offline",
-            "last_heartbeat_at": cam.last_heartbeat_at.isoformat() if cam.last_heartbeat_at else None,
-        })
-
-    return CameraMonitoringSummary(
-        total_cameras=len(cameras),
-        online=online,
-        offline=offline,
-        cameras=camera_list,
-    )
+async def get_camera_monitoring(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+    return await camera_service.monitoring_summary(db, org_id)
 
 
 @router.get("/cameras", response_model=PaginatedResponse[MonitoringCameraOut])
@@ -93,17 +49,9 @@ async def list_cameras(
     org_id: TenantOrgId,
     pagination: PaginationDep,
 ):
-    stmt = select(Camera).join(Location, Camera.location_id == Location.id)
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-    stmt = stmt.order_by(Camera.id.desc())
-    threshold = datetime.now(timezone.utc) - timedelta(
-        seconds=settings.camera_online_threshold_seconds
-    )
+    stmt = camera_service.cameras_query(org_id)
     page = await paginate(db, stmt, pagination.page, pagination.per_page)
-    page.data = [
-        _format_camera(c, _camera_is_online(c, threshold), recognition_today=0)
-        for c in page.data
-    ]
+    page.data = [camera_service.format_monitoring_camera(c) for c in page.data]
     return page
 
 
@@ -113,44 +61,13 @@ async def create_camera(
     db: DbSession,
     user: require_permission("cameras.manage"),
 ):
-    data = body.model_dump()
-    data["device_id"] = data.get("device_id") or await _generate_device_id(db, body.name)
-    camera = Camera(**data)
-    db.add(camera)
-    await db.flush()
-    await db.refresh(camera)
+    camera = await camera_service.create_camera(db, body)
     return CameraOut.model_validate(camera, from_attributes=True)
 
 
-async def _generate_device_id(db: DbSession, name: str) -> str:
-    base = re.sub(r"[^A-Z0-9]+", "-", name.upper()).strip("-") or "CAMERA"
-    candidate = base
-    suffix = 1
-    while True:
-        existing = await db.execute(select(Camera.id).where(Camera.device_id == candidate))
-        if existing.scalar_one_or_none() is None:
-            return candidate
-        candidate = f"{base}-{suffix}"
-        suffix += 1
-
-
 @router.get("/cameras/{camera_id}", response_model=CameraOut)
-async def get_camera(
-    camera_id: int,
-    db: DbSession,
-    user: CurrentUser,
-    org_id: TenantOrgId,
-):
-    stmt = (
-        select(Camera)
-        .join(Location, Camera.location_id == Location.id)
-        .where(Camera.id == camera_id)
-    )
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-    result = await db.execute(stmt)
-    camera = result.scalar_one_or_none()
-    if not camera:
-        raise NotFoundError("Camera not found")
+async def get_camera(camera_id: int, db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+    camera = await camera_service.get_camera(db, camera_id, org_id)
     return CameraOut.model_validate(camera, from_attributes=True)
 
 
@@ -162,23 +79,7 @@ async def update_camera(
     user: require_permission("cameras.manage"),
     org_id: TenantOrgId = None,
 ):
-    stmt = (
-        select(Camera)
-        .join(Location, Camera.location_id == Location.id)
-        .where(Camera.id == camera_id)
-    )
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-    result = await db.execute(stmt)
-    camera = result.scalar_one_or_none()
-    if not camera:
-        raise NotFoundError("Camera not found")
-
-    update_data = body.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(camera, field, value)
-
-    await db.flush()
-    await db.refresh(camera)
+    camera = await camera_service.update_camera(db, camera_id, org_id, body)
     return CameraOut.model_validate(camera, from_attributes=True)
 
 
@@ -189,23 +90,10 @@ async def delete_camera(
     user: require_permission("cameras.manage"),
     org_id: TenantOrgId = None,
 ):
-    stmt = (
-        select(Camera)
-        .join(Location, Camera.location_id == Location.id)
-        .where(Camera.id == camera_id)
-    )
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-    result = await db.execute(stmt)
-    camera = result.scalar_one_or_none()
-    if not camera:
-        raise NotFoundError("Camera not found")
-    await db.delete(camera)
+    await camera_service.delete_camera(db, camera_id, org_id)
 
 
-@router.get(
-    "/cameras/{camera_id}/health",
-    response_model=PaginatedResponse[CameraHealthLogOut],
-)
+@router.get("/cameras/{camera_id}/health", response_model=PaginatedResponse[CameraHealthLogOut])
 async def get_camera_health(
     camera_id: int,
     db: DbSession,
@@ -213,44 +101,13 @@ async def get_camera_health(
     org_id: TenantOrgId,
     pagination: PaginationDep,
 ):
-    stmt = (
-        select(CameraHealthLog)
-        .where(CameraHealthLog.camera_id == camera_id)
-        .order_by(CameraHealthLog.recorded_at.desc())
-    )
+    stmt = camera_service.health_query(camera_id)
     return await paginate(db, stmt, pagination.page, pagination.per_page, CameraHealthLogOut)
 
 
 @router.post("/cameras/{camera_id}/heartbeat", response_model=CameraOut)
-async def camera_heartbeat(
-    camera_id: int,
-    db: DbSession,
-    user: CurrentUser,
-    org_id: TenantOrgId,
-):
-    stmt = (
-        select(Camera)
-        .join(Location, Camera.location_id == Location.id)
-        .where(Camera.id == camera_id)
-    )
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-    result = await db.execute(stmt)
-    camera = result.scalar_one_or_none()
-    if not camera:
-        raise NotFoundError("Camera not found")
-
-    camera.last_heartbeat_at = datetime.now(timezone.utc)
-    await db.flush()
-    await db.refresh(camera)
-
-    event_org_id = org_id
-    if event_org_id is None:
-        loc = await db.execute(
-            select(Location.organization_id).where(Location.id == camera.location_id)
-        )
-        event_org_id = loc.scalar_one_or_none()
-    await emit(event_org_id, "cameras.changed", {"camera_id": camera.id})
-
+async def camera_heartbeat(camera_id: int, db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+    camera = await camera_service.heartbeat(db, camera_id, org_id)
     return CameraOut.model_validate(camera, from_attributes=True)
 
 
@@ -261,22 +118,4 @@ async def capture_camera_frame(
     user: require_permission("cameras.manage"),
     org_id: TenantOrgId = None,
 ):
-    stmt = (
-        select(Camera)
-        .join(Location, Camera.location_id == Location.id)
-        .where(Camera.id == camera_id)
-    )
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-    result = await db.execute(stmt)
-    camera = result.scalar_one_or_none()
-    if not camera:
-        raise NotFoundError("Camera not found")
-    if not camera.stream_url:
-        raise ValidationError("Camera has no stream URL configured")
-
-    capture = await run_in_threadpool(capture_stream_frame, camera.stream_url)
-    return CaptureResult(
-        success=capture["success"],
-        image=capture.get("image"),
-        error=capture.get("error"),
-    )
+    return await camera_service.capture_frame(db, camera_id, org_id)

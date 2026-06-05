@@ -1,23 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, status
-
-from sqlalchemy import select
+from fastapi import APIRouter
 
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.errors import NotFoundError, ValidationError
-from app.core.pagination import PaginatedResponse, PaginationParams, paginate, PaginationDep
-from app.middleware.tenant import apply_tenant_filter
-from app.models.attendance import (
-    AttendancePolicy,
-    Holiday,
-    LeaveRequest,
-    Shift,
-    ShiftAssignment,
-)
-from app.models.employee import Employee
+from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.schemas.attendance import (
     AttendancePolicyCreate,
     AttendancePolicyOut,
@@ -31,6 +17,7 @@ from app.schemas.attendance import (
     ShiftCreate,
     ShiftOut,
 )
+from app.services import shift_service
 
 router = APIRouter(prefix="/api/v1", tags=["shifts"])
 
@@ -39,20 +26,9 @@ router = APIRouter(prefix="/api/v1", tags=["shifts"])
 
 
 @router.get("/attendance-policies", response_model=list[AttendancePolicyOut])
-async def list_policies(
-    db: DbSession,
-    user: CurrentUser,
-    org_id: TenantOrgId,
-):
-    stmt = (
-        select(AttendancePolicy)
-        .where(AttendancePolicy.is_active == True)  # noqa: E712
-        .order_by(AttendancePolicy.name)
-    )
-    stmt = apply_tenant_filter(stmt, org_id, AttendancePolicy.organization_id)
-    result = await db.execute(stmt)
-    items = list(result.scalars().all())
-    return [AttendancePolicyOut.model_validate(p, from_attributes=True) for p in items]
+async def list_policies(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+    policies = await shift_service.list_policies(db, org_id)
+    return [AttendancePolicyOut.model_validate(p, from_attributes=True) for p in policies]
 
 
 @router.post("/attendance-policies", status_code=201, response_model=AttendancePolicyOut)
@@ -62,39 +38,13 @@ async def create_policy(
     org_id: TenantOrgId,
     user: require_permission("shifts.manage"),
 ):
-    if org_id is None:
-        raise ValidationError("Organization context required")
-
-    if body.is_default:
-        reset = (
-            select(AttendancePolicy)
-            .where(
-                AttendancePolicy.organization_id == org_id,
-                AttendancePolicy.is_default == True,  # noqa: E712
-            )
-        )
-        result = await db.execute(reset)
-        for p in result.scalars().all():
-            p.is_default = False
-
-    policy = AttendancePolicy(organization_id=org_id, **body.model_dump())
-    db.add(policy)
-    await db.flush()
-    await db.refresh(policy)
+    policy = await shift_service.create_policy(db, org_id, body)
     return AttendancePolicyOut.model_validate(policy, from_attributes=True)
 
 
 @router.get("/attendance-policies/{policy_id}", response_model=AttendancePolicyOut)
-async def get_policy(
-    policy_id: int,
-    db: DbSession,
-    user: CurrentUser,
-):
-    stmt = select(AttendancePolicy).where(AttendancePolicy.id == policy_id)
-    result = await db.execute(stmt)
-    policy = result.scalar_one_or_none()
-    if not policy:
-        raise NotFoundError("Policy not found")
+async def get_policy(policy_id: int, db: DbSession, user: CurrentUser):
+    policy = await shift_service.get_policy(db, policy_id)
     return AttendancePolicyOut.model_validate(policy, from_attributes=True)
 
 
@@ -105,30 +55,7 @@ async def update_policy(
     db: DbSession,
     user: require_permission("shifts.manage"),
 ):
-    stmt = select(AttendancePolicy).where(AttendancePolicy.id == policy_id)
-    result = await db.execute(stmt)
-    policy = result.scalar_one_or_none()
-    if not policy:
-        raise NotFoundError("Policy not found")
-
-    if body.is_default:
-        reset_stmt = (
-            select(AttendancePolicy)
-            .where(
-                AttendancePolicy.organization_id == policy.organization_id,
-                AttendancePolicy.id != policy_id,
-                AttendancePolicy.is_default == True,  # noqa: E712
-            )
-        )
-        reset_result = await db.execute(reset_stmt)
-        for p in reset_result.scalars().all():
-            p.is_default = False
-
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(policy, field, value)
-
-    await db.flush()
-    await db.refresh(policy)
+    policy = await shift_service.update_policy(db, policy_id, body)
     return AttendancePolicyOut.model_validate(policy, from_attributes=True)
 
 
@@ -136,20 +63,9 @@ async def update_policy(
 
 
 @router.get("/shifts", response_model=list[ShiftOut])
-async def list_shifts(
-    db: DbSession,
-    user: CurrentUser,
-    org_id: TenantOrgId,
-):
-    stmt = (
-        select(Shift)
-        .where(Shift.is_active == True)  # noqa: E712
-        .order_by(Shift.name)
-    )
-    stmt = apply_tenant_filter(stmt, org_id, Shift.organization_id)
-    result = await db.execute(stmt)
-    items = list(result.scalars().all())
-    return [ShiftOut.model_validate(s, from_attributes=True) for s in items]
+async def list_shifts(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+    shifts = await shift_service.list_shifts(db, org_id)
+    return [ShiftOut.model_validate(s, from_attributes=True) for s in shifts]
 
 
 @router.post("/shifts", status_code=201, response_model=ShiftOut)
@@ -159,27 +75,13 @@ async def create_shift(
     org_id: TenantOrgId,
     user: require_permission("shifts.manage"),
 ):
-    if org_id is None:
-        raise ValidationError("Organization context required")
-
-    shift = Shift(organization_id=org_id, **body.model_dump())
-    db.add(shift)
-    await db.flush()
-    await db.refresh(shift)
+    shift = await shift_service.create_shift(db, org_id, body)
     return ShiftOut.model_validate(shift, from_attributes=True)
 
 
 @router.get("/shifts/{shift_id}", response_model=ShiftOut)
-async def get_shift(
-    shift_id: int,
-    db: DbSession,
-    user: CurrentUser,
-):
-    stmt = select(Shift).where(Shift.id == shift_id)
-    result = await db.execute(stmt)
-    shift = result.scalar_one_or_none()
-    if not shift:
-        raise NotFoundError("Shift not found")
+async def get_shift(shift_id: int, db: DbSession, user: CurrentUser):
+    shift = await shift_service.get_shift(db, shift_id)
     return ShiftOut.model_validate(shift, from_attributes=True)
 
 
@@ -190,34 +92,17 @@ async def update_shift(
     db: DbSession,
     user: require_permission("shifts.manage"),
 ):
-    stmt = select(Shift).where(Shift.id == shift_id)
-    result = await db.execute(stmt)
-    shift = result.scalar_one_or_none()
-    if not shift:
-        raise NotFoundError("Shift not found")
-
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(shift, field, value)
-
-    await db.flush()
-    await db.refresh(shift)
+    shift = await shift_service.update_shift(db, shift_id, body)
     return ShiftOut.model_validate(shift, from_attributes=True)
 
 
-@router.delete("/shifts/{shift_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/shifts/{shift_id}", status_code=204)
 async def delete_shift(
     shift_id: int,
     db: DbSession,
     user: require_permission("shifts.manage"),
 ):
-    stmt = select(Shift).where(Shift.id == shift_id)
-    result = await db.execute(stmt)
-    shift = result.scalar_one_or_none()
-    if not shift:
-        raise NotFoundError("Shift not found")
-
-    shift.is_active = False
-    await db.flush()
+    await shift_service.deactivate_shift(db, shift_id)
     return None
 
 
@@ -228,22 +113,7 @@ async def assign_shift(
     db: DbSession,
     user: require_permission("shifts.manage"),
 ):
-    stmt = select(Shift).where(Shift.id == shift_id)
-    result = await db.execute(stmt)
-    shift = result.scalar_one_or_none()
-    if not shift:
-        raise NotFoundError("Shift not found")
-
-    assignment = ShiftAssignment(
-        shift_id=shift_id,
-        employee_id=body.employee_id,
-        effective_from=body.effective_from,
-        effective_to=body.effective_to,
-    )
-    db.add(assignment)
-    await db.flush()
-    await db.refresh(assignment)
-
+    assignment = await shift_service.assign_shift(db, shift_id, body)
     return ShiftAssignmentOut(
         id=assignment.id,
         shift_id=assignment.shift_id,
@@ -257,16 +127,9 @@ async def assign_shift(
 
 
 @router.get("/holidays", response_model=list[HolidayOut])
-async def list_holidays(
-    db: DbSession,
-    user: CurrentUser,
-    org_id: TenantOrgId,
-):
-    stmt = select(Holiday).order_by(Holiday.date)
-    stmt = apply_tenant_filter(stmt, org_id, Holiday.organization_id)
-    result = await db.execute(stmt)
-    items = list(result.scalars().all())
-    return [HolidayOut.model_validate(h, from_attributes=True) for h in items]
+async def list_holidays(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+    holidays = await shift_service.list_holidays(db, org_id)
+    return [HolidayOut.model_validate(h, from_attributes=True) for h in holidays]
 
 
 @router.post("/holidays", status_code=201, response_model=HolidayOut)
@@ -276,13 +139,7 @@ async def create_holiday(
     org_id: TenantOrgId,
     user: require_permission("holidays.manage"),
 ):
-    if org_id is None:
-        raise ValidationError("Organization context required")
-
-    holiday = Holiday(organization_id=org_id, **body.model_dump())
-    db.add(holiday)
-    await db.flush()
-    await db.refresh(holiday)
+    holiday = await shift_service.create_holiday(db, org_id, body)
     return HolidayOut.model_validate(holiday, from_attributes=True)
 
 
@@ -296,30 +153,13 @@ async def list_leave_requests(
     org_id: TenantOrgId,
     pagination: PaginationDep,
 ):
-    stmt = select(LeaveRequest).order_by(LeaveRequest.created_at.desc())
-    if org_id:
-        emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
-        stmt = stmt.where(LeaveRequest.employee_id.in_(emp_ids))
-
+    stmt = shift_service.leave_requests_query(org_id)
     return await paginate(db, stmt, pagination.page, pagination.per_page, LeaveRequestOut)
 
 
 @router.post("/leave-requests", status_code=201, response_model=LeaveRequestOut)
-async def create_leave_request(
-    body: LeaveRequestCreate,
-    db: DbSession,
-    user: CurrentUser,
-):
-    leave = LeaveRequest(
-        employee_id=body.employee_id,
-        type=body.type,
-        start_date=body.start_date,
-        end_date=body.end_date,
-        reason=body.reason,
-    )
-    db.add(leave)
-    await db.flush()
-    await db.refresh(leave)
+async def create_leave_request(body: LeaveRequestCreate, db: DbSession, user: CurrentUser):
+    leave = await shift_service.create_leave_request(db, body)
     return LeaveRequestOut.model_validate(leave, from_attributes=True)
 
 
@@ -330,16 +170,5 @@ async def update_leave_request(
     db: DbSession,
     user: require_permission("leave.approve"),
 ):
-    stmt = select(LeaveRequest).where(LeaveRequest.id == leave_id)
-    result = await db.execute(stmt)
-    leave = result.scalar_one_or_none()
-    if not leave:
-        raise NotFoundError("Leave request not found")
-
-    leave.status = body.status
-    leave.approved_by = user.id
-    leave.approved_at = datetime.now(timezone.utc)
-
-    await db.flush()
-    await db.refresh(leave)
+    leave = await shift_service.decide_leave_request(db, leave_id, body, user.id)
     return LeaveRequestOut.model_validate(leave, from_attributes=True)

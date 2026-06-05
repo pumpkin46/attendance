@@ -1,10 +1,9 @@
-"""Lightweight in-process rate limiting.
+"""Rate limiting for auth-sensitive and resource-intensive endpoints.
 
-This is a best-effort limiter intended for brute-force / abuse mitigation on
-auth-sensitive and resource-intensive endpoints. State is per-process (a simple
-sliding window keyed by client IP) and therefore NOT shared across multiple
-workers or nodes. For hard guarantees behind a load balancer, also enforce
-limits at the reverse proxy. Disable globally with ``RATE_LIMIT_ENABLED=false``.
+Uses Redis (a per-IP fixed window via ``INCR``/``EXPIRE``) when Redis is enabled,
+so limits hold across all workers and nodes. When Redis is disabled or
+unreachable it falls back to an in-process sliding window (single-worker
+behaviour). Disable globally with ``RATE_LIMIT_ENABLED=false``.
 """
 
 from __future__ import annotations
@@ -13,8 +12,10 @@ import time
 from collections import defaultdict, deque
 
 from fastapi import Depends, HTTPException, Request, status
+from redis.exceptions import RedisError
 
 from app.core.config import settings
+from app.core.redis import get_redis
 
 # key -> timestamps (monotonic seconds) of recent requests
 _hits: dict[str, deque[float]] = defaultdict(deque)
@@ -37,6 +38,39 @@ def _purge_if_needed(now: float, window_seconds: int) -> None:
         _hits.clear()
 
 
+def _allow_in_memory(name: str, ip: str, max_requests: int, window_seconds: int) -> bool:
+    """In-process sliding window. Returns True if the request is allowed."""
+    now = time.monotonic()
+    key = f"{name}:{ip}"
+    bucket = _hits[key]
+    cutoff = now - window_seconds
+    while bucket and bucket[0] < cutoff:
+        bucket.popleft()
+    if len(bucket) >= max_requests:
+        return False
+    bucket.append(now)
+    _purge_if_needed(now, window_seconds)
+    return True
+
+
+async def _allow_redis(
+    name: str, ip: str, max_requests: int, window_seconds: int
+) -> bool | None:
+    """Redis fixed-window limiter. Returns True/False, or None to fall back."""
+    redis = get_redis()
+    if redis is None:
+        return None
+    try:
+        bucket = int(time.time() // window_seconds)
+        key = f"rl:{name}:{ip}:{bucket}"
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, window_seconds)
+        return count <= max_requests
+    except RedisError:
+        return None
+
+
 def rate_limit(name: str, max_requests: int, window_seconds: int):
     """Return a FastAPI dependency enforcing ``max_requests`` per window per IP.
 
@@ -47,21 +81,16 @@ def rate_limit(name: str, max_requests: int, window_seconds: int):
     async def _dependency(request: Request) -> None:
         if not settings.rate_limit_enabled or max_requests <= 0:
             return
-        now = time.monotonic()
-        key = f"{name}:{_client_ip(request)}"
-        bucket = _hits[key]
-        cutoff = now - window_seconds
-        while bucket and bucket[0] < cutoff:
-            bucket.popleft()
-        if len(bucket) >= max_requests:
-            retry_after = int(bucket[0] + window_seconds - now) + 1
+        ip = _client_ip(request)
+        allowed = await _allow_redis(name, ip, max_requests, window_seconds)
+        if allowed is None:
+            allowed = _allow_in_memory(name, ip, max_requests, window_seconds)
+        if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many requests. Please slow down and try again later.",
-                headers={"Retry-After": str(max(retry_after, 1))},
+                headers={"Retry-After": str(window_seconds)},
             )
-        bucket.append(now)
-        _purge_if_needed(now, window_seconds)
 
     return Depends(_dependency)
 

@@ -59,6 +59,31 @@ class Settings(BaseSettings):
             f"@{self.db_host}:{self.db_port}/{self.db_database}"
         )
 
+    # ── Redis ────────────────────────────────────────────────────────────
+    # When disabled, duplicate-suppression and rate-limiting fall back to the
+    # in-process implementations (single-worker behaviour).
+    redis_enabled: bool = False
+    redis_url: str = "redis://127.0.0.1:6379/0"
+
+    # ── Celery (background tasks) ─────────────────────────────────────────
+    # When disabled, the in-process visitor-expiry loop runs instead of Beat.
+    celery_enabled: bool = False
+    celery_broker_url: str | None = None
+    celery_result_backend: str | None = None
+    celery_timezone: str = "UTC"
+    # Beat intervals (seconds)
+    beat_visitor_expiry_seconds: int = 60
+    beat_anomaly_detection_seconds: int = 3600
+    beat_retention_purge_seconds: int = 86400
+
+    @property
+    def effective_celery_broker(self) -> str:
+        return self.celery_broker_url or self.redis_url
+
+    @property
+    def effective_celery_backend(self) -> str:
+        return self.celery_result_backend or self.redis_url
+
     # ── Password hashing ─────────────────────────────────────────────────
     hash_driver: str = "argon2id"
     argon_memory: int = 65536

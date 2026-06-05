@@ -29,6 +29,10 @@ Pillow==12.2.0
 scikit-learn==1.9.0
 scikit-image<0.26
 
+# Cache, broker & background tasks
+redis==5.2.1
+celery[redis]==5.4.0
+
 # Utilities
 httpx==0.28.1
 python-dateutil==2.9.0

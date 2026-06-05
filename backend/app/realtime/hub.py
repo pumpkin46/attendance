@@ -1,14 +1,20 @@
-"""In-process publish/subscribe hub for realtime WebSocket fan-out.
+"""Publish/subscribe hub for realtime WebSocket fan-out.
 
 Events are partitioned by ``organization_id`` for tenant isolation. A connection
 scoped to ``org_id=None`` (a super-admin watching every tenant) receives all
 events; a publish with ``org_id=None`` is delivered ONLY to those super-admin
 connections, never fanned out across tenants.
 
-This is intentionally process-local: it matches the single-worker deployment.
-To scale to multiple workers, swap the body of ``publish`` for a Redis (or other
-broker) PUBLISH and feed each connection's queue from a per-worker SUBSCRIBE — the
-public surface (``register``/``unregister``/``publish``/``emit``) can stay the same.
+Two modes, transparent to callers (``register``/``unregister``/``publish``/``emit``):
+
+* **Redis enabled** — ``publish`` does a Redis ``PUBLISH``; every worker runs a
+  ``SUBSCRIBE`` loop (started in the app lifespan) that fans the event out to its
+  own local connections. This makes realtime correct across multiple workers/nodes.
+* **Redis disabled** — ``publish`` fans out directly to this process's
+  connections (single-worker behaviour).
+
+Pub/sub is best-effort: a dropped event is re-synced by the client's normal
+refetch on reconnect.
 """
 
 from __future__ import annotations
@@ -19,7 +25,14 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from redis.exceptions import RedisError
+
+from app.core.redis import get_redis
+
 logger = logging.getLogger(__name__)
+
+# Single channel; tenant targeting is applied locally per worker from the payload.
+_CHANNEL = "realtime:events"
 
 # Bounded per-connection buffer. A client that cannot keep up drops events rather
 # than ballooning memory; it will re-sync via a normal refetch on reconnect.
@@ -42,6 +55,8 @@ class RealtimeHub:
     def __init__(self) -> None:
         self._connections: set[Connection] = set()
         self._lock = asyncio.Lock()
+        self._pubsub: Any = None
+        self._sub_task: asyncio.Task | None = None
 
     async def register(self, user_id: int, org_id: int | None) -> Connection | None:
         """Register a subscriber, or return None if the per-user cap is reached."""
@@ -75,9 +90,24 @@ class RealtimeHub:
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
         )
-        # A super-admin connection (org_id is None) sees every tenant's events.
-        # A publish with org_id=None is therefore delivered ONLY to those
-        # super-admin connections — never fanned out to all tenants.
+        # With Redis, broadcast to every worker; each worker's subscriber loop
+        # delivers to its own local connections (including this one). Without
+        # Redis, deliver to this process's connections directly.
+        redis = get_redis()
+        if redis is not None:
+            try:
+                await redis.publish(_CHANNEL, message)
+                return
+            except RedisError:
+                logger.warning("Realtime PUBLISH failed; delivering locally only")
+        await self._deliver_local(org_id, message)
+
+    async def _deliver_local(self, org_id: int | None, message: str) -> None:
+        """Fan a serialized event out to this process's matching connections.
+
+        A super-admin connection (org_id is None) sees every tenant's events; an
+        event with org_id=None is delivered ONLY to those super-admin connections.
+        """
         async with self._lock:
             targets = [
                 conn
@@ -88,7 +118,56 @@ class RealtimeHub:
             try:
                 conn.queue.put_nowait(message)
             except asyncio.QueueFull:
-                logger.warning("Realtime queue full; dropping '%s' for a slow client", event_type)
+                logger.warning("Realtime queue full; dropping event for a slow client")
+
+    # ── Cross-worker subscriber (started/stopped by the app lifespan) ─────────
+
+    async def start_subscriber(self) -> None:
+        """Begin consuming Redis pub/sub events for local fan-out (no-op if off)."""
+        redis = get_redis()
+        if redis is None or self._sub_task is not None:
+            return
+        try:
+            self._pubsub = redis.pubsub()
+            await self._pubsub.subscribe(_CHANNEL)
+        except RedisError:
+            logger.warning("Realtime subscriber could not connect; running local-only")
+            self._pubsub = None
+            return
+        self._sub_task = asyncio.create_task(self._consume())
+
+    async def _consume(self) -> None:
+        try:
+            async for message in self._pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                raw = message.get("data")
+                if not isinstance(raw, str):
+                    continue
+                try:
+                    org_id = json.loads(raw).get("org_id")
+                except (ValueError, TypeError):
+                    continue
+                await self._deliver_local(org_id, raw)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - defensive; keep the worker alive
+            logger.exception("Realtime subscriber loop crashed")
+
+    async def stop_subscriber(self) -> None:
+        if self._sub_task is not None:
+            self._sub_task.cancel()
+            try:
+                await self._sub_task
+            except asyncio.CancelledError:
+                pass
+            self._sub_task = None
+        if self._pubsub is not None:
+            try:
+                await self._pubsub.aclose()
+            except Exception:  # pragma: no cover
+                pass
+            self._pubsub = None
 
 
 _hub = RealtimeHub()
