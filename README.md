@@ -128,10 +128,16 @@ For on-site inference, set a camera to **edge** deployment mode and run a local 
 
 Check compliance: `GET http://127.0.0.1:8000/api/v1/health`
 
-## Windows installer
+## Windows installer (offline)
 
-- **Build** the setup EXE: [WINDOWS_BUILD.md](WINDOWS_BUILD.md)
-- **Install / run** on end-user PCs: [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md)
+A single `AttendancePlatformSetup.exe` installs and runs the whole platform on an
+**offline** Windows PC — Python, PostgreSQL, nginx, all dependencies, and the
+face-recognition models are bundled. PostgreSQL runs as a Windows service; a
+system-tray launcher controls the backend and nginx (which serves the UI on
+`http://localhost:8080`).
+
+- **Build** the setup EXE (online build machine): [WINDOWS_BUILD.md](WINDOWS_BUILD.md)
+- **Install / run** on end-user PCs (offline): [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md)
 
 ## Project structure
 
@@ -139,14 +145,5 @@ Check compliance: `GET http://127.0.0.1:8000/api/v1/health`
 attendance/
 ├── backend/       # FastAPI API + face recognition
 ├── frontend/      # React admin UI
-├── windows/       # Installer + tray launcher
-└── scripts/       # Dev utilities (e.g. test-face.py)
+└── windows/       # Offline installer toolchain + tray launcher
 ```
-
-## Test face recognition
-
-```bash
-python scripts/test-face.py path/to/photo.jpg
-```
-
-Requires backend on **http://127.0.0.1:8000**.

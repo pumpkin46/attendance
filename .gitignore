@@ -110,14 +110,19 @@ windows/installer/prereqs/postgresql/*
 !windows/installer/prereqs/postgresql/.gitkeep
 windows/installer/prereqs/python/*
 !windows/installer/prereqs/python/.gitkeep
-windows/installer/prereqs/redis/*
-!windows/installer/prereqs/redis/.gitkeep
 windows/installer/prereqs/nginx/*
 !windows/installer/prereqs/nginx/.gitkeep
+windows/installer/prereqs/redis/*
+!windows/installer/prereqs/redis/.gitkeep
+windows/installer/prereqs/models/*
+!windows/installer/prereqs/models/.gitkeep
+windows/installer/prereqs/wheelhouse/*
+!windows/installer/prereqs/wheelhouse/.gitkeep
 
 # Launcher build artifacts (build with dotnet before compiling Inno Setup)
 windows/launcher/**/bin/
 windows/launcher/**/obj/
+windows/launcher/publish/
 
 # -----------------------------------------------------------------------------
 # Windows installer outputs (generated)
