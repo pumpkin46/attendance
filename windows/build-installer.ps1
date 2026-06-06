@@ -111,22 +111,10 @@ if (-not (Test-Path (Join-Path $Frontend 'dist\index.html'))) { throw "frontend\
 
 # -- 5. Icon (before launcher so it can be embedded) --------------------------
 Section '5. Icon'
-$png = Join-Path $WinDir 'assets\app-icon.png'
-$ico = Join-Path $WinDir 'assets\app.ico'
-if ((Test-Path $png) -and -not (Test-Path $ico)) {
-    Add-Type -AssemblyName System.Drawing
-    $src = [System.Drawing.Image]::FromFile($png)
-    try {
-        $bmp = New-Object System.Drawing.Bitmap($src, 256, 256)
-        $h = $bmp.GetHicon()
-        $icon = [System.Drawing.Icon]::FromHandle($h)
-        $fs = [System.IO.File]::Create($ico)
-        $icon.Save($fs); $fs.Close()
-        $bmp.Dispose()
-    } finally { $src.Dispose() }
-    Write-Host "Generated $ico"
-} elseif (Test-Path $ico) { Write-Host "Icon already present." }
-else { Write-Host "No app-icon.png - installer will use the default Inno icon." }
+# Regenerate the multi-resolution app.ico (and app-icon.png preview) from code.
+& (Join-Path $WinDir 'assets\make-icon.ps1')
+if (-not (Test-Path (Join-Path $WinDir 'assets\app.ico'))) { throw "app.ico was not generated." }
+Write-Host "Icon ready."
 
 # -- 6. Tray launcher ---------------------------------------------------------
 Section '6. Tray launcher'

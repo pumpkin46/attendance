@@ -65,7 +65,7 @@ Download "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion
          (Join-Path $pyDir "python-$PythonVersion-amd64.exe")
 
 # -- PostgreSQL (binaries-only zip) -------------------------------------------
-Write-Host "[2/5] PostgreSQL binaries"
+Write-Host "[2/6] PostgreSQL binaries"
 $pgDir = Join-Path $PrereqDir 'postgresql'
 if (-not (Test-Path (Join-Path $pgDir 'bin\postgres.exe'))) {
     $zip = Join-Path $tmp 'postgresql.zip'
@@ -75,9 +75,21 @@ if (-not (Test-Path (Join-Path $pgDir 'bin\postgres.exe'))) {
     Flatten-SingleRoot $pgDir   # zip contains a top-level pgsql\ folder
     if (-not (Test-Path (Join-Path $pgDir 'bin\postgres.exe'))) { throw "PostgreSQL extraction failed." }
 } else { Write-Host "  exists: $pgDir" }
+# Trim to the server runtime only (idempotent): drop the bundled pgAdmin GUI
+# (~690 MB!), StackBuilder, docs, headers and symbols. We only run the server.
+# Use `rd /s /q` first - it copes with pgAdmin's very deep (>260 char) paths
+# that make Remove-Item throw "directory not empty".
+foreach ($d in @('pgAdmin 4','StackBuilder','doc','include','symbols')) {
+    $p = Join-Path $pgDir $d
+    if (Test-Path -LiteralPath $p) {
+        cmd /c rd /s /q "$p" 2>$null
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+        Write-Host "  pruned postgresql\$d"
+    }
+}
 
 # -- nginx --------------------------------------------------------------------
-Write-Host "[3/5] nginx $NginxVersion"
+Write-Host "[3/6] nginx $NginxVersion"
 $ngDir = Join-Path $PrereqDir 'nginx'
 if (-not (Test-Path (Join-Path $ngDir 'nginx.exe'))) {
     $zip = Join-Path $tmp 'nginx.zip'
@@ -89,7 +101,7 @@ if (-not (Test-Path (Join-Path $ngDir 'nginx.exe'))) {
 } else { Write-Host "  exists: $ngDir" }
 
 # -- InsightFace buffalo_l ----------------------------------------------------
-Write-Host "[4/5] InsightFace buffalo_l model"
+Write-Host "[4/6] InsightFace buffalo_l model"
 $bufDest = Join-Path $PrereqDir 'models\insightface\models\buffalo_l'
 if (-not (Test-Path (Join-Path $bufDest '*.onnx'))) {
     $zip = Join-Path $tmp 'buffalo_l.zip'
@@ -101,6 +113,13 @@ if (-not (Test-Path (Join-Path $bufDest '*.onnx'))) {
         throw "buffalo_l extraction produced no .onnx files."
     }
 } else { Write-Host "  exists: $bufDest" }
+# Keep only detection (det_10g) + recognition (w600k_r50). The pipeline uses
+# face.embedding/bbox/kps only - never 2D/3D landmarks or gender-age - so drop
+# those models (idempotent): saves ~143 MB with no functional impact.
+foreach ($m in @('1k3d68.onnx','2d106det.onnx','genderage.onnx')) {
+    $p = Join-Path $bufDest $m
+    if (Test-Path $p) { Remove-Item -LiteralPath $p -Force; Write-Host "  pruned model $m" }
+}
 
 # -- Anti-spoof ONNX ----------------------------------------------------------
 Write-Host "[5/6] Anti-spoof MiniFASNetV2.onnx"

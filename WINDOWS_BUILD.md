@@ -63,8 +63,13 @@ Optional flags:
 - `windows\installer\inno\Output\AttendancePlatformSetup.exe`
 - A copy at the repo root: `AttendancePlatformSetup.exe`
 
-Expected size ≈ **0.8 GB** compressed (buffalo_l ~280 MB, wheels ~400 MB incl.
-onnxruntime/faiss/opencv, PostgreSQL ~300 MB, Redis ~12 MB — LZMA2-compressed).
+Expected size ≈ **460 MB** compressed. The build trims the bundle aggressively:
+PostgreSQL ships server-only (pgAdmin/StackBuilder/docs removed, 876→141 MB) and
+the InsightFace pack keeps only detection + recognition (`det_10g` + `w600k_r50`,
+325→182 MB; the unused landmark/gender models are dropped). The remaining floor is
+the ResNet50 recognition model (~166 MB) plus the Python ML wheels. To get to
+~150 MB, swap the recognition model for the lightweight MobileFaceNet (`w600k_mbf`)
+— see `fetch-prereqs.ps1`.
 
 ## Updating bundled component versions
 
