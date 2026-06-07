@@ -7,22 +7,21 @@ param([Parameter(Mandatory = $true)][string]$AdminPassword)
 
 . "$PSScriptRoot\common.ps1"
 
-if (-not (Test-Path $VenvPython)) { throw "Venv missing ($VenvPython). Run create_venv.ps1 first." }
+if (-not (Test-Path $PythonExe)) { throw "Python missing ($PythonExe). Run install_python.ps1 first." }
 
 Push-Location $BackendDir
 try {
+    $migLog = Join-Path $LogDir 'migrate.log'
     Write-Log "Running database migrations (alembic upgrade head) ..."
-    & $VenvPython -m alembic upgrade head 2>&1 |
-        Tee-Object -FilePath (Join-Path $LogDir 'migrate.log') -Append
-    if ($LASTEXITCODE -ne 0) { throw "alembic upgrade failed ($LASTEXITCODE). See $LogDir\migrate.log." }
+    $code = Invoke-Logged -FilePath $PythonExe -LogFile $migLog -ArgumentList @('-m','alembic','upgrade','head')
+    if ($code -ne 0) { throw "alembic upgrade failed ($code). See $migLog." }
 
     Write-Log "Seeding initial data (seed.py) ..."
     $env:SEED_ADMIN_PASSWORD = $AdminPassword
     $env:SEED_SUPERADMIN_PASSWORD = $AdminPassword
     try {
-        & $VenvPython seed.py 2>&1 |
-            Tee-Object -FilePath (Join-Path $LogDir 'migrate.log') -Append
-        if ($LASTEXITCODE -ne 0) { throw "seed.py failed ($LASTEXITCODE). See $LogDir\migrate.log." }
+        $code = Invoke-Logged -FilePath $PythonExe -LogFile $migLog -ArgumentList @('seed.py')
+        if ($code -ne 0) { throw "seed.py failed ($code). See $migLog." }
     } finally {
         Remove-Item Env:\SEED_ADMIN_PASSWORD, Env:\SEED_SUPERADMIN_PASSWORD -ErrorAction SilentlyContinue
     }

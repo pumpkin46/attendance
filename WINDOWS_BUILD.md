@@ -38,7 +38,8 @@ Optional flags:
 
 1. **Inno Setup** — uses `iscc` if on PATH, else silent-installs it.
 2. **`fetch-prereqs.ps1`** — downloads + normalizes into `installer\prereqs\`:
-   - `python\python-<ver>-amd64.exe` (official installer)
+   - `python\python-<ver>-embed-amd64.zip` + `get-pip.py` (embeddable runtime —
+     extracted at install, no MSI, so it never conflicts with a system Python)
    - `postgresql\` — EDB "binaries only" zip, PostgreSQL 18 (flattened)
    - `nginx\` — nginx/Windows zip (flattened)
    - `redis\` — Memurai MSI (Redis-compatible Windows server, installed as a service)

@@ -92,6 +92,10 @@ Write-Host "Building wheelhouse from requirements.txt (this downloads/builds all
 # locally so the target needs only --no-index installs.
 & $python -m pip wheel -r (Join-Path $Backend 'requirements.txt') -w $WheelDir
 if ($LASTEXITCODE -ne 0) { throw "pip wheel failed - cannot assemble offline wheelhouse." }
+# pip itself (+ setuptools/wheel) so the embeddable Python can bootstrap pip
+# offline via get-pip.py --no-index --find-links wheelhouse.
+& $python -m pip download pip setuptools wheel -d $WheelDir
+if ($LASTEXITCODE -ne 0) { throw "pip download (pip/setuptools/wheel) failed." }
 $whlCount = (Get-ChildItem $WheelDir -Filter '*.whl').Count
 Write-Host "Wheelhouse contains $whlCount wheels."
 

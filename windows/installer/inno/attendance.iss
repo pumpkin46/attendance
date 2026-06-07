@@ -55,8 +55,8 @@ Source: "..\..\..\backend\*"; DestDir: "{app}\backend"; Flags: recursesubdirs cr
 ; -- Frontend (prebuilt static bundle) --
 Source: "..\..\..\frontend\dist\*"; DestDir: "{app}\frontend\dist"; Flags: recursesubdirs createallsubdirs ignoreversion
 
-; -- Bundled Python installer (run silently at first install) --
-Source: "..\prereqs\python\python-*-amd64.exe"; DestDir: "{app}\pyinstaller"; Flags: ignoreversion
+; -- Bundled Python (embeddable zip + get-pip; extracted at first install) --
+Source: "..\prereqs\python\*"; DestDir: "{app}\pyembed"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 ; -- Portable PostgreSQL binaries --
 Source: "..\prereqs\postgresql\*"; DestDir: "{app}\pgsql"; Flags: recursesubdirs createallsubdirs ignoreversion

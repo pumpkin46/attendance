@@ -4,6 +4,8 @@
 param([switch]$PurgeData)
 
 . "$PSScriptRoot\common.ps1"
+# Uninstall is best-effort: never let a service tool's stderr abort cleanup.
+$ErrorActionPreference = 'Continue'
 
 Write-Log "=== Uninstall cleanup starting (PurgeData=$PurgeData) ==="
 
@@ -14,9 +16,9 @@ foreach ($name in @('AttendanceLauncher', 'nginx')) {
         Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
     }
 }
-# uvicorn runs as python.exe - only stop ones launched from our venv.
+# uvicorn / celery run as python.exe - only stop ones from our bundled Python.
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($VenvDir, [StringComparison]::OrdinalIgnoreCase) } |
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($PyHome, [StringComparison]::OrdinalIgnoreCase) } |
     ForEach-Object {
         Write-Log "Stopping backend python (PID $($_.ProcessId))"
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue

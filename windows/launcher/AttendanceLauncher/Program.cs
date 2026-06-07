@@ -57,7 +57,8 @@ internal sealed class TrayApp : ApplicationContext
     {
         _appDir = AppContext.BaseDirectory.TrimEnd('\\');
         _backendDir = Path.Combine(_appDir, "backend");
-        _venvPython = Path.Combine(_backendDir, ".venv", "Scripts", "python.exe");
+        // Bundled embeddable Python (packages live in its Lib\site-packages).
+        _venvPython = Path.Combine(_appDir, "python", "python.exe");
         _nginxDir = Path.Combine(_appDir, "nginx");
         _nginxExe = Path.Combine(_nginxDir, "nginx.exe");
         _insightfaceHome = Path.Combine(_appDir, "models", "insightface");

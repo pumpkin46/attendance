@@ -9,10 +9,10 @@ $ErrorActionPreference = 'Stop'
 # -- Paths --------------------------------------------------------------------
 $AppDir      = Split-Path $PSScriptRoot -Parent              # <AppDir>
 $BackendDir  = Join-Path $AppDir 'backend'
-$VenvDir     = Join-Path $BackendDir '.venv'
-$VenvPython  = Join-Path $VenvDir 'Scripts\python.exe'
-$VenvScripts = Join-Path $VenvDir 'Scripts'
-$PythonExe   = Join-Path $AppDir 'python\python.exe'
+# Bundled embeddable Python; dependencies are installed directly into its
+# Lib\site-packages (no virtualenv).
+$PyHome      = Join-Path $AppDir 'python'
+$PythonExe   = Join-Path $PyHome 'python.exe'
 $WheelDir    = Join-Path $AppDir 'wheelhouse'
 $PgBin       = Join-Path $AppDir 'pgsql\bin'
 $RedisDir    = Join-Path $AppDir 'redis'
@@ -48,6 +48,30 @@ function Write-Log {
     $line  = "[$stamp] [$Level] $Message"
     Write-Host $line
     Add-Content -Path (Join-Path $LogDir 'install.log') -Value $line -Encoding utf8
+}
+
+# Run a native executable, append ALL its output (stdout + stderr) to a log, and
+# return its real exit code. The script-wide 'Stop' preference would otherwise
+# turn any line a tool writes to stderr (e.g. pip's "not on PATH" warning, or a
+# "new pip available" notice) into a terminating error even on success - so we
+# relax it for the duration of the call and judge success by the exit code only.
+function Invoke-Logged {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [Parameter(Mandatory = $true)][string]$LogFile
+    )
+    Initialize-Logging
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        # Tee writes stdout+stderr to the log; Out-Null keeps the tool's output
+        # from leaking into this function's return value (only the exit code).
+        & $FilePath @ArgumentList 2>&1 | Tee-Object -FilePath $LogFile -Append | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
 }
 
 function Save-State {

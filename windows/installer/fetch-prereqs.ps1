@@ -57,12 +57,18 @@ function Flatten-SingleRoot($dir) {
     }
 }
 
-# -- Python installer ---------------------------------------------------------
-Write-Host "[1/5] Python $PythonVersion installer"
+# -- Python (embeddable zip + get-pip) ----------------------------------------
+# Use the embeddable distribution, not the .exe installer: it is just extracted
+# (no MSI, no product registration) so it never conflicts with a Python already
+# installed on the target (the installer fails with 1638 in that case), and it
+# bundles the full stdlib so the app never depends on a system Python.
+Write-Host "[1/6] Python $PythonVersion (embeddable) + get-pip"
 $pyDir = Join-Path $PrereqDir 'python'
 New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
-Download "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe" `
-         (Join-Path $pyDir "python-$PythonVersion-amd64.exe")
+Get-ChildItem -Path $pyDir -Filter 'python-*-amd64.exe' -ErrorAction SilentlyContinue | Remove-Item -Force  # drop old MSI installer
+Download "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip" `
+         (Join-Path $pyDir "python-$PythonVersion-embed-amd64.zip")
+Download "https://bootstrap.pypa.io/get-pip.py" (Join-Path $pyDir 'get-pip.py')
 
 # -- PostgreSQL (binaries-only zip) -------------------------------------------
 Write-Host "[2/6] PostgreSQL binaries"

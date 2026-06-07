@@ -55,8 +55,8 @@ try {
         $d = if ($sub) { Join-Path $AppDataDir $sub } else { $AppDataDir }
         if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
     }
-    & icacls.exe $AppDataDir /grant "*S-1-5-32-545:(OI)(CI)M" /T /Q 2>&1 |
-        Tee-Object -FilePath (Join-Path $LogDir 'install.log') -Append | Out-Null
+    $null = Invoke-Logged -FilePath 'icacls.exe' -LogFile (Join-Path $LogDir 'install.log') -ArgumentList @(
+        $AppDataDir, '/grant', '*S-1-5-32-545:(OI)(CI)M', '/T', '/Q')
 
     Write-Log "=== Bootstrap completed successfully ==="
     exit 0

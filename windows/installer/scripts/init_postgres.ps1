@@ -22,9 +22,9 @@ if (-not (Test-Path (Join-Path $PgData 'PG_VERSION'))) {
     $pwfile = Join-Path $env:TEMP ("pgpw_" + [guid]::NewGuid().ToString('N') + '.txt')
     try {
         Set-Content -Path $pwfile -Value $DbPassword -NoNewline -Encoding ascii
-        & $initdb -D $PgData -U $DbUser --pwfile=$pwfile -E UTF8 -A scram-sha-256 --locale=C 2>&1 |
-            Tee-Object -FilePath (Join-Path $LogDir 'postgres-init.log') -Append
-        if ($LASTEXITCODE -ne 0) { throw "initdb failed ($LASTEXITCODE)." }
+        $code = Invoke-Logged -FilePath $initdb -LogFile (Join-Path $LogDir 'postgres-init.log') -ArgumentList @(
+            '-D',$PgData,'-U',$DbUser,"--pwfile=$pwfile",'-E','UTF8','-A','scram-sha-256','--locale=C')
+        if ($code -ne 0) { throw "initdb failed ($code)." }
     } finally {
         Remove-Item $pwfile -Force -ErrorAction SilentlyContinue
     }
@@ -40,9 +40,9 @@ if (-not (Test-Path (Join-Path $PgData 'PG_VERSION'))) {
 $svc = Get-Service -Name $PgServiceName -ErrorAction SilentlyContinue
 if (-not $svc) {
     Write-Log "Registering Windows service '$PgServiceName' ..."
-    & $pgctl register -N $PgServiceName -D $PgData -S auto -w 2>&1 |
-        Tee-Object -FilePath (Join-Path $LogDir 'postgres-init.log') -Append
-    if ($LASTEXITCODE -ne 0) { throw "pg_ctl register failed ($LASTEXITCODE)." }
+    $code = Invoke-Logged -FilePath $pgctl -LogFile (Join-Path $LogDir 'postgres-init.log') -ArgumentList @(
+        'register','-N',$PgServiceName,'-D',$PgData,'-S','auto','-w')
+    if ($code -ne 0) { throw "pg_ctl register failed ($code)." }
 }
 
 Write-Log "Starting PostgreSQL service ..."
