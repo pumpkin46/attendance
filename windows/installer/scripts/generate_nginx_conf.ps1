@@ -13,15 +13,17 @@ $root      = To-Nginx $FrontendDir
 $mime      = To-Nginx (Join-Path $confDir 'mime.types')
 $errLog    = To-Nginx (Join-Path $LogDir 'nginx-error.log')
 $accLog    = To-Nginx (Join-Path $LogDir 'nginx-access.log')
-$pid       = To-Nginx (Join-Path $DataRoot 'nginx.pid')
-$tmp       = To-Nginx (Join-Path $DataRoot 'nginx-temp')
+# pid + temp live under the user-writable appdata dir so a non-elevated tray
+# launcher can run nginx. (NOT $pid - $PID is a read-only automatic variable.)
+$pidPath   = To-Nginx (Join-Path $AppDataDir 'nginx.pid')
+$tmp       = To-Nginx (Join-Path $AppDataDir 'nginx-temp')
 
 Initialize-Logging
 
 $conf = @"
 worker_processes  1;
 error_log  "$errLog"  warn;
-pid        "$pid";
+pid        "$pidPath";
 
 events { worker_connections 1024; }
 

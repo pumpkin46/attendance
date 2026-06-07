@@ -49,14 +49,17 @@ try {
     Write-Log "Wrote first-login credentials to $credFile"
 
     # Writable runtime data lives under ProgramData (FAISS index, uploads,
-    # snapshots, the Celery beat schedule). Create it and grant the Users group
-    # modify rights so the non-elevated tray launcher can write there.
-    foreach ($sub in @('', 'uploads', 'snapshots\unknown')) {
+    # snapshots, the Celery beat schedule, nginx pid/temp, runtime logs). Create
+    # the dirs and grant the Users group modify rights so the (possibly
+    # non-elevated) tray launcher can write there.
+    foreach ($sub in @('', 'uploads', 'snapshots\unknown', 'nginx-temp')) {
         $d = if ($sub) { Join-Path $AppDataDir $sub } else { $AppDataDir }
         if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
     }
-    $null = Invoke-Logged -FilePath 'icacls.exe' -LogFile (Join-Path $LogDir 'install.log') -ArgumentList @(
-        $AppDataDir, '/grant', '*S-1-5-32-545:(OI)(CI)M', '/T', '/Q')
+    foreach ($grantDir in @($AppDataDir, $LogDir)) {
+        $null = Invoke-Logged -FilePath 'icacls.exe' -LogFile (Join-Path $LogDir 'install.log') -ArgumentList @(
+            $grantDir, '/grant', '*S-1-5-32-545:(OI)(CI)M', '/T', '/Q')
+    }
 
     Write-Log "=== Bootstrap completed successfully ==="
     exit 0

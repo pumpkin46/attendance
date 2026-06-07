@@ -9,7 +9,7 @@ dependencies, and the face-recognition models are included.
 - Windows 10/11 or Windows Server 2019+ (**64-bit**)
 - Administrator rights (to install into Program Files and register the database service)
 - ~3 GB free disk space
-- Free TCP ports: **8080** (web UI), **8000** (local API), **5432** (PostgreSQL), **6379** (Redis)
+- Free TCP ports: **8080** (web UI), **8000** (local API), **15432** (PostgreSQL — non-default to avoid clashes), **6379** (Redis)
 
 ## Install
 
@@ -83,7 +83,7 @@ database**:
 
 - **UI won't open / "can't reach this page"** — give it a minute after first
   launch (models load on first use). Check **View logs → uvicorn.log**.
-- **Port already in use** — another app is using 8080/8000/5432/6379. Stop it, or ask
+- **Port already in use** — another app is using 8080/8000/15432/6379. Stop it, or ask
   your administrator to change the ports (the values live in
   `…\AttendancePlatform\scripts\common.ps1`, the launcher, and the generated
   `nginx\conf\nginx.conf`).

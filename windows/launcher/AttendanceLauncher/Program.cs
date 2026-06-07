@@ -1,23 +1,18 @@
 using System.Diagnostics;
-using System.Net.Http;
+using System.Net.Sockets;
 
 namespace AttendanceLauncher;
 
 /// <summary>
-/// System-tray launcher for the Attendance Platform. Ensures the PostgreSQL
-/// service is running, starts/stops the uvicorn backend and nginx front, and
-/// opens the browser UI. The installed layout is:
-///   &lt;AppDir&gt;\AttendanceLauncher.exe   (this exe)
-///   &lt;AppDir&gt;\backend\.venv\Scripts\python.exe
-///   &lt;AppDir&gt;\nginx\nginx.exe
-///   &lt;AppDir&gt;\models\insightface       (INSIGHTFACE_HOME)
+/// System-tray launcher for the Attendance Platform. Starts/stops the PostgreSQL
+/// and Redis (Memurai) services, the uvicorn API, the Celery worker + beat, and
+/// nginx; shows a live status of each service; and opens the browser UI.
 /// </summary>
 internal static class Program
 {
     [STAThread]
     private static void Main()
     {
-        // Single instance: if already running, just exit.
         using var mutex = new Mutex(true, "AttendancePlatformLauncher", out bool isNew);
         if (!isNew) return;
 
@@ -30,35 +25,47 @@ internal sealed class TrayApp : ApplicationContext
 {
     private const string PgService = "AttendancePostgres";
     private const string RedisService = "Memurai";
-    private const int ApiPort = 8000;
+    // Must match common.ps1. uvicorn + Postgres use non-default ports to avoid
+    // colliding with other services the machine may already run.
+    private const int ApiPort = 18000;
     private const int NginxPort = 8080;
+    private const int PgPort = 15432;
+    private const int RedisPort = 6379;
     private static readonly string UiUrl = $"http://localhost:{NginxPort}";
-    private static readonly string HealthUrl = $"http://127.0.0.1:{ApiPort}/up";
 
     private readonly string _appDir;
     private readonly string _backendDir;
-    private readonly string _venvPython;
+    private readonly string _pythonExe;
     private readonly string _nginxDir;
     private readonly string _nginxExe;
     private readonly string _insightfaceHome;
     private readonly string _logDir;
 
     private readonly NotifyIcon _tray;
-    private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _startItem;
     private readonly ToolStripMenuItem _stopItem;
-    private readonly System.Windows.Forms.Timer _healthTimer;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(2) };
+    private readonly System.Windows.Forms.Timer _statusTimer;
 
-    private readonly List<Process> _managed = new();
-    private bool _backendUp;
+    private readonly Dictionary<string, Process> _procs = new();
+    private readonly List<Service> _services = new();
+    private readonly Image _dotUp;
+    private readonly Image _dotDown;
+    private readonly Icon _icon;
+
+    private sealed class Service
+    {
+        public required string Name;
+        public required ToolStripMenuItem Item;
+        public required Func<bool> Probe;
+        public string? LogFile;
+        public bool Up;
+    }
 
     public TrayApp()
     {
         _appDir = AppContext.BaseDirectory.TrimEnd('\\');
         _backendDir = Path.Combine(_appDir, "backend");
-        // Bundled embeddable Python (packages live in its Lib\site-packages).
-        _venvPython = Path.Combine(_appDir, "python", "python.exe");
+        _pythonExe = Path.Combine(_appDir, "python", "python.exe");
         _nginxDir = Path.Combine(_appDir, "nginx");
         _nginxExe = Path.Combine(_nginxDir, "nginx.exe");
         _insightfaceHome = Path.Combine(_appDir, "models", "insightface");
@@ -67,13 +74,29 @@ internal sealed class TrayApp : ApplicationContext
             "AttendancePlatform", "logs");
         Directory.CreateDirectory(_logDir);
 
-        var menu = new ContextMenuStrip();
-        _statusItem = new ToolStripMenuItem("Starting…") { Enabled = false };
+        _dotUp = MakeDot(Color.FromArgb(34, 197, 94));    // green
+        _dotDown = MakeDot(Color.FromArgb(148, 163, 184)); // slate-gray
+        _icon = LoadIcon();
+
+        var menu = new ContextMenuStrip { ShowImageMargin = true };
+
+        var header = new ToolStripMenuItem("Attendance Platform") { Enabled = false };
+        header.Font = new Font(header.Font, FontStyle.Bold);
+        menu.Items.Add(header);
+        menu.Items.Add(new ToolStripSeparator());
+
+        // Live service rows (click a row to open that service's log).
+        AddService(menu, "Database (PostgreSQL)", () => TcpUp(PgPort), "postgres-init.log");
+        AddService(menu, "Cache (Redis / Memurai)", () => TcpUp(RedisPort), null);
+        AddService(menu, "API server", () => TcpUp(ApiPort), "uvicorn.log");
+        AddService(menu, "Background worker (Celery)", () => ProcUp("celery-worker"), "celery-worker.log");
+        AddService(menu, "Scheduler (Celery beat)", () => ProcUp("celery-beat"), "celery-beat.log");
+        AddService(menu, "Web server (nginx)", () => TcpUp(NginxPort), "nginx-error.log");
+
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("Open UI", null, (_, _) => OpenUi()) { Font = new Font(menu.Font, FontStyle.Bold) });
         _startItem = new ToolStripMenuItem("Start", null, (_, _) => StartAll());
         _stopItem = new ToolStripMenuItem("Stop", null, (_, _) => StopAll());
-        menu.Items.Add(_statusItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Open UI", null, (_, _) => OpenUi()));
         menu.Items.Add(_startItem);
         menu.Items.Add(_stopItem);
         menu.Items.Add(new ToolStripMenuItem("View logs", null, (_, _) => OpenLogs()));
@@ -82,18 +105,27 @@ internal sealed class TrayApp : ApplicationContext
 
         _tray = new NotifyIcon
         {
-            Icon = LoadIcon(),
+            Icon = _icon,
             Text = "Attendance Platform",
             Visible = true,
             ContextMenuStrip = menu,
         };
         _tray.DoubleClick += (_, _) => OpenUi();
 
-        _healthTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-        _healthTimer.Tick += async (_, _) => await PollHealthAsync();
-        _healthTimer.Start();
+        _statusTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+        _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        _statusTimer.Start();
 
         StartAll();
+    }
+
+    private void AddService(ContextMenuStrip menu, string name, Func<bool> probe, string? logFile)
+    {
+        var item = new ToolStripMenuItem(name) { Image = _dotDown };
+        if (logFile != null) item.Click += (_, _) => OpenLogFile(logFile);
+        var svc = new Service { Name = name, Item = item, Probe = probe, LogFile = logFile };
+        _services.Add(svc);
+        menu.Items.Add(item);
     }
 
     private Icon LoadIcon()
@@ -103,22 +135,32 @@ internal sealed class TrayApp : ApplicationContext
         return SystemIcons.Application;
     }
 
+    private static Image MakeDot(Color color)
+    {
+        var bmp = new Bitmap(12, 12);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var b = new SolidBrush(color);
+        g.FillEllipse(b, 1, 1, 9, 9);
+        using var pen = new Pen(Color.FromArgb(60, 0, 0, 0));
+        g.DrawEllipse(pen, 1, 1, 9, 9);
+        return bmp;
+    }
+
     // ── Lifecycle ────────────────────────────────────────────────────────────
     private void StartAll()
     {
         try
         {
-            EnsurePostgres();
-            EnsureRedis();
+            EnsureService(PgService);
+            EnsureService(RedisService);
             StartBackend();
             StartNginx();
-            SetStatus("Running");
         }
         catch (Exception ex)
         {
             Log("launcher", $"StartAll failed: {ex}");
             _tray.ShowBalloonTip(5000, "Attendance Platform", "Failed to start: " + ex.Message, ToolTipIcon.Error);
-            SetStatus("Error");
         }
     }
 
@@ -126,27 +168,28 @@ internal sealed class TrayApp : ApplicationContext
     {
         StopNginx();
         StopBackend();
-        // PostgreSQL stays running as a Windows service.
-        SetStatus("Stopped");
+        // Also stop the PostgreSQL + Redis Windows services so "Stop" means
+        // everything is off (needs admin rights to stop a service).
+        StopService(RedisService);
+        StopService(PgService);
     }
 
-    private void EnsurePostgres() => RunQuiet("sc.exe", $"start {PgService}");
+    private static void EnsureService(string name) => RunQuiet("sc.exe", $"start {name}");
 
-    private void EnsureRedis() => RunQuiet("sc.exe", $"start {RedisService}");
+    private static void StopService(string name) => RunQuiet("sc.exe", $"stop {name}");
 
     private void StartBackend()
     {
-        if (_managed.Any(p => !p.HasExited)) return;
-        if (!File.Exists(_venvPython))
-            throw new FileNotFoundException("Backend python not found", _venvPython);
+        if (_procs.Values.Any(p => !p.HasExited)) return;
+        if (!File.Exists(_pythonExe))
+            throw new FileNotFoundException("Backend python not found", _pythonExe);
 
         var beatSchedule = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "AttendancePlatform", "appdata", "celerybeat-schedule");
 
         // uvicorn API + Celery worker (solo pool: prefork is unsupported on
-        // Windows) + Celery beat (periodic jobs). All import the app package, so
-        // they run from the backend dir where .env lives.
+        // Windows) + Celery beat. All import the app package from the backend dir.
         StartPyProcess("uvicorn", $"-m uvicorn main:app --host 127.0.0.1 --port {ApiPort}");
         StartPyProcess("celery-worker", "-m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo");
         StartPyProcess("celery-beat", $"-m celery -A app.celery_app.celery_app beat --loglevel=info --schedule \"{beatSchedule}\"");
@@ -156,7 +199,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         var psi = new ProcessStartInfo
         {
-            FileName = _venvPython,
+            FileName = _pythonExe,
             Arguments = args,
             WorkingDirectory = _backendDir,
             UseShellExecute = false,
@@ -164,7 +207,6 @@ internal sealed class TrayApp : ApplicationContext
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        // InsightFace resolves models under %INSIGHTFACE_HOME%\models\buffalo_l.
         psi.Environment["INSIGHTFACE_HOME"] = _insightfaceHome;
 
         var log = Path.Combine(_logDir, label + ".log");
@@ -176,25 +218,24 @@ internal sealed class TrayApp : ApplicationContext
         proc.Start();
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
-        _managed.Add(proc);
+        _procs[label] = proc;
         Log("launcher", label + " started");
     }
 
     private void StopBackend()
     {
-        foreach (var p in _managed)
+        foreach (var p in _procs.Values)
         {
             try { if (!p.HasExited) { p.Kill(entireProcessTree: true); p.WaitForExit(5000); } }
             catch (Exception ex) { Log("launcher", "StopBackend: " + ex.Message); }
         }
-        _managed.Clear();
+        _procs.Clear();
     }
 
     private void StartNginx()
     {
         if (!File.Exists(_nginxExe)) throw new FileNotFoundException("nginx not found", _nginxExe);
-        // Avoid stacking masters: stop any prior instance first.
-        StopNginx();
+        StopNginx(); // avoid stacking masters
         var psi = new ProcessStartInfo
         {
             FileName = _nginxExe,
@@ -211,50 +252,70 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (!File.Exists(_nginxExe)) return;
         RunQuiet(_nginxExe, $"-p \"{_nginxDir}\" -c conf\\nginx.conf -s stop", _nginxDir);
-        // Fallback: kill any stragglers.
         foreach (var p in Process.GetProcessesByName("nginx"))
         {
             try { p.Kill(); } catch { /* ignore */ }
         }
     }
 
+    // ── Status ───────────────────────────────────────────────────────────────
+    private async Task RefreshStatusAsync()
+    {
+        // Probe off the UI thread (TCP connects can block briefly), then update UI.
+        var states = await Task.Run(() => _services.Select(s => s.Probe()).ToArray());
+
+        int up = 0;
+        for (int i = 0; i < _services.Count; i++)
+        {
+            var s = _services[i];
+            s.Up = states[i];
+            if (s.Up) up++;
+            s.Item.Image = s.Up ? _dotUp : _dotDown;
+            s.Item.Text = $"{s.Name}{(s.Up ? "" : "  —  stopped")}";
+        }
+
+        bool allUp = up == _services.Count;
+        _tray.Text = Truncate($"Attendance Platform — {up}/{_services.Count} services up", 63);
+        _startItem.Enabled = !allUp;
+        _stopItem.Enabled = up > 0;
+    }
+
+    private static bool TcpUp(int port)
+    {
+        try
+        {
+            using var c = new TcpClient();
+            var ar = c.BeginConnect("127.0.0.1", port, null, null);
+            if (!ar.AsyncWaitHandle.WaitOne(350)) return false;
+            c.EndConnect(ar);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private bool ProcUp(string label) => _procs.TryGetValue(label, out var p) && !p.HasExited;
+
     // ── UI helpers ─────────────────────────────────────────────────────────
     private void OpenUi() => Process.Start(new ProcessStartInfo(UiUrl) { UseShellExecute = true });
 
     private void OpenLogs() => Process.Start(new ProcessStartInfo(_logDir) { UseShellExecute = true });
 
+    private void OpenLogFile(string fileName)
+    {
+        var path = Path.Combine(_logDir, fileName);
+        var target = File.Exists(path) ? path : _logDir;
+        Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+    }
+
     private void Quit()
     {
-        _healthTimer.Stop();
+        _statusTimer.Stop();
         StopAll();
         _tray.Visible = false;
         ExitThread();
     }
 
-    private void SetStatus(string s)
-    {
-        _statusItem.Text = $"Status: {s}";
-        _tray.Text = $"Attendance Platform — {s}";
-    }
-
-    private async Task PollHealthAsync()
-    {
-        bool up;
-        try
-        {
-            using var resp = await _http.GetAsync(HealthUrl);
-            up = resp.IsSuccessStatusCode;
-        }
-        catch { up = false; }
-
-        if (up != _backendUp)
-        {
-            _backendUp = up;
-            SetStatus(up ? "Running" : "Starting…");
-            _startItem.Enabled = !up;
-            _stopItem.Enabled = up;
-        }
-    }
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s.Substring(0, max);
 
     // ── Process utilities ────────────────────────────────────────────────────
     private static void RunQuiet(string file, string args, string? cwd = null)

@@ -40,9 +40,9 @@ function New-IconBitmap([int]$S) {
     $path.AddArc(0, $S - $d, $d, $d, 90, 90)
     $path.CloseFigure()
 
-    $c1 = [System.Drawing.Color]::FromArgb(255, 0x96, 0x4B, 0xFF)   # bright violet
-    $c2 = [System.Drawing.Color]::FromArgb(255, 0x53, 0x16, 0xC9)   # deep indigo
-    $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $c1, $c2, 55.0)
+    $c1 = [System.Drawing.Color]::FromArgb(255, 0x7C, 0x5C, 0xFF)   # soft violet
+    $c2 = [System.Drawing.Color]::FromArgb(255, 0x41, 0x1A, 0xBE)   # deep indigo
+    $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $c1, $c2, 60.0)
     $g.FillPath($brush, $path)
 
     # soft top highlight
@@ -58,11 +58,11 @@ function New-IconBitmap([int]$S) {
 
     # ---- face-recognition corner brackets ----
     if ($S -ge 32) {
-        $pen = New-Object System.Drawing.Pen($white, [single]([Math]::Max(2, 13*$f)))
+        $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(235,255,255,255), [single]([Math]::Max(2, 11*$f)))
         $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
         $pen.EndCap   = [System.Drawing.Drawing2D.LineCap]::Round
-        $m = 46 * $f          # margin
-        $len = 46 * $f        # arm length
+        $m = 44 * $f          # margin
+        $len = 42 * $f        # arm length
         $lo = $m; $hi2 = $S - $m
         # TL
         $g.DrawLine($pen, $lo, $lo+$len, $lo, $lo); $g.DrawLine($pen, $lo, $lo, $lo+$len, $lo)
@@ -92,9 +92,9 @@ function New-IconBitmap([int]$S) {
     # ---- green "checked-in" badge, bottom-right ----
     if ($S -ge 24) {
         $bR = 42 * $f
-        $bcx = 190 * $f; $bcy = 190 * $f
-        $ring = New-Object System.Drawing.SolidBrush($c2)   # indigo separator ring
-        $g.FillEllipse($ring, $bcx-$bR-5*$f, $bcy-$bR-5*$f, ($bR+5*$f)*2, ($bR+5*$f)*2)
+        $bcx = 192 * $f; $bcy = 192 * $f
+        $ring = New-Object System.Drawing.SolidBrush($white)   # white separator ring for pop
+        $g.FillEllipse($ring, $bcx-$bR-7*$f, $bcy-$bR-7*$f, ($bR+7*$f)*2, ($bR+7*$f)*2)
         $green = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,0x22,0xC5,0x5E))
         $g.FillEllipse($green, $bcx-$bR, $bcy-$bR, $bR*2, $bR*2)
         $cp = New-Object System.Drawing.Pen($white, [single]([Math]::Max(2, 12*$f)))

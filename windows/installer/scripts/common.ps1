@@ -31,10 +31,13 @@ $PgServiceName    = 'AttendancePostgres'
 $RedisServiceName = 'Memurai'           # service name created by the Memurai MSI
 $DbName           = 'attendance'
 $DbUser           = 'postgres'
-$PgPort           = 5432
-$RedisPort        = 6379
-$ApiPort          = 8000
-$NginxPort        = 8080
+# Non-default internal ports so the bundled services don't collide with things
+# the machine already runs on common defaults (Postgres 5432, uvicorn 8000).
+# uvicorn is internal (nginx proxies to it); the browser only uses $NginxPort.
+$PgPort           = 15432
+$RedisPort        = 6379          # Memurai default; bound cleanly on the target
+$ApiPort          = 18000         # uvicorn (loopback only, behind nginx)
+$NginxPort        = 8080          # the web UI the user opens
 
 # -- Logging ------------------------------------------------------------------
 function Initialize-Logging {
