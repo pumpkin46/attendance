@@ -12,7 +12,7 @@ type KioskStatus = 'idle' | 'scanning' | 'face_detected' | 'recognized' | 'unkno
 const DETECT_MS = 400
 const IDENTIFY_MS = 1500
 const FRAME_BUFFER_MS = 300
-const MAX_LIVENESS_FRAMES = 20
+const MAX_LIVENESS_FRAMES = 12
 
 const statusBarStyles: Record<KioskStatus, string> = {
   idle: 'bg-slate-700 text-slate-300',

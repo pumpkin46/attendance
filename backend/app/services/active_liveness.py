@@ -31,13 +31,14 @@ class ActiveLivenessResult:
 
 
 def _extract_metrics(image_b64: str) -> FrameMetrics | None:
-    from app.services.face_service import _decode_image, _get_face_app
+    from app.services.face_service import _decode_image, _get_detection_app
 
     img = _decode_image(image_b64)
     if img is None:
         return None
 
-    app = _get_face_app()
+    # Detection-only: we just need the 5 keypoints per frame, not embeddings.
+    app = _get_detection_app()
     if app is None:
         return FrameMetrics(eye_variance=100.0, yaw_proxy=0.0, pitch_proxy=0.0, det_score=0.9, face_count=1)
 

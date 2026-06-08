@@ -138,7 +138,10 @@ def recognize(
     track_info = assign_track(session_id, bbox)
     pipeline.append(_stage("face_tracking", t2, track_info))
 
-    # 4. Face quality check
+    # 4. Face quality check — advisory by default (see recognition_require_quality).
+    # The score is recorded for telemetry, but a soft/dim frame still proceeds to
+    # matching so genuine faces are recognized rather than rejected as "blurry".
+    # Enrollment keeps its own strict validation independently.
     t3 = time.perf_counter()
     quality = validate_face_image(img, faces)
     pipeline.append(
@@ -149,10 +152,11 @@ def recognize(
                 "accepted": quality["accepted"],
                 "quality_score": quality.get("quality_score"),
                 "reason": quality.get("reason"),
+                "enforced": settings.recognition_require_quality,
             },
         )
     )
-    if not quality["accepted"]:
+    if settings.recognition_require_quality and not quality["accepted"]:
         total = int((time.perf_counter() - wall_start) * 1000)
         return _fail(
             pipeline,

@@ -183,6 +183,12 @@ class Settings(BaseSettings):
     # Same-person similarity is typically ~0.4–0.7, so 0.95 rejects real matches
     # as "unknown". 0.5 is a balanced default; tune via RECOGNITION_THRESHOLD.
     recognition_threshold: float = 0.5
+    # When False (default), the live recognition pipeline treats face-quality
+    # checks (blur/brightness/occlusion/resolution) as advisory — it records the
+    # score but still attempts to match, so soft/dim webcam frames are recognized
+    # instead of rejected as "blurry". Enrollment keeps its own strict validation
+    # regardless. Set True to make recognition reject low-quality frames again.
+    recognition_require_quality: bool = False
     recognition_sla_ms: int = 300
     liveness_sla_ms: int = 500
     target_accuracy: float = 0.99
@@ -215,7 +221,11 @@ class Settings(BaseSettings):
     # Active liveness
     active_liveness_enabled: bool = True
     active_liveness_min_frames: int = 5
-    active_liveness_max_frames: int = 24
+    # Upper bound on frames analyzed per liveness check. Each frame runs a face
+    # detection on CPU, so this is the main cost of a kiosk identify with active
+    # liveness — keep it modest. 12 frames (~3.6s window at the kiosk's sampling)
+    # is enough to catch a blink while keeping latency low.
+    active_liveness_max_frames: int = 12
     active_liveness_require_blink: bool = True
     active_liveness_require_head_movement: bool = False
     active_liveness_require_frames: bool = False

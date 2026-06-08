@@ -39,6 +39,12 @@ function buildWsTarget(): { url: string; protocols: string[] } | null {
   return { url: `${wsBase}/ws${query}`, protocols: ['bearer', token] }
 }
 
+// A running kiosk can emit "unknown face" events many times a second, which would
+// otherwise bury the user in duplicate toasts over a long session. Throttle the
+// toast (cache invalidation below still runs for every event).
+let lastUnknownToastAt = 0
+const UNKNOWN_TOAST_THROTTLE_MS = 15_000
+
 /** Translate a server event into TanStack Query cache updates (and user-facing toasts). */
 function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
   const { type } = msg
@@ -54,8 +60,12 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
     invalidate(['monitoring'])
     invalidate(['security-monitoring'])
     if (type === 'recognition.unknown') {
-      const message = (msg.data?.message as string) ?? 'Unknown face detected'
-      toast.warning(message)
+      const now = Date.now()
+      if (now - lastUnknownToastAt >= UNKNOWN_TOAST_THROTTLE_MS) {
+        lastUnknownToastAt = now
+        const message = (msg.data?.message as string) ?? 'Unknown face detected'
+        toast.warning(message)
+      }
     }
     return
   }

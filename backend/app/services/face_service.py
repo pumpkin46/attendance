@@ -39,6 +39,38 @@ def _get_face_app():
         return None
 
 
+_detection_app = None
+
+
+def _get_detection_app():
+    """Detection-only FaceAnalysis (bbox + 5 keypoints, no recognition embedding).
+
+    Active liveness needs only landmarks per frame, so loading just the detector
+    avoids running the expensive 512-d recognition model on every buffered frame —
+    the dominant cost when a kiosk submits a multi-frame liveness sequence. Falls
+    back to the full app, then to mock mode, if the slim load is unsupported.
+    """
+    global _detection_app
+    if _detection_app is not None:
+        return _detection_app
+
+    try:
+        from insightface.app import FaceAnalysis
+
+        app = FaceAnalysis(
+            name="buffalo_l",
+            providers=["CPUExecutionProvider"],
+            allowed_modules=["detection"],
+        )
+        # Smaller detector input: liveness only needs rough keypoints from a close
+        # kiosk face, and 320×320 detection is several times faster than 640×640.
+        app.prepare(ctx_id=0, det_size=(320, 320))
+        _detection_app = app
+        return _detection_app
+    except Exception:
+        return _get_face_app()
+
+
 def _decode_image(image_b64: str) -> np.ndarray | None:
     try:
         if "," in image_b64:
