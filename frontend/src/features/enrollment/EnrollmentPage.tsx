@@ -8,7 +8,7 @@ import { PageHeader } from '@/shared/ui/PageHeader'
 import { Select } from '@/shared/ui/Input'
 import { cn } from '@/shared/lib/cn'
 import { useEnrollFace, useEnrollableEmployees, useEnrollmentConfig, useValidateImage } from '@/features/enrollment/api/queries'
-import { REASON_LABELS, type PoseCapture } from '@/features/enrollment/types'
+import { reasonLabel, type PoseCapture } from '@/features/enrollment/types'
 
 export default function EnrollmentPage() {
   const { data: employeesPage } = useEnrollableEmployees()
@@ -72,7 +72,11 @@ export default function EnrollmentPage() {
 
   const captureFromCamera = async () => {
     if (!currentPose) return
-    const frame = captureFrame(640)
+    // Capture at native resolution and high JPEG fidelity. Enrollment requires
+    // at least 640×480 (a downscaled 640-wide 16:9 frame is only 640×360 and is
+    // rejected as low_resolution), and aggressive JPEG compression strips the
+    // high-frequency detail the blur check measures, causing false "blurry".
+    const frame = captureFrame(1920, 0.95)
     if (frame) await validateAndSetPose(currentPose, frame)
   }
 
@@ -127,7 +131,7 @@ export default function EnrollmentPage() {
         ?.response?.data
       if (body?.rejected?.length) {
         setMessage(
-          body.rejected.map((r) => `${r.pose_type}: ${REASON_LABELS[r.reason] ?? r.reason}`).join('; ')
+          body.rejected.map((r) => `${r.pose_type}: ${reasonLabel(r.reason)}`).join('; ')
         )
       } else {
         setMessage(body?.error ?? 'Enrollment failed')
@@ -265,7 +269,7 @@ export default function EnrollmentPage() {
                   </>
                 ) : (
                   <span className="text-red-400">
-                    {REASON_LABELS[poses[currentPose].reason ?? ''] ?? poses[currentPose].reason}
+                    {reasonLabel(poses[currentPose].reason)}
                   </span>
                 )}
                 <button

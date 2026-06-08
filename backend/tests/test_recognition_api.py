@@ -111,3 +111,28 @@ def test_unknown_identify_records_unknown_event(client, fake_session, monkeypatc
     assert events[0].result == "unknown"
     assert events[0].employee_id is None
     assert events[0].organization_id == 1  # tenant from the caller context
+
+
+def test_identify_with_unevaluated_liveness(client, fake_session, monkeypatch):
+    """liveness_passed=None (liveness not evaluated) serializes without error."""
+    async def fake_process_recognition(**kwargs):
+        return None
+
+    monkeypatch.setattr(
+        attendance_service, "process_recognition", fake_process_recognition
+    )
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": "7",
+            "confidence": 0.97,
+            "liveness_passed": None,
+            "processing_ms": 120,
+        },
+    )
+
+    resp = client.post("/api/v1/recognition/identify", json={"image": "x"})
+    assert resp.status_code == 200
+    assert resp.json()["liveness_passed"] is None

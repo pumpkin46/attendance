@@ -70,6 +70,21 @@ def test_list_streams(client):
     assert "streams" in data
 
 
+def test_list_streams_with_registered_stream(client):
+    """A registered stream serializes without error (keys are stringified)."""
+    from app.engine.stream_manager import get_stream_manager
+
+    manager = get_stream_manager()
+    manager.add_stream(42, "rtsp://example/stream")
+    try:
+        response = client.get("/api/v1/engine/streams")
+        assert response.status_code == 200
+        data = response.json()
+        assert "42" in data["streams"]
+    finally:
+        manager.remove_stream(42)
+
+
 def test_get_tracking_stats(client):
     response = client.get("/api/v1/engine/tracking/stats")
     assert response.status_code == 200

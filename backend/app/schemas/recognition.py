@@ -109,7 +109,7 @@ class IdentifyResponse(BaseModel):
     success: bool = True
     employee_id: str | None = None
     confidence: float = 0.0
-    liveness_passed: bool = False
+    liveness_passed: bool | None = None
     processing_ms: int = 0
     liveness_score: float | None = None
     face_count: int | None = None

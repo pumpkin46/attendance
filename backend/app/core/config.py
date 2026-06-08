@@ -220,7 +220,11 @@ class Settings(BaseSettings):
     enrollment_min_images: int = 10
     enrollment_max_images: int = 50
     quality_min_det_score: float = 0.5
-    quality_min_blur_score: float = 0.35
+    # Laplacian-variance sharpness floor (normalized against quality_blur_variance_ref).
+    # 0.25 ⇒ variance ≥ 30, realistic for laptop webcams in indoor light; genuinely
+    # blurry/motion-smeared frames score far lower. The composite quality_min_overall_score
+    # gate (blur weighted 25%) backstops this so a soft-but-otherwise-poor image still fails.
+    quality_min_blur_score: float = 0.25
     quality_min_brightness_score: float = 0.35
     quality_min_occlusion_score: float = 0.4
     quality_min_resolution_score: float = 0.5

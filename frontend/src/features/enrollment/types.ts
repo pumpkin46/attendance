@@ -72,3 +72,29 @@ export const REASON_LABELS: Record<string, string> = {
   wrong_pose: 'Pose does not match instruction',
   validation_error: 'Validation failed',
 }
+
+const POSE_HINTS: Record<string, string> = {
+  front: 'face the camera straight on',
+  left: 'turn your head left',
+  right: 'turn your head right',
+  up: 'tilt your head up slightly',
+  down: 'tilt your head down slightly',
+  smiling: 'smile',
+  neutral: 'keep a neutral expression',
+}
+
+/**
+ * Resolves a backend rejection reason to a friendly message. Handles the
+ * dynamic `wrong_pose_expected_<pose>_got_<pose>` strings that have no fixed
+ * label by turning them into an actionable hint.
+ */
+export function reasonLabel(reason?: string): string {
+  if (!reason) return 'Image rejected'
+  if (REASON_LABELS[reason]) return REASON_LABELS[reason]
+  const m = /^wrong_pose_expected_([a-z_]+?)_got_/.exec(reason)
+  if (m) {
+    const hint = POSE_HINTS[m[1]]
+    return hint ? `Pose doesn't match — please ${hint}` : 'Pose does not match instruction'
+  }
+  return reason.replace(/_/g, ' ')
+}

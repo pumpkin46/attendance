@@ -288,7 +288,7 @@ class StreamManager:
             "total_streams": self.total_streams,
             "active_streams": self.active_streams,
             "streams": {
-                cam_id: self.get_stream_status(cam_id)
+                str(cam_id): self.get_stream_status(cam_id)
                 for cam_id in self._streams
             },
         }
