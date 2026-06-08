@@ -31,6 +31,17 @@ export interface EnrollFaceResult {
   average_quality_score?: number
 }
 
+export interface SimpleEnrollResult {
+  success: boolean
+  employee_id?: string | number
+  error?: string
+  embeddings_stored?: number
+  average_quality_score?: number
+  accepted_count?: number
+  rejected_count?: number
+  rejected?: { index: number; reason: string }[]
+}
+
 export interface LivenessResult {
   passed: boolean
   score: number

@@ -105,9 +105,26 @@ class EnrollResponse(BaseModel):
     spoof_type: str | None = None
 
 
+class EmployeeBrief(BaseModel):
+    id: int
+    employee_code: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+class AttendanceAction(BaseModel):
+    action: str
+    employee_id: int | None = None
+
+
 class IdentifyResponse(BaseModel):
     success: bool = True
     employee_id: str | None = None
+    # Whether an enrolled identity was matched above threshold. The kiosk and the
+    # recognition test page key off this (and `employee`/`attendance`) to decide
+    # recognized vs. unknown — without it every result reads as "unknown".
+    matched: bool = False
+    reason: str | None = None
     confidence: float = 0.0
     liveness_passed: bool | None = None
     processing_ms: int = 0
@@ -116,6 +133,8 @@ class IdentifyResponse(BaseModel):
     liveness_reason: str | None = None
     liveness_checks: dict[str, Any] | None = None
     spoof_type: str | None = None
+    employee: EmployeeBrief | None = None
+    attendance: AttendanceAction | None = None
 
 
 class FaceBox(BaseModel):

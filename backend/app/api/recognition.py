@@ -71,8 +71,13 @@ async def identify_face(
         session_id=body.session_id,
         source=body.source,
     )
-    await recognition_service.record_identification(db, result, org_id)
-    return IdentifyResponse(**result)
+    outcome = await recognition_service.record_identification(db, result, org_id)
+    return IdentifyResponse(
+        **result,
+        matched=outcome.get("matched", False),
+        employee=outcome.get("employee"),
+        attendance=outcome.get("attendance"),
+    )
 
 
 @router.post(

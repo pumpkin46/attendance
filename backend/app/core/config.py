@@ -117,7 +117,9 @@ class Settings(BaseSettings):
     attendance_max_work_minutes: int = 600
     attendance_break_minutes: int = 60
     attendance_half_day_minutes: int = 240
-    attendance_min_confidence: float = 0.95
+    # Cosine-similarity floor; see recognition_threshold. 0.95 rejects genuine
+    # ArcFace matches, so attendance/access from real faces would never register.
+    attendance_min_confidence: float = 0.5
     attendance_overtime_threshold_minutes: int = 480
     face_duplicate_window_seconds: int = 60
     rfid_duplicate_window_seconds: int = 60
@@ -177,7 +179,10 @@ class Settings(BaseSettings):
     ldap_enabled: bool = False
 
     # ── AI Recognition (existing settings) ────────────────────────────────
-    recognition_threshold: float = 0.95
+    # Cosine-similarity match floor over L2-normalized ArcFace embeddings.
+    # Same-person similarity is typically ~0.4–0.7, so 0.95 rejects real matches
+    # as "unknown". 0.5 is a balanced default; tune via RECOGNITION_THRESHOLD.
+    recognition_threshold: float = 0.5
     recognition_sla_ms: int = 300
     liveness_sla_ms: int = 500
     target_accuracy: float = 0.99

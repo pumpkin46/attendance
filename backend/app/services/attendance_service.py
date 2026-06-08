@@ -263,6 +263,8 @@ async def process_recognition(
     # Suppress duplicates using persisted state (authoritative across workers)
     # plus the in-process fast path.
     if fast_dup or _recent_action_within(record, window, now):
+        # Transient (non-persisted) marker so callers can report what happened.
+        record.last_action = "duplicate_ignored"
         return record
 
     if not record.check_in_at:
@@ -272,6 +274,7 @@ async def process_recognition(
         record.shift_id = shift.id if shift else record.shift_id
         record.status = _resolve_status(now, shift, policy)
         record.attendance_type = record.status
+        action = "check_in"
     elif not record.check_out_at:
         record.check_out_at = now
         record.check_out_method = method
@@ -280,9 +283,13 @@ async def process_recognition(
         record.overtime_minutes = overtime
         record.status = _resolve_checkout_status(worked, policy, record.status)
         record.attendance_type = record.status
+        action = "check_out"
+    else:
+        action = "already_complete"
 
     await db.flush()
     await db.refresh(record)
+    record.last_action = action
     return record
 
 

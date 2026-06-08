@@ -19,6 +19,7 @@ const routeLoaders: Record<string, () => Promise<unknown>> = {
   '/visitors': () => import('@/features/visitors/VisitorsPage'),
   '/employees': () => import('@/features/employees/EmployeesPage'),
   '/enrollment': () => import('@/features/enrollment/EnrollmentPage'),
+  '/enrollment-simple': () => import('@/features/enrollment/SimpleEnrollmentPage'),
   '/live-kiosk': () => import('@/features/kiosk/LiveKioskPage'),
   '/liveness-test': () => import('@/features/recognition/LivenessTestPage'),
   '/recognition-test': () => import('@/features/recognition/RecognitionTestPage'),

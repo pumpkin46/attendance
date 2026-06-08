@@ -90,6 +90,54 @@ def test_matched_identify_records_matched_event(client, fake_session, monkeypatc
     assert float(events[0].confidence) == pytest.approx(0.97)
 
 
+def test_matched_identify_response_contract(client, monkeypatch):
+    """The kiosk/test UI key off matched + employee + attendance; a regression
+    here makes every recognition read as "unknown" in the UI.
+    """
+    async def fake_process_recognition(**kwargs):
+        return SimpleNamespace(last_action="check_in")
+
+    monkeypatch.setattr(
+        attendance_service, "process_recognition", fake_process_recognition
+    )
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": "7",
+            "confidence": 0.62,
+            "liveness_passed": True,
+            "processing_ms": 120,
+        },
+    )
+
+    body = client.post("/api/v1/recognition/identify", json={"image": "x"}).json()
+    assert body["matched"] is True
+    assert body["employee"]["id"] == 7
+    assert body["attendance"]["action"] == "check_in"
+
+
+def test_unknown_identify_response_contract(client, monkeypatch):
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": None,
+            "confidence": 0.2,
+            "reason": "low_confidence",
+            "liveness_passed": True,
+            "processing_ms": 80,
+        },
+    )
+
+    body = client.post("/api/v1/recognition/identify", json={"image": "x"}).json()
+    assert body["matched"] is False
+    assert body["employee"] is None
+    assert body["reason"] == "low_confidence"
+
+
 def test_unknown_identify_records_unknown_event(client, fake_session, monkeypatch):
     monkeypatch.setattr(
         face_service,

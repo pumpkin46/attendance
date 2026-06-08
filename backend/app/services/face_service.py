@@ -359,6 +359,62 @@ def enroll_batch(employee_id: str, images_b64: list[str]) -> dict:
     }
 
 
+def enroll_simple(employee_id: str, images_b64: list[str]) -> dict:
+    """Lenient face registration for the quick "register by camera" flow.
+
+    Stores one embedding per image that contains exactly one detectable face.
+    Unlike enroll_batch / enroll_structured, this applies NO blur, resolution,
+    pose, or quality-score gating — only face presence — so ordinary webcam
+    shots register without fighting the strict guided pipeline. Accepts one or
+    more images; succeeds as long as at least one usable face is captured.
+    """
+    start = time.perf_counter()
+    if not images_b64:
+        return {"success": False, "error": "No images provided"}
+
+    accepted: list[dict] = []
+    rejected: list[dict] = []
+    embeddings: list[np.ndarray] = []
+
+    for i, image_b64 in enumerate(images_b64):
+        _, embedding, det_score, face_count, _, _ = _analyze_image(
+            image_b64, f"{employee_id}-{i}"
+        )
+        if embedding is None or face_count == 0:
+            rejected.append({"index": i, "reason": "no_face"})
+            continue
+        if face_count > 1:
+            rejected.append({"index": i, "reason": "multiple_faces"})
+            continue
+        embeddings.append(embedding)
+        accepted.append({"index": i, "quality_score": round(float(det_score), 4)})
+
+    if not embeddings:
+        return {
+            "success": False,
+            "error": "No face detected — make sure one face is clearly visible.",
+            "accepted_count": 0,
+            "rejected_count": len(rejected),
+            "rejected": rejected,
+            "processing_ms": int((time.perf_counter() - start) * 1000),
+        }
+
+    faiss_ids = get_index().add_batch(employee_id, embeddings)
+    avg_quality = sum(a["quality_score"] for a in accepted) / len(accepted)
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "embeddings_stored": len(faiss_ids),
+        "faiss_ids": [str(i) for i in faiss_ids],
+        "average_quality_score": round(avg_quality, 4),
+        "accepted": accepted,
+        "accepted_count": len(accepted),
+        "rejected_count": len(rejected),
+        "rejected": rejected,
+        "processing_ms": int((time.perf_counter() - start) * 1000),
+    }
+
+
 def enroll(employee_id: str, image_b64: str) -> dict:
     start = time.perf_counter()
     img, embedding, det_score, face_count, insightface_ok, bbox = _analyze_image(

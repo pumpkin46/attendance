@@ -61,6 +61,12 @@ class SingleEnrollRequest(BaseModel):
     image: str = Field(..., description="Base64-encoded image")
 
 
+class SimpleEnrollRequest(BaseModel):
+    images: list[str] = Field(
+        ..., min_length=1, description="One or more base64-encoded images"
+    )
+
+
 class BatchEnrollRequest(BaseModel):
     images: list[str] = Field(..., min_length=1, description="Base64-encoded images")
     enrollment_method: str = "image_upload"
@@ -254,6 +260,49 @@ async def enroll_face_single(
         entity_id=emp.id,
         ip_address=request.client.host if request.client else None,
         new_values={"method": "single", "faiss_id": result.get("faiss_id")},
+    )
+
+    return result
+
+
+@router.post("/employees/{employee_id}/enroll-face-simple", response_model=EnrollResultResponse)
+async def enroll_face_simple(
+    employee_id: int,
+    body: SimpleEnrollRequest,
+    request: Request,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: require_permission("employees.manage"),
+):
+    """Simple face registration — store an embedding for each captured image that
+    has a single clear face, without pose/blur/quality gating. Backs the quick
+    "register by camera" page; the guided structured flow is left untouched.
+    """
+    from app.services import face_service
+
+    emp = await _get_employee_or_404(db, employee_id, org_id)
+    result = await run_in_threadpool(face_service.enroll_simple, str(emp.id), body.images)
+
+    if not result.get("success"):
+        return result
+
+    embeddings_info = [
+        {"faiss_id": fid, "quality_score": result.get("average_quality_score")}
+        for fid in (result.get("faiss_ids") or [])
+    ]
+    await _save_enrollment(db, emp, result, embeddings_info=embeddings_info)
+
+    await log_action(
+        db,
+        user_id=user.id,
+        action="face.enrolled_simple",
+        entity_type="employee",
+        entity_id=emp.id,
+        ip_address=request.client.host if request.client else None,
+        new_values={
+            "method": "simple",
+            "embeddings_stored": result.get("embeddings_stored"),
+        },
     )
 
     return result

@@ -22,8 +22,13 @@ from app.services import attendance_service
 from app.services.live_event_service import create_live_event
 
 
-async def record_identification(db: AsyncSession, result: dict, org_id: int | None) -> None:
-    """Persist attendance/recognition events + realtime for an identify result."""
+async def record_identification(db: AsyncSession, result: dict, org_id: int | None) -> dict:
+    """Persist attendance/recognition events + realtime for an identify result.
+
+    Returns a small outcome dict (`matched`, `employee`, `attendance`, `reason`)
+    so the API can tell the kiosk/test UI whether an identity was recognized and
+    what attendance action (check-in/out/duplicate) it produced.
+    """
     if result.get("success") and result.get("employee_id"):
         emp_id_str = str(result["employee_id"])
         if emp_id_str.startswith("visitor-"):
@@ -38,14 +43,14 @@ async def record_identification(db: AsyncSession, result: dict, org_id: int | No
                     visitor_id=visitor.id,
                     payload={"confidence": result.get("confidence")},
                 )
-            return
+            return {"matched": True, "employee": None, "attendance": None}
 
         employee_id = int(emp_id_str)
         confidence = result.get("confidence", 0.0)
         liveness_passed = bool(result.get("liveness_passed", False))
         processing_ms = result.get("processing_ms", 0)
 
-        await attendance_service.process_recognition(
+        record = await attendance_service.process_recognition(
             db=db,
             employee_id=employee_id,
             confidence=confidence,
@@ -53,6 +58,7 @@ async def record_identification(db: AsyncSession, result: dict, org_id: int | No
             processing_ms=processing_ms,
             organization_id=org_id,
         )
+        action = getattr(record, "last_action", None)
 
         # Log the successful match so it appears in metrics, the events list,
         # and exports (previously only "unknown" events were recorded).
@@ -80,7 +86,21 @@ async def record_identification(db: AsyncSession, result: dict, org_id: int | No
                 employee_id=employee.id,
                 payload={"confidence": confidence, "liveness_passed": liveness_passed},
             )
-        return
+
+        employee_brief = (
+            {
+                "id": employee.id,
+                "employee_code": getattr(employee, "employee_code", None),
+                "first_name": getattr(employee, "first_name", None),
+                "last_name": getattr(employee, "last_name", None),
+            }
+            if employee is not None
+            else None
+        )
+        attendance = (
+            {"action": action, "employee_id": employee_id} if action else None
+        )
+        return {"matched": True, "employee": employee_brief, "attendance": attendance}
 
     db.add(
         RecognitionEvent(
@@ -101,6 +121,7 @@ async def record_identification(db: AsyncSession, result: dict, org_id: int | No
         message="Unknown face detected",
         payload={"confidence": result.get("confidence")},
     )
+    return {"matched": False, "employee": None, "attendance": None, "reason": result.get("reason")}
 
 
 async def _count(db: AsyncSession, stmt: Select) -> int:

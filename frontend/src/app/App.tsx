@@ -12,6 +12,7 @@ const AccessControlPage = lazy(() => import('@/features/access/AccessControlPage
 const VisitorsPage = lazy(() => import('@/features/visitors/VisitorsPage'))
 const EmployeesPage = lazy(() => import('@/features/employees/EmployeesPage'))
 const EnrollmentPage = lazy(() => import('@/features/enrollment/EnrollmentPage'))
+const SimpleEnrollmentPage = lazy(() => import('@/features/enrollment/SimpleEnrollmentPage'))
 const LiveKioskPage = lazy(() => import('@/features/kiosk/LiveKioskPage'))
 const RecognitionTestPage = lazy(() => import('@/features/recognition/RecognitionTestPage'))
 const LivenessTestPage = lazy(() => import('@/features/recognition/LivenessTestPage'))
@@ -59,6 +60,7 @@ export default function App() {
                 <Route path="visitors" element={<VisitorsPage />} />
                 <Route path="employees" element={<EmployeesPage />} />
                 <Route path="enrollment" element={<EnrollmentPage />} />
+                <Route path="enrollment-simple" element={<SimpleEnrollmentPage />} />
                 <Route path="live-kiosk" element={<LiveKioskPage />} />
                 <Route path="liveness-test" element={<LivenessTestPage />} />
                 <Route path="recognition-test" element={<RecognitionTestPage />} />

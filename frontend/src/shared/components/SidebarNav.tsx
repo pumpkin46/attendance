@@ -77,6 +77,7 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/employees', label: 'Employees' },
       { to: '/enrollment', label: 'Face Enrollment' },
+      { to: '/enrollment-simple', label: 'Quick Face Register' },
     ],
   },
   {

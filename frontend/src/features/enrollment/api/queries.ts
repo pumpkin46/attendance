@@ -8,6 +8,7 @@ import type {
   EnrollmentConfig,
   HealthInfo,
   LivenessResult,
+  SimpleEnrollResult,
   ValidateImageResult,
 } from '@/features/enrollment/types'
 
@@ -74,6 +75,29 @@ export function useEnrollFace() {
     meta: { silent: true },
     onSuccess: () => {
       toast.success('Enrollment completed')
+      invalidate()
+    },
+  })
+}
+
+/**
+ * Simple face registration — stores embeddings for one or more camera shots
+ * with only a face-presence check (no pose/blur/quality gating). Backs the
+ * quick-register page; the guided structured flow uses {@link useEnrollFace}.
+ */
+export function useSimpleEnroll() {
+  const invalidate = useInvalidateEnrollment()
+  return useMutation({
+    mutationFn: async ({ employeeId, images }: { employeeId: string; images: string[] }) => {
+      const { data } = await api.post<SimpleEnrollResult>(
+        `/employees/${employeeId}/enroll-face-simple`,
+        { images }
+      )
+      return data
+    },
+    meta: { silent: true },
+    onSuccess: () => {
+      toast.success('Face registered')
       invalidate()
     },
   })

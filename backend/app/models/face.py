@@ -46,6 +46,7 @@ class FaceEmbedding(Base, TimestampMixin):
     face_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     version: Mapped[int] = mapped_column(SmallInteger, server_default="1")
     is_primary: Mapped[bool] = mapped_column(Boolean, server_default="1")
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default="1")
 
     employee: Mapped["Employee"] = relationship(back_populates="face_embeddings", lazy="selectin")
     enrollment_session: Mapped[FaceEnrollmentSession | None] = relationship(

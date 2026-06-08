@@ -24,6 +24,19 @@ const statusBarStyles: Record<KioskStatus, string> = {
   duplicate: 'bg-amber-600/90 text-white',
 }
 
+// Actionable hints for the kiosk "unknown" state. Without a specific reason it
+// means no enrolled face matched; quality reasons mean the frame was rejected
+// before matching even ran.
+const UNKNOWN_HINTS: Record<string, string> = {
+  default: 'No matching enrolled face. Register them under Quick Face Register.',
+  blurry: 'Image too blurry — hold still and improve focus/lighting.',
+  too_dark: 'Too dark — add more light on the face.',
+  low_quality: 'Image quality too low — move closer with even lighting.',
+  occluded_face: 'Face partly hidden — remove obstructions and face the camera.',
+  low_detection_score: 'Face not clear enough — move closer to the camera.',
+  no_face: 'No face detected — center your face in the frame.',
+}
+
 const SPOOF_REASONS = new Set([
   'spoof_detected',
   'liveness_failed',
@@ -165,7 +178,10 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
 
     const runIdentify = async () => {
       if (inFlightIdentify.current || faceCountRef.current < 1) return
-      const frame = captureFrame(640)
+      // Capture at native resolution + high JPEG fidelity. A downscaled, heavily
+      // compressed frame loses the high-frequency detail the pipeline's blur gate
+      // measures, so genuine faces get rejected as "blurry" before matching.
+      const frame = captureFrame(1280, 0.92)
       if (!frame) return
       inFlightIdentify.current = true
       try {
@@ -371,9 +387,16 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           )}
 
           {!lastMatch?.matched && status === 'unknown' && (
-            <p className="mt-4 text-sm text-amber-400">
-              Face not enrolled. Add under Face Enrollment.
-            </p>
+            <div className="mt-4 text-sm text-amber-400">
+              <p>{UNKNOWN_HINTS[lastMatch?.reason ?? ''] ?? UNKNOWN_HINTS.default}</p>
+              {(lastMatch?.reason || lastMatch?.confidence != null) && (
+                <p className="mt-1 text-xs text-slate-500">
+                  {lastMatch?.reason ? `reason: ${lastMatch.reason}` : 'no match'}
+                  {lastMatch?.confidence != null &&
+                    ` · best match ${(lastMatch.confidence * 100).toFixed(1)}%`}
+                </p>
+              )}
+            </div>
           )}
         </Card>
       </div>
