@@ -1,7 +1,10 @@
+import { useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, getApiErrorMessage } from '@/shared/api/client'
 import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { useFallbackPoll } from '@/features/realtime/useFallbackPoll'
+import { getToken } from '@/shared/lib/session'
 import type { Paginated, RecognitionEvent } from '@/shared/types'
 import type {
   AddStreamInput,
@@ -27,17 +30,68 @@ export const engineKeys = {
 }
 
 export function useEngineStatus() {
+  // Live updates arrive via useEngineLiveFeed (WebSocket); HTTP polling is only a
+  // fallback for when the realtime socket is down.
+  const poll = useFallbackPoll(5000)
   return useApiQuery<EngineStatus>(engineKeys.status, '/engine/status', undefined, {
-    refetchInterval: 5000,
+    refetchInterval: poll,
     silent: true,
   })
 }
 
 export function useEngineStreams() {
+  const poll = useFallbackPoll(5000)
   return useApiQuery<StreamsResponse>(engineKeys.streams, '/engine/streams', undefined, {
-    refetchInterval: 5000,
+    refetchInterval: poll,
     silent: true,
   })
+}
+
+/**
+ * Live engine dashboard feed. Opens a WebSocket that pushes status + stream
+ * telemetry every ~2s and writes it straight into the query cache, so the AI
+ * Engine page updates live without background polling. Auto-reconnects on drop.
+ */
+export function useEngineLiveFeed() {
+  const qc = useQueryClient()
+  useEffect(() => {
+    const token = getToken()
+    if (!token) return
+
+    const apiBase = import.meta.env.VITE_API_URL ?? '/api/v1'
+    const httpBase = /^https?:\/\//.test(apiBase) ? apiBase : window.location.origin + apiBase
+    const wsUrl = `${httpBase.replace(/^http/, 'ws')}/engine/status/ws`
+
+    let cancelled = false
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+
+    const connect = () => {
+      if (cancelled) return
+      ws = new WebSocket(wsUrl, ['bearer', token])
+      ws.onmessage = (ev) => {
+        if (cancelled || typeof ev.data !== 'string') return
+        try {
+          const msg = JSON.parse(ev.data) as { status?: EngineStatus; streams?: StreamsResponse }
+          if (msg.status) qc.setQueryData(engineKeys.status, msg.status)
+          if (msg.streams) qc.setQueryData(engineKeys.streams, msg.streams)
+        } catch {
+          /* ignore malformed frame */
+        }
+      }
+      ws.onclose = () => {
+        if (!cancelled) reconnectTimer = setTimeout(connect, 1500)
+      }
+      ws.onerror = () => ws?.close()
+    }
+
+    connect()
+    return () => {
+      cancelled = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      ws?.close()
+    }
+  }, [qc])
 }
 
 export function useEngineConfig() {

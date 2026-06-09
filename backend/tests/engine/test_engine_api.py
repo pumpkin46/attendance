@@ -85,6 +85,81 @@ def test_list_streams_with_registered_stream(client):
         manager.remove_stream(42)
 
 
+def test_stream_snapshot_404_when_no_frame(client):
+    """A registered-but-not-running stream has no cached frame → 404."""
+    from app.engine.stream_manager import get_stream_manager
+
+    manager = get_stream_manager()
+    manager.add_stream(43, "0")
+    try:
+        response = client.get("/api/v1/engine/streams/43/snapshot")
+        assert response.status_code == 404
+    finally:
+        manager.remove_stream(43)
+
+
+def test_stream_snapshot_returns_jpeg_when_frame_cached(client):
+    """Once the stream loop has a frame, the snapshot is served as JPEG bytes."""
+    import numpy as np
+
+    from app.engine.stream_manager import get_stream_manager
+
+    manager = get_stream_manager()
+    stream = manager.add_stream(44, "0")
+    stream._last_frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    try:
+        response = client.get("/api/v1/engine/streams/44/snapshot")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/jpeg"
+        assert len(response.content) > 0
+    finally:
+        manager.remove_stream(44)
+
+
+def test_stream_ws_pushes_jpeg_frame(client, monkeypatch):
+    """The camera WebSocket pushes the latest frame as binary JPEG."""
+    import numpy as np
+
+    import app.api.ws as ws_mod
+    from app.engine.stream_manager import get_stream_manager
+
+    async def fake_identity(_token, _org):
+        return (1, 1)
+
+    monkeypatch.setattr(ws_mod, "_origin_allowed", lambda _origin: True)
+    monkeypatch.setattr(ws_mod, "_resolve_identity", fake_identity)
+
+    manager = get_stream_manager()
+    stream = manager.add_stream(45, "0")
+    stream._last_frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    try:
+        with client.websocket_connect(
+            "/api/v1/engine/streams/45/ws", subprotocols=["bearer", "tok"]
+        ) as ws:
+            data = ws.receive_bytes()
+            assert len(data) > 0  # a JPEG frame
+    finally:
+        manager.remove_stream(45)
+
+
+def test_engine_status_ws_pushes_status(client, monkeypatch):
+    """The engine status WebSocket pushes a status + streams payload."""
+    import app.api.ws as ws_mod
+
+    async def fake_identity(_token, _org):
+        return (1, 1)
+
+    monkeypatch.setattr(ws_mod, "_origin_allowed", lambda _origin: True)
+    monkeypatch.setattr(ws_mod, "_resolve_identity", fake_identity)
+
+    with client.websocket_connect(
+        "/api/v1/engine/status/ws", subprotocols=["bearer", "tok"]
+    ) as ws:
+        msg = ws.receive_json()
+        assert "status" in msg
+        assert "streams" in msg
+
+
 def test_get_tracking_stats(client):
     response = client.get("/api/v1/engine/tracking/stats")
     assert response.status_code == 200

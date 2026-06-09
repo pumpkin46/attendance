@@ -4,12 +4,17 @@ import { Card } from '@/shared/ui/Card'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { useFallbackPoll } from '@/features/realtime/useFallbackPoll'
-import { useMonitoringDashboard, useMonitoringLiveFeed } from '@/features/monitoring/api/queries'
+import {
+  useMonitoringDashboard,
+  useMonitoringFeed,
+  useMonitoringLiveFeed,
+} from '@/features/monitoring/api/queries'
 
 export default function MonitoringPage() {
-  // Live via WebSocket ('recognition.*', 'access.*', 'cameras.changed',
-  // 'visitors.changed'); resynced on reconnect. Only poll as a fallback when the
-  // socket is down — while it's healthy, events keep this screen fresh.
+  // Live counters stream over a WebSocket (pushed every ~3s) and write straight
+  // into the query cache. Realtime events still resync on reconnect, and HTTP
+  // polling stays as a fallback only while the socket is down.
+  useMonitoringFeed()
   const poll = useFallbackPoll(60_000)
   const { data: dashboard } = useMonitoringDashboard(poll)
   const { data: liveFeed } = useMonitoringLiveFeed(poll)

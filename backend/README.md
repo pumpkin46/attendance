@@ -22,8 +22,26 @@ python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate 
 pip install -r requirements.txt
 alembic upgrade head
 python seed.py
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+### Running
+
+```powershell
+.\run.ps1          # stable — no file watching (use this for the kiosk / long runs)
+.\run.ps1 -Dev     # auto-reload backend code while editing
+```
+
+Or directly:
+
+```bash
+uvicorn main:app --host 127.0.0.1 --port 8000             # stable
+```
+
+> **Avoid a bare `uvicorn --reload` for the kiosk.** `--reload` watches the whole
+> folder including `data/`, and the recognition engine writes `data/faiss.index`
+> on every enrollment — so normal use reload-drops the port and the frontend logs
+> `ECONNREFUSED 127.0.0.1:8000` (and `ws proxy error`). `run.ps1 -Dev` excludes
+> `data/` from the watcher; plain `run.ps1` watches nothing.
 
 Health: `GET http://127.0.0.1:8000/health` · API health: `GET /api/v1/health`
 

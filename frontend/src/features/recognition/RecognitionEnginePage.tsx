@@ -10,6 +10,7 @@ import {
   useAddStream,
   useControlStream,
   useEngineConfig,
+  useEngineLiveFeed,
   useEngineStatus,
   useEngineStreams,
   useInvalidateEngine,
@@ -19,6 +20,7 @@ import {
   useToggleEngine,
 } from '@/features/recognition/api/queries'
 import type { EngineAlert, EngineConfigDict } from '@/features/recognition/types'
+import WebcamMonitor from '@/features/recognition/WebcamMonitor'
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
@@ -45,6 +47,7 @@ function SlaIndicator({ name, target, actual, met }: { name: string; target: num
 }
 
 export default function RecognitionEnginePage() {
+  useEngineLiveFeed() // live status + streams over WebSocket (replaces 5s polling)
   const { data: status, isPending: loading, error: queryError } = useEngineStatus()
   const toggleEngine = useToggleEngine()
   const { data: streamsData } = useEngineStreams()
@@ -120,6 +123,9 @@ export default function RecognitionEnginePage() {
         <StatCard label="Quality Rejected" value={metrics?.total_quality_rejected ?? 0} />
         <StatCard label="Attendance Events" value={status?.attendance?.total_events_generated ?? 0} />
       </div>
+
+      {/* Local webcam monitor */}
+      <WebcamMonitor />
 
       {/* Pipeline & Streams */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -270,11 +276,15 @@ export default function RecognitionEnginePage() {
             />
           </Label>
           <Label className="sm:col-span-2">
-            Stream URL
+            {streamForm.protocol === 'usb' ? 'Device index' : 'Stream URL'}
             <Input
               value={streamForm.stream_url}
               onChange={(e) => setStreamForm({ ...streamForm, stream_url: e.target.value })}
-              placeholder="rtsp://user:pass@host:554/stream"
+              placeholder={
+                streamForm.protocol === 'usb'
+                  ? '0  (first USB camera on the server, 1 = next…)'
+                  : 'rtsp://user:pass@host:554/stream'
+              }
               required
             />
           </Label>
@@ -287,6 +297,7 @@ export default function RecognitionEnginePage() {
               <option value="rtsp">RTSP</option>
               <option value="http">HTTP</option>
               <option value="webrtc">WebRTC</option>
+              <option value="usb">USB / Webcam</option>
             </Select>
           </Label>
           <div className="sm:col-span-4">

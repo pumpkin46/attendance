@@ -52,12 +52,13 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
 
   if (type === 'connected') return
 
-  // Recognition + access incidents feed notifications, the recognition views, the
-  // live monitoring center, and the security-monitoring dashboard.
+  // Recognition + access incidents feed notifications, the recognition views, and
+  // the security-monitoring dashboard. The monitoring page is intentionally NOT
+  // invalidated here — it streams live via its own WebSocket (useMonitoringFeed),
+  // so event-driven refetching would just duplicate that push.
   if (type.startsWith('recognition.') || type === 'notification.created') {
     invalidate(['notifications'])
     invalidate(['recognition'])
-    invalidate(['monitoring'])
     invalidate(['security-monitoring'])
     if (type === 'recognition.unknown') {
       const now = Date.now()
@@ -72,7 +73,6 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
 
   if (type.startsWith('access.')) {
     invalidate(['notifications'])
-    invalidate(['monitoring'])
     invalidate(['security-monitoring'])
     return
   }
@@ -83,7 +83,6 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
   }
   if (type === 'cameras.changed') {
     invalidate(['cameras'])
-    invalidate(['monitoring'])
     return
   }
   if (type === 'engine.changed') {
@@ -92,7 +91,6 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
   }
   if (type === 'visitors.changed') {
     invalidate(['visitors'])
-    invalidate(['monitoring'])
     return
   }
   if (type === 'anomalies.changed') {

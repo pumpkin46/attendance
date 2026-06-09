@@ -118,6 +118,10 @@ class CameraStream:
     _capture: Any = field(default=None, repr=False)
     _task: Any = field(default=None, repr=False)
     _running: bool = False
+    # Most recent decoded frame, kept so the API can serve a live snapshot without
+    # opening the camera a second time (which would conflict with this loop —
+    # especially for USB devices that allow only one reader).
+    _last_frame: Any = field(default=None, repr=False)
 
 
 FrameCallback = Callable[[int, np.ndarray, float], Coroutine[Any, Any, None]]
@@ -221,6 +225,23 @@ class StreamManager:
             stream._capture = None
         stream.status = StreamStatus.OFFLINE
         return True
+
+    def snapshot_jpeg(self, camera_id: int, max_width: int = 960) -> bytes | None:
+        """JPEG-encode the most recent frame of a running stream (for live preview).
+
+        Returns None if the stream is unknown or hasn't produced a frame yet
+        (e.g. registered but not started). Never opens the device itself.
+        """
+        stream = self._streams.get(camera_id)
+        if stream is None or stream._last_frame is None:
+            return None
+        frame = stream._last_frame  # local ref; loop may reassign concurrently
+        h, w = frame.shape[:2]
+        if w > max_width:
+            scale = max_width / float(w)
+            frame = cv2.resize(frame, (max_width, max(1, int(h * scale))))
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return buf.tobytes() if ok else None
 
     def capture_frame(self, stream_url: str, warmup_frames: int = 5) -> dict:
         """Capture a single frame from a stream URL (for photo upload mode)."""
@@ -333,6 +354,7 @@ class StreamManager:
                 stream.health.last_frame_at = datetime.now(timezone.utc)
                 stream.health.resolution = (frame.shape[1], frame.shape[0])
                 stream.reconnect_attempts = 0
+                stream._last_frame = frame
 
                 if stream.health.started_at:
                     elapsed = (datetime.now(timezone.utc) - stream.health.started_at).total_seconds()

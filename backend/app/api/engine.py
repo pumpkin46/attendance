@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Response, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
@@ -261,6 +261,16 @@ async def get_stream_status(camera_id: int, user: CurrentUser):
     if not status_info:
         raise NotFoundError("Stream not found")
     return status_info
+
+
+@router.get("/streams/{camera_id}/snapshot")
+async def get_stream_snapshot(camera_id: int, user: CurrentUser):
+    """Latest frame of a running stream as a JPEG (live preview; poll to refresh)."""
+    manager = get_stream_manager()
+    jpeg = await run_in_threadpool(manager.snapshot_jpeg, camera_id)
+    if jpeg is None:
+        raise NotFoundError("No frame available — start the engine and this stream first")
+    return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 # ─── Engine Control ───────────────────────────────────────────────────────────
