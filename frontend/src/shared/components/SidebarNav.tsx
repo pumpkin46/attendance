@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { prefetchRoute } from '@/app/routes'
+import { ROUTE_PERMISSIONS } from '@/app/access'
+import { useAuth } from '@/features/auth/AuthProvider'
 import { cn } from '@/shared/lib/cn'
 
 type NavItem = { to: string; label: string; end?: boolean }
@@ -31,7 +33,7 @@ const navGroups: NavGroup[] = [
         </svg>
       </Icon>
     ),
-    items: [{ to: '/', label: 'Monitoring', end: true }],
+    items: [{ to: '/', label: 'Dashboard', end: true }],
   },
   {
     id: 'access',
@@ -187,7 +189,25 @@ function updateScrollThumb(el: HTMLElement): ScrollThumb {
 export default function SidebarNav() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const { hasPermission } = useAuth()
   const [query, setQuery] = useState('')
+
+  // Hide nav items the current user can't access (matches the route guards and
+  // the backend's per-endpoint permissions). Items with no required permission
+  // are always visible; groups left with no items are dropped.
+  const visibleGroups = useMemo(
+    () =>
+      navGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => {
+            const perm = ROUTE_PERMISSIONS[item.to]
+            return !perm || hasPermission(perm)
+          }),
+        }))
+        .filter((group) => group.items.length > 0),
+    [hasPermission]
+  )
   const scrollRef = useRef<HTMLElement>(null)
   const [scrollThumb, setScrollThumb] = useState<ScrollThumb>({
     height: 0,
@@ -196,14 +216,14 @@ export default function SidebarNav() {
   })
 
   const activeGroupId = useMemo(
-    () => navGroups.find((g) => groupHasActiveItem(pathname, g))?.id,
-    [pathname]
+    () => visibleGroups.find((g) => groupHasActiveItem(pathname, g))?.id,
+    [pathname, visibleGroups]
   )
 
   const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return navGroups
-    return navGroups
+    if (!q) return visibleGroups
+    return visibleGroups
       .map((group) => ({
         ...group,
         items: group.items.filter(
@@ -212,7 +232,7 @@ export default function SidebarNav() {
         ),
       }))
       .filter((group) => group.items.length > 0)
-  }, [query])
+  }, [query, visibleGroups])
 
   // Expansion is fully derived: a search expands every match, otherwise only the
   // group owning the active route is open (accordion). Navigating updates the
@@ -347,7 +367,7 @@ export default function SidebarNav() {
                                   cn(
                                     'mr-1 flex w-full items-center rounded-md py-1.5 pl-10 pr-3 text-[14px] transition-colors',
                                     linkActive
-                                      ? 'bg-blue-500/10 font-semibold text-blue-300'
+                                      ? 'font-semibold text-blue-300'
                                       : 'font-medium text-slate-500 hover:bg-slate-800/50 hover:text-slate-300'
                                   )
                                 }

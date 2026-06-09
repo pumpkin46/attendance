@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Popover } from '@/shared/ui/Popover'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
@@ -19,6 +20,12 @@ const BuildingIcon = (
     <path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M17 21V9h2a2 2 0 0 1 2 2v10M8 7h2M8 11h2M8 15h2" />
   </svg>
 )
+const AccountIcon = (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21c0-4 3.5-6 8-6s8 2 8 6" />
+  </svg>
+)
 
 export function UserMenu({
   user,
@@ -31,6 +38,7 @@ export function UserMenu({
 }) {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
+  const navigate = useNavigate()
   const orgName = user.organization?.name
 
   return (
@@ -86,17 +94,30 @@ export function UserMenu({
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(false)
-            onLogout()
-          }}
-          className="mt-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/10"
-        >
-          {LogoutIcon}
-          Sign out
-        </button>
+        <div className="mt-1 space-y-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              navigate('/profile')
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-800"
+          >
+            {AccountIcon}
+            My account
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onLogout()
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/10"
+          >
+            {LogoutIcon}
+            Sign out
+          </button>
+        </div>
       </Popover>
     </>
   )

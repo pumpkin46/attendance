@@ -41,6 +41,16 @@ _MAX_QUEUED_EVENTS = 100
 # Cap concurrent sockets per user to bound resource use from a single account.
 _MAX_CONNECTIONS_PER_USER = 8
 
+# The subscriber polls with an explicit read timeout rather than a blocking
+# ``listen()``. A blocking read inherits the client's short ``socket_timeout``
+# and raises on every idle window; a caller-supplied timeout instead returns
+# ``None`` on expiry, so idle is normal. On expiry we loop, which also lets
+# redis-py fire its periodic health-check PING to detect a dead connection.
+_SUBSCRIBE_POLL_TIMEOUT = 30.0
+
+# Backoff before reconnecting after the subscriber loses its Redis connection.
+_SUBSCRIBE_RETRY_DELAY = 2.0
+
 
 class Connection:
     """A single subscriber's mailbox."""
@@ -127,19 +137,30 @@ class RealtimeHub:
         redis = get_redis()
         if redis is None or self._sub_task is not None:
             return
-        try:
-            self._pubsub = redis.pubsub()
-            await self._pubsub.subscribe(_CHANNEL)
-        except RedisError:
-            logger.warning("Realtime subscriber could not connect; running local-only")
-            self._pubsub = None
-            return
         self._sub_task = asyncio.create_task(self._consume())
 
     async def _consume(self) -> None:
-        try:
-            async for message in self._pubsub.listen():
-                if message.get("type") != "message":
+        """Subscribe and fan events out locally, reconnecting across drops.
+
+        Polls with ``get_message(timeout=...)`` instead of a blocking
+        ``listen()``: a blocking read inherits the client's short
+        ``socket_timeout`` and would raise on every idle window, killing the
+        loop. Transient Redis errors (idle restart, brief outage) reconnect with
+        a backoff rather than tearing down realtime until the next app restart.
+        """
+        redis = get_redis()
+        if redis is None:
+            return
+        while True:
+            try:
+                if self._pubsub is None:
+                    self._pubsub = redis.pubsub()
+                    await self._pubsub.subscribe(_CHANNEL)
+                message = await self._pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=_SUBSCRIBE_POLL_TIMEOUT,
+                )
+                if message is None or message.get("type") != "message":
                     continue
                 raw = message.get("data")
                 if not isinstance(raw, str):
@@ -149,10 +170,25 @@ class RealtimeHub:
                 except (ValueError, TypeError):
                     continue
                 await self._deliver_local(org_id, raw)
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # pragma: no cover - defensive; keep the worker alive
-            logger.exception("Realtime subscriber loop crashed")
+            except asyncio.CancelledError:
+                raise
+            except RedisError:
+                logger.warning("Realtime subscriber lost Redis; reconnecting")
+                await self._reset_pubsub()
+                await asyncio.sleep(_SUBSCRIBE_RETRY_DELAY)
+            except Exception:  # pragma: no cover - defensive; keep the loop alive
+                logger.exception("Realtime subscriber loop error; reconnecting")
+                await self._reset_pubsub()
+                await asyncio.sleep(_SUBSCRIBE_RETRY_DELAY)
+
+    async def _reset_pubsub(self) -> None:
+        """Drop the current pub/sub so the next loop iteration reconnects fresh."""
+        if self._pubsub is not None:
+            try:
+                await self._pubsub.aclose()
+            except Exception:  # pragma: no cover - best-effort cleanup
+                pass
+            self._pubsub = None
 
     async def stop_subscriber(self) -> None:
         if self._sub_task is not None:
@@ -162,12 +198,7 @@ class RealtimeHub:
             except asyncio.CancelledError:
                 pass
             self._sub_task = None
-        if self._pubsub is not None:
-            try:
-                await self._pubsub.aclose()
-            except Exception:  # pragma: no cover
-                pass
-            self._pubsub = None
+        await self._reset_pubsub()
 
 
 _hub = RealtimeHub()

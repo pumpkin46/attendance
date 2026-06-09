@@ -11,6 +11,12 @@
   restart the server. Plain `--reload` watches everything, so every enrollment
   reload-drops the port and the frontend logs "ECONNREFUSED 127.0.0.1:8000".
 
+  The data dir is excluded by passing its ABSOLUTE path to --reload-exclude:
+  uvicorn treats a directory there as a recursive exclude (matched against each
+  changed file's parents), and a wildcard-free absolute path is not glob-expanded
+  by uvicorn's Click CLI on Windows (a "data/*" glob would expand to the dir's
+  contents and crash uvicorn with "unexpected extra arguments").
+
 .EXAMPLE
   .\run.ps1            # stable (recommended for kiosk / long runs)
 
@@ -29,7 +35,8 @@ if (-not (Test-Path $python)) { $python = "python" }  # fall back to PATH
 
 $uvicornArgs = @("-m", "uvicorn", "main:app", "--host", $BindHost, "--port", "$Port")
 if ($Dev) {
-  $uvicornArgs += @("--reload", "--reload-exclude", "data/*", "--reload-exclude", "*.index", "--reload-exclude", "*.json")
+  $dataDir = Join-Path $PSScriptRoot "data"
+  $uvicornArgs += @("--reload", "--reload-exclude", $dataDir)
   Write-Host "Starting backend (dev, auto-reload; data/ excluded) on ${BindHost}:${Port}" -ForegroundColor Cyan
 } else {
   Write-Host "Starting backend (stable, no reload) on ${BindHost}:${Port}" -ForegroundColor Cyan

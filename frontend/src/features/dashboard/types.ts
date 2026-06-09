@@ -1,24 +1,26 @@
-export interface TodaySummary {
-  date: string
-  present: number
-  absent: number
-  late: number
-  on_leave: number
-}
+import type { Camera } from '@/shared/types'
 
-export interface UnknownSummary {
-  today: number
-  unreviewed: number
-}
-
-export interface AppNotification {
-  id: string
-  data: {
-    type: string
-    message: string
-    recognized_at: string
-    camera_name?: string
+export interface MonitoringDashboard {
+  active_cameras: number
+  total_cameras: number
+  employees_present: number
+  employees_absent: number
+  employees_late: number
+  unknown_persons_today: number
+  active_visitors: number
+  camera_health: {
+    online: number
+    offline: number
+    avg_fps: number | null
+    avg_latency_ms: number | null
+    total_dropped_frames: number
   }
-  read_at?: string
-  created_at: string
+  cameras: Camera[]
+}
+
+export interface LiveEvent {
+  id: string | number
+  event_type: string
+  message: string
+  occurred_at: string
 }

@@ -92,22 +92,35 @@ export function VisitorDetailPanel({
   const [zones, setZones] = useState('')
   const [perms, setPerms] = useState<AccessPerm[]>([])
   const [docType, setDocType] = useState('id_front')
+  const [loadError, setLoadError] = useState(false)
+  const [auxError, setAuxError] = useState(false)
   const photoRef = useRef<HTMLInputElement>(null)
   const docRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(() => {
-    api.get<VisitorDetail>(`/visitors/${visitorId}`).then((r) => {
-      setVisitor(r.data)
-    })
-    api.get<Photo[]>(`/visitors/${visitorId}/photos`).then((r) => setPhotos(r.data)).catch(() => {})
-    api.get<Document[]>(`/visitors/${visitorId}/documents`).then((r) => setDocuments(r.data)).catch(() => {})
+    api
+      .get<VisitorDetail>(`/visitors/${visitorId}`)
+      .then((r) => {
+        setVisitor(r.data)
+        setLoadError(false)
+      })
+      .catch(() => setLoadError(true))
+    api.get<Photo[]>(`/visitors/${visitorId}/photos`).then((r) => setPhotos(r.data)).catch(() => setAuxError(true))
+    api.get<Document[]>(`/visitors/${visitorId}/documents`).then((r) => setDocuments(r.data)).catch(() => setAuxError(true))
     api.get<AccessPerm[]>(`/visitors/${visitorId}/access-permissions`)
       .then((r) => {
         setPerms(r.data)
         setZones(r.data.map((p) => p.zone_name).join(', '))
       })
-      .catch(() => {})
+      .catch(() => setAuxError(true))
   }, [visitorId])
+
+  // Clears prior error flags then reloads (used by retry buttons).
+  const retry = () => {
+    setLoadError(false)
+    setAuxError(false)
+    load()
+  }
 
   useEffect(() => {
     load()
@@ -156,8 +169,25 @@ export function VisitorDetailPanel({
 
   if (!visitor) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-        <Card className="w-full max-w-2xl p-6">Loading…</Card>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        onClick={onClose}
+      >
+        <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md">
+          <Card className="p-6 text-center">
+            {loadError ? (
+              <>
+                <p className="text-sm text-red-400">Failed to load visitor details.</p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button variant="ghost" onClick={retry}>Retry</Button>
+                  <Button variant="ghost" onClick={onClose}>Close</Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-slate-400">Loading…</p>
+            )}
+          </Card>
+        </div>
       </div>
     )
   }
@@ -186,6 +216,15 @@ export function VisitorDetailPanel({
           </div>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
+
+        {auxError && (
+          <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+            <span>Some details (photos, documents, or zones) couldn&apos;t be loaded.</span>
+            <button type="button" onClick={retry} className="font-medium underline hover:no-underline">
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* Approval workflow */}
         <Card className="mb-4">

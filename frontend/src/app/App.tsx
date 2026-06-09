@@ -1,14 +1,16 @@
-import { lazy, Suspense } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { lazy, Suspense, type ReactNode } from 'react'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from '@/features/auth/ProtectedRoute'
+import { RequirePermission } from '@/features/auth/RequirePermission'
 import { ErrorBoundary } from '@/shared/components/ErrorBoundary'
+import { NotFoundPage } from '@/shared/components/StatusScreen'
 import { Loading } from '@/shared/ui/Loading'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import { RealtimeProvider } from '@/features/realtime/RealtimeContext'
+import { ROUTE_PERMISSIONS } from '@/app/access'
 import AppLayout from '@/layouts/AppLayout'
 
 const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'))
-const MonitoringPage = lazy(() => import('@/features/monitoring/MonitoringPage'))
 const AccessControlPage = lazy(() => import('@/features/access/AccessControlPage'))
 const VisitorsPage = lazy(() => import('@/features/visitors/VisitorsPage'))
 const EmployeesPage = lazy(() => import('@/features/employees/EmployeesPage'))
@@ -31,10 +33,17 @@ const SecurityMonitoringPage = lazy(() => import('@/features/security/SecurityMo
 const RecognitionEnginePage = lazy(() => import('@/features/recognition/RecognitionEnginePage'))
 const NotificationsPage = lazy(() => import('@/features/notifications/NotificationsPage'))
 const PrivacyPage = lazy(() => import('@/features/privacy/PrivacyPage'))
+const ProfilePage = lazy(() => import('@/features/auth/ProfilePage'))
 const LoginPage = lazy(() => import('@/features/auth/LoginPage'))
 
 function FullScreenFallback() {
   return <Loading fullScreen />
+}
+
+/** Wraps a route element in its permission guard when one is configured. */
+function guard(path: string, element: ReactNode): ReactNode {
+  const permission = ROUTE_PERMISSIONS[path]
+  return permission ? <RequirePermission permission={permission}>{element}</RequirePermission> : element
 }
 
 export default function App() {
@@ -54,31 +63,32 @@ export default function App() {
                   </ProtectedRoute>
                 }
               >
-                <Route index element={<MonitoringPage />} />
+                <Route index element={<DashboardPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="monitoring" element={<MonitoringPage />} />
-                <Route path="access-control" element={<AccessControlPage />} />
+                <Route path="access-control" element={guard('/access-control', <AccessControlPage />)} />
                 <Route path="visitors" element={<VisitorsPage />} />
-                <Route path="employees" element={<EmployeesPage />} />
-                <Route path="enrollment" element={<EnrollmentPage />} />
-                <Route path="enrollment-simple" element={<SimpleEnrollmentPage />} />
+                <Route path="employees" element={guard('/employees', <EmployeesPage />)} />
+                <Route path="enrollment" element={guard('/enrollment', <EnrollmentPage />)} />
+                <Route path="enrollment-simple" element={guard('/enrollment-simple', <SimpleEnrollmentPage />)} />
                 <Route path="live-kiosk" element={<LiveKioskPage />} />
                 <Route path="liveness-test" element={<LivenessTestPage />} />
                 <Route path="recognition-test" element={<RecognitionTestPage />} />
                 <Route path="attendance" element={<AttendancePage />} />
-                <Route path="anomalies" element={<AnomaliesPage />} />
+                <Route path="anomalies" element={guard('/anomalies', <AnomaliesPage />)} />
                 <Route path="shifts" element={<ShiftsPage />} />
-                <Route path="cameras" element={<CamerasPage />} />
-                <Route path="rfid" element={<RfidPage />} />
-                <Route path="reports" element={<ReportsPage />} />
-                <Route path="unknown-faces" element={<UnknownFacesPage />} />
-                <Route path="audit-logs" element={<AuditLogsPage />} />
-                <Route path="security" element={<SecurityTenancyPage />} />
-                <Route path="smart-building" element={<SmartBuildingPage />} />
-                <Route path="security-monitoring" element={<SecurityMonitoringPage />} />
-                <Route path="recognition-engine" element={<RecognitionEnginePage />} />
+                <Route path="cameras" element={guard('/cameras', <CamerasPage />)} />
+                <Route path="rfid" element={guard('/rfid', <RfidPage />)} />
+                <Route path="reports" element={guard('/reports', <ReportsPage />)} />
+                <Route path="unknown-faces" element={guard('/unknown-faces', <UnknownFacesPage />)} />
+                <Route path="audit-logs" element={guard('/audit-logs', <AuditLogsPage />)} />
+                <Route path="security" element={guard('/security', <SecurityTenancyPage />)} />
+                <Route path="smart-building" element={guard('/smart-building', <SmartBuildingPage />)} />
+                <Route path="security-monitoring" element={guard('/security-monitoring', <SecurityMonitoringPage />)} />
+                <Route path="recognition-engine" element={guard('/recognition-engine', <RecognitionEnginePage />)} />
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="privacy" element={<PrivacyPage />} />
+                <Route path="profile" element={<ProfilePage />} />
+                <Route path="*" element={<NotFoundPage />} />
               </Route>
               <Route
                 path="/kiosk"
@@ -88,7 +98,6 @@ export default function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
           </BrowserRouter>

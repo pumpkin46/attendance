@@ -56,8 +56,33 @@ celery -A app.celery_app.celery_app worker --loglevel=info
 celery -A app.celery_app.celery_app beat --loglevel=info
 ```
 
+> **Windows:** Celery's default `prefork` pool is not supported — start the
+> worker with `--pool=solo` (single-process) or `--pool=threads`:
+>
+> ```powershell
+> celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo
+> celery -A app.celery_app.celery_app beat   --loglevel=info --schedule "%PROGRAMDATA%\AttendancePlatform\appdata\celerybeat-schedule"
+> ```
+>
+> The packaged tray launcher (`windows/launcher`) already starts both this way,
+> alongside the Memurai Redis service — no manual steps needed on an installed
+> deployment.
+>
+> For local development, the `run-celery.ps1` helper starts the worker
+> (`--pool=solo`) and beat together:
+>
+> ```powershell
+> .\run-celery.ps1            # worker (new window) + beat (foreground)
+> .\run-celery.ps1 -Worker    # only the worker, in this window
+> .\run-celery.ps1 -Beat      # only the scheduler, in this window
+> ```
+
 Broker and result backend default to `REDIS_URL`; override with
 `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` (e.g. separate Redis DBs).
+
+> **Note:** with `CELERY_ENABLED=true`, the API no longer runs the in-process
+> expiry/cleanup loop — a worker **and** beat must be running, or those periodic
+> jobs won't fire. Restart the API after changing the flag so it picks up `.env`.
 
 Intervals are configurable: `BEAT_VISITOR_EXPIRY_SECONDS`,
 `BEAT_ANOMALY_DETECTION_SECONDS`, `BEAT_RETENTION_PURGE_SECONDS`.

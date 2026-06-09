@@ -12,8 +12,7 @@
  * requirement.
  */
 const routeLoaders: Record<string, () => Promise<unknown>> = {
-  '/': () => import('@/features/monitoring/MonitoringPage'),
-  '/monitoring': () => import('@/features/monitoring/MonitoringPage'),
+  '/': () => import('@/features/dashboard/DashboardPage'),
   '/dashboard': () => import('@/features/dashboard/DashboardPage'),
   '/access-control': () => import('@/features/access/AccessControlPage'),
   '/visitors': () => import('@/features/visitors/VisitorsPage'),
