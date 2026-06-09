@@ -50,23 +50,37 @@ export interface CreateOrganizationPayload {
 
 export interface SecurityAlert {
   id: number
+  organization_id: number
   alert_type: string
   severity: string
   title: string
-  message: string
+  description?: string | null
+  camera_id?: number | null
+  access_point_id?: number | null
+  snapshot_path?: string | null
+  metadata_json?: Record<string, unknown> | null
   status: string
-  occurred_at: string
-  camera?: { name: string }
-  employee?: { first_name: string; last_name: string }
+  acknowledged_at?: string | null
+  resolved_at?: string | null
+  created_at?: string | null
 }
 
 export interface SecurityDashboard {
-  open_total: number
-  critical_open: number
-  high_open: number
-  today_total: number
+  total_alerts: number
+  open_alerts: number
+  acknowledged_alerts: number
+  resolved_alerts: number
+  by_severity: Record<string, number>
   by_type: Record<string, number>
-  recent: SecurityAlert[]
+  recent_alerts: SecurityAlert[]
+}
+
+export interface SecurityMonitoringConfig {
+  enabled: boolean
+  after_hours_start: string
+  after_hours_end: string
+  tailgating_window: number
+  alert_cooldown: number
 }
 
 export const SECURITY_SEVERITY_TONE: Record<string, 'danger' | 'warn' | 'ok' | 'neutral'> = {

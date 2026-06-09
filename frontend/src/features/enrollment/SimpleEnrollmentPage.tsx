@@ -1,12 +1,19 @@
 import { useState, type FormEvent } from 'react'
 import { useWebcam } from '@/shared/hooks/useWebcam'
 import { Button } from '@/shared/ui/Button'
-import { Card } from '@/shared/ui/Card'
+import { CameraPanel } from '@/shared/ui/CameraPanel'
 import { ImageDropzone } from '@/shared/ui/ImageDropzone'
-import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
+import { Badge } from '@/shared/ui/Badge'
 import { Combobox } from '@/shared/ui/Combobox'
-import { cn } from '@/shared/lib/cn'
+import {
+  ProgressBar,
+  SectionCard,
+  SegmentedToggle,
+  StatusAlert,
+  UploadIcon,
+  WebcamIcon,
+} from '@/features/enrollment/components/EnrollmentUI'
 import { useEnrollableEmployees, useSimpleEnroll } from '@/features/enrollment/api/queries'
 import { reasonLabel } from '@/features/enrollment/types'
 
@@ -19,7 +26,7 @@ export default function SimpleEnrollmentPage() {
   const [employeeId, setEmployeeId] = useState('')
   const [shots, setShots] = useState<string[]>([])
   const [message, setMessage] = useState('')
-  const [useCamera, setUseCamera] = useState(true)
+  const [source, setSource] = useState<'camera' | 'upload'>('camera')
 
   const simpleEnroll = useSimpleEnroll()
   const submitting = simpleEnroll.isPending
@@ -75,19 +82,21 @@ export default function SimpleEnrollmentPage() {
   }
 
   const success = message.startsWith('Face registered')
+  const selectedEmployee = employees.find((e) => String(e.id) === employeeId)
 
   return (
     <div>
       <PageHeader
         title="Quick Face Register"
-        description="Register a face the simple way: pick an employee, take one or more photos, and save. No guided pose steps — just a clear, single face."
+        description="Pick an employee, take one or more clear photos of a single face, and save. No guided pose steps required."
+        actions={<Badge tone="neutral">Simple mode</Badge>}
       />
 
-      <Card>
-        <form className="flex flex-col gap-5" onSubmit={submit}>
-          <Label>
-            Employee
-            <Combobox value={employeeId} onChange={(value) => setEmployeeId(value)} required>
+      <form onSubmit={submit} className="grid gap-6 lg:grid-cols-3">
+        {/* Capture column */}
+        <div className="space-y-6 lg:col-span-2">
+          <SectionCard step={1} title="Select employee" subtitle="Choose who you're registering a face for.">
+            <Combobox value={employeeId} onChange={(value) => setEmployeeId(value)} required placeholder="Select employee">
               <option value="">Select employee</option>
               {employees.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -96,94 +105,117 @@ export default function SimpleEnrollmentPage() {
                 </option>
               ))}
             </Combobox>
-          </Label>
+            {selectedEmployee?.face_enrolled && (
+              <p className="mt-2 text-xs text-amber-400">
+                This employee already has a face enrolled — saving will add more reference images.
+              </p>
+            )}
+          </SectionCard>
 
-          <div className="flex gap-2">
-            <Button type="button" variant={useCamera ? 'primary' : 'ghost'} onClick={() => setUseCamera(true)}>
-              Webcam
-            </Button>
-            <Button
-              type="button"
-              variant={!useCamera ? 'primary' : 'ghost'}
-              onClick={() => {
-                setUseCamera(false)
-                stop()
-              }}
-            >
-              Upload file
-            </Button>
-          </div>
-
-          {useCamera ? (
-            <div className="flex flex-col gap-3">
-              {!active ? (
-                <Button type="button" onClick={start}>
-                  Start camera
-                </Button>
-              ) : (
-                <>
-                  <div className="relative max-w-xl overflow-hidden rounded-xl bg-black">
-                    <video ref={videoRef} className="block w-full" playsInline muted autoPlay />
-                    <canvas ref={canvasRef} hidden />
-                  </div>
-                  <div className="flex gap-2">
+          <SectionCard
+            step={2}
+            title="Capture photos"
+            subtitle={`Add up to ${MAX_SHOTS} photos. More angles improve recognition accuracy.`}
+            actions={
+              <SegmentedToggle
+                value={source}
+                onChange={(next) => {
+                  setSource(next)
+                  if (next === 'upload') stop()
+                }}
+                options={[
+                  { key: 'camera', label: 'Webcam', icon: <WebcamIcon /> },
+                  { key: 'upload', label: 'Upload', icon: <UploadIcon /> },
+                ]}
+              />
+            }
+          >
+            {source === 'camera' ? (
+              <CameraPanel
+                videoRef={videoRef}
+                canvasRef={canvasRef}
+                active={active}
+                error={camError}
+                onStart={start}
+                hint={
+                  shots.length >= MAX_SHOTS
+                    ? `Maximum ${MAX_SHOTS} photos reached.`
+                    : 'Center your face in the guide, then capture.'
+                }
+                controls={
+                  <>
                     <Button type="button" onClick={captureFromCamera} disabled={shots.length >= MAX_SHOTS}>
                       Take photo ({shots.length}/{MAX_SHOTS})
                     </Button>
                     <Button type="button" variant="ghost" onClick={stop}>
                       Stop camera
                     </Button>
+                  </>
+                }
+              />
+            ) : (
+              <ImageDropzone
+                label="Photo"
+                onFile={onFile}
+                disabled={shots.length >= MAX_SHOTS}
+                hint={
+                  shots.length >= MAX_SHOTS
+                    ? `Maximum ${MAX_SHOTS} photos reached`
+                    : 'JPEG or PNG · one clear, single face per photo'
+                }
+              />
+            )}
+          </SectionCard>
+        </div>
+
+        {/* Summary column */}
+        <div className="lg:col-span-1">
+          <SectionCard
+            title="Captured photos"
+            subtitle={`${shots.length} of ${MAX_SHOTS} added`}
+            className="lg:sticky lg:top-6"
+          >
+            <ProgressBar value={shots.length} max={MAX_SHOTS} />
+
+            {shots.length > 0 ? (
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                {shots.map((src, i) => (
+                  <div key={i} className="group relative aspect-square">
+                    <img
+                      src={src}
+                      alt={`Shot ${i + 1}`}
+                      className="h-full w-full rounded-lg object-cover ring-1 ring-slate-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeShot(i)}
+                      className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-slate-800 text-xs text-slate-300 opacity-0 ring-1 ring-slate-600 transition-opacity hover:text-white group-hover:opacity-100"
+                      aria-label={`Remove shot ${i + 1}`}
+                    >
+                      ✕
+                    </button>
                   </div>
-                </>
-              )}
-              {camError && <p className="text-sm text-red-400">{camError}</p>}
-            </div>
-          ) : (
-            <ImageDropzone
-              label="Photo"
-              onFile={onFile}
-              disabled={shots.length >= MAX_SHOTS}
-              hint={
-                shots.length >= MAX_SHOTS
-                  ? `Maximum ${MAX_SHOTS} photos reached`
-                  : 'JPEG or PNG · one clear, single face per photo'
-              }
-            />
-          )}
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 grid place-items-center rounded-lg border border-dashed border-slate-700 px-4 py-8 text-center">
+                <p className="text-sm text-slate-400">No photos yet</p>
+                <p className="mt-1 text-xs text-slate-500">Capture at least one photo to register.</p>
+              </div>
+            )}
 
-          {shots.length > 0 && (
-            <div className="flex flex-wrap gap-3">
-              {shots.map((src, i) => (
-                <div key={i} className="relative">
-                  <img src={src} alt={`Shot ${i + 1}`} className="h-24 w-24 rounded-lg object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeShot(i)}
-                    className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-slate-800 text-xs text-slate-300 ring-1 ring-slate-600 hover:text-white"
-                    aria-label={`Remove shot ${i + 1}`}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+            <Button type="submit" fullWidth className="mt-5" isLoading={submitting} disabled={!canSubmit}>
+              {submitting ? 'Registering…' : 'Register face'}
+            </Button>
 
-          <p className="text-sm text-slate-300">
-            {shots.length === 0
-              ? 'Capture at least one photo to register.'
-              : `${shots.length} photo(s) ready. More angles improve recognition.`}
-          </p>
-
-          <Button type="submit" disabled={!canSubmit}>
-            {submitting ? 'Registering…' : 'Register face'}
-          </Button>
-
-          {message && (
-            <p className={cn('text-sm', success ? 'text-green-400' : 'text-red-400')}>{message}</p>
-          )}
-        </form>
-      </Card>
+            {message && (
+              <div className="mt-4">
+                <StatusAlert tone={success ? 'ok' : 'error'}>{message}</StatusAlert>
+              </div>
+            )}
+          </SectionCard>
+        </div>
+      </form>
     </div>
   )
 }

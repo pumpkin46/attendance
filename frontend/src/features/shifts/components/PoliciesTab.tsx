@@ -5,6 +5,7 @@ import { Card } from '@/shared/ui/Card'
 import { Checkbox } from '@/shared/ui/Checkbox'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
+import { SidePanel } from '@/shared/ui/SidePanel'
 import { DataTable } from '@/shared/ui/DataTable'
 import { usePolicies, useSavePolicy } from '@/features/shifts/api/queries'
 import type { AttendancePolicy } from '@/features/shifts/types'
@@ -43,6 +44,12 @@ export function PoliciesTab() {
     setForm(emptyForm)
   }
 
+  const openCreate = () => {
+    setEditingId(null)
+    setForm(emptyForm)
+    setFormOpen(true)
+  }
+
   const openEdit = (p: AttendancePolicy) => {
     setEditingId(p.id)
     setForm({
@@ -78,18 +85,33 @@ export function PoliciesTab() {
   )
 
   return (
-    <div>
-      <div className="mb-4 flex justify-end">
-        <Button onClick={formOpen ? close : () => setFormOpen(true)}>
-          {formOpen ? 'Cancel' : 'New policy'}
-        </Button>
+    <Card padding={false} className="overflow-hidden">
+      <div className="flex items-center justify-between border-b border-slate-800 p-4">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-200">Attendance policies</h2>
+          <p className="text-xs text-slate-400">Grace, work limits, breaks, and overtime rules.</p>
+        </div>
+        <Button onClick={openCreate}>+ New policy</Button>
       </div>
 
       {formOpen && (
-        <Card className="mb-6">
-          <h2 className="mb-4 text-lg font-medium">{editingId ? 'Edit policy' : 'New policy'}</h2>
-          <form className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" onSubmit={submit}>
-            <Label>
+        <SidePanel
+          title={editingId ? 'Edit policy' : 'New policy'}
+          description="All thresholds are in minutes"
+          onClose={close}
+          footer={
+            <>
+              <Button type="submit" form="policy-form" isLoading={savePolicy.isPending}>
+                {editingId ? 'Save changes' : 'Create policy'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={close}>
+                Cancel
+              </Button>
+            </>
+          }
+        >
+          <form id="policy-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
+            <Label className="sm:col-span-2">
               Name *
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </Label>
@@ -99,20 +121,15 @@ export function PoliciesTab() {
             {numField('max_work_minutes', 'Max work (min)')}
             {numField('overtime_after_minutes', 'Overtime after (min)')}
             {numField('half_day_minutes', 'Half-day (min)')}
-            <Label className="flex-row items-center gap-2">
+            <div className="sm:col-span-2">
               <Checkbox
                 checked={form.is_default}
                 onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
-                label="Default policy"
+                label="Set as default policy"
               />
-            </Label>
-            <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
-              <Button type="submit" disabled={savePolicy.isPending}>
-                {editingId ? 'Save changes' : 'Create policy'}
-              </Button>
             </div>
           </form>
-        </Card>
+        </SidePanel>
       )}
 
       <DataTable
@@ -121,31 +138,36 @@ export function PoliciesTab() {
         loading={isPending}
         empty="No policies yet"
         columns={[
-          { key: 'name', header: 'Name', cell: (p) => p.name },
+          {
+            key: 'name',
+            header: 'Name',
+            cell: (p) => (
+              <span className="flex items-center gap-2">
+                <span className="font-medium text-slate-100">{p.name}</span>
+                {p.is_default && <Badge tone="ok">Default</Badge>}
+              </span>
+            ),
+          },
           { key: 'grace', header: 'Grace', cell: (p) => `${p.grace_minutes}m` },
           {
             key: 'work',
             header: 'Work min/max',
-            cell: (p) => (
-              <>
-                {p.min_work_minutes}–{p.max_work_minutes}m
-              </>
-            ),
+            className: 'font-mono text-xs text-slate-300',
+            cell: (p) => `${p.min_work_minutes}–${p.max_work_minutes}m`,
           },
           { key: 'break', header: 'Break', cell: (p) => `${p.break_minutes}m` },
           { key: 'overtime', header: 'Overtime after', cell: (p) => `${p.overtime_after_minutes}m` },
-          { key: 'default', header: 'Default', cell: (p) => p.is_default && <Badge tone="ok">Default</Badge> },
           {
             key: 'actions',
             header: 'Actions',
             cell: (p) => (
-              <Button variant="ghost" onClick={() => openEdit(p)}>
+              <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>
                 Edit
               </Button>
             ),
           },
         ]}
       />
-    </div>
+    </Card>
   )
 }

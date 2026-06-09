@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -8,7 +8,8 @@ import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { SidePanel } from '@/shared/ui/SidePanel'
 import { StatCard } from '@/shared/ui/StatCard'
-import { DataTable } from '@/shared/ui/DataTable'
+import { Skeleton } from '@/shared/ui/Skeleton'
+import { cn } from '@/shared/lib/cn'
 import type { Camera } from '@/shared/types'
 import {
   useCameras,
@@ -41,6 +42,138 @@ const emptyForm = {
   deployment_mode: 'cloud' as Camera['deployment_mode'],
 }
 
+const CameraGlyph = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z" />
+    <circle cx="12" cy="12.5" r="3.2" />
+  </svg>
+)
+
+const isOnline = (c: Camera) => c.health?.online ?? c.online ?? false
+const eventsToday = (c: Camera) => c.health?.recognition_events_today ?? c.recognition_count_today ?? 0
+
+function MetricCell({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="px-3 py-2">
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="font-mono text-sm font-medium text-slate-200">{value}</div>
+    </div>
+  )
+}
+
+function CameraTile({
+  camera,
+  capturing,
+  deleting,
+  onEdit,
+  onTest,
+  onDelete,
+}: {
+  camera: Camera
+  capturing: boolean
+  deleting: boolean
+  onEdit: () => void
+  onTest: () => void
+  onDelete: () => void
+}) {
+  const online = isOnline(camera)
+  const statusTone =
+    camera.status === 'active' ? 'ok' : camera.status === 'maintenance' ? 'warn' : 'neutral'
+  const resolution =
+    camera.resolution ??
+    (camera.resolution_width && camera.resolution_height
+      ? `${camera.resolution_width}×${camera.resolution_height}`
+      : null)
+  const fps = camera.health?.fps != null ? camera.health.fps.toFixed(1) : camera.frame_rate_fps ?? '—'
+
+  return (
+    <Card padding={false} className="flex flex-col overflow-hidden">
+      {/* Preview band */}
+      <div
+        className={cn(
+          'relative flex aspect-video items-center justify-center',
+          'bg-[radial-gradient(circle_at_center,_theme(colors.slate.800)_0%,_theme(colors.slate.950)_100%)]'
+        )}
+      >
+        <span className={cn('h-12 w-12', online ? 'text-slate-600' : 'text-slate-700')}>{CameraGlyph}</span>
+
+        {/* Top-left: online status */}
+        <span
+          className={cn(
+            'absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold backdrop-blur',
+            online ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-900/70 text-slate-400'
+          )}
+        >
+          <span className={cn('h-1.5 w-1.5 rounded-full', online ? 'bg-emerald-400' : 'bg-slate-500')} />
+          {online ? 'Online' : 'Offline'}
+        </span>
+
+        {/* Top-right: type */}
+        <span className="absolute right-2 top-2 rounded-md bg-slate-900/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-300 backdrop-blur">
+          {camera.camera_type ?? 'rtsp'}
+        </span>
+
+        {/* Bottom: name + location */}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-8">
+          <div className="flex items-end justify-between gap-2">
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-semibold text-white">{camera.name}</h3>
+              <p className="truncate text-xs text-slate-300">
+                {camera.location?.name ?? '—'}
+                {(camera.zone || camera.floor) && ` · ${[camera.zone, camera.floor].filter(Boolean).join(' · ')}`}
+              </p>
+            </div>
+            <Badge tone={statusTone}>{STATUS_LABELS[camera.status]}</Badge>
+          </div>
+        </div>
+      </div>
+
+      {/* Health metrics */}
+      <div className="grid grid-cols-3 gap-px bg-slate-800">
+        <MetricCell label="FPS" value={fps} />
+        <MetricCell label="Latency" value={camera.health?.latency_ms != null ? `${camera.health.latency_ms}ms` : '—'} />
+        <MetricCell label="Events" value={eventsToday(camera)} />
+        <MetricCell label="CPU" value={camera.health?.cpu_usage_percent != null ? `${camera.health.cpu_usage_percent}%` : '—'} />
+        <MetricCell label="GPU" value={camera.health?.gpu_usage_percent != null ? `${camera.health.gpu_usage_percent}%` : '—'} />
+        <MetricCell label="Dropped" value={camera.health?.dropped_frames ?? 0} />
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between gap-2 border-t border-slate-800 px-3 py-2.5">
+        <span className="truncate text-xs text-slate-500">
+          {resolution ?? (camera.target_fps ? `${camera.target_fps} fps target` : '—')}
+        </span>
+        <div className="flex shrink-0 gap-1">
+          <Button size="sm" variant="ghost" onClick={onEdit}>
+            Edit
+          </Button>
+          {camera.stream_url && (
+            <Button size="sm" variant="ghost" isLoading={capturing} onClick={onTest}>
+              Test
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            disabled={deleting}
+            onClick={onDelete}
+          >
+            Delete
+          </Button>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'online', label: 'Online' },
+  { key: 'offline', label: 'Offline' },
+] as const
+type FilterKey = (typeof FILTERS)[number]['key']
+
 export default function CamerasPage() {
   const { data: camerasData, isPending, isError } = useCameras()
   const { data: config } = useCameraConfig()
@@ -55,12 +188,20 @@ export default function CamerasPage() {
   const [capturing, setCapturing] = useState<number | null>(null)
   const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [filter, setFilter] = useState<FilterKey>('all')
 
-  const cameras = camerasData?.data ?? []
+  const cameras = useMemo(() => camerasData?.data ?? [], [camerasData])
   const locations = locationsData ?? []
 
   const cameraTypes = config?.camera_types ?? CAMERA_TYPE_FALLBACK
   const zones = config?.zones ?? ZONE_FALLBACK
+
+  const onlineCount = cameras.filter(isOnline).length
+  const filtered = useMemo(() => {
+    if (filter === 'online') return cameras.filter(isOnline)
+    if (filter === 'offline') return cameras.filter((c) => !isOnline(c))
+    return cameras
+  }, [cameras, filter])
 
   const startEdit = (camera: Camera) => {
     setEditingId(camera.id)
@@ -124,7 +265,9 @@ export default function CamerasPage() {
     }
   }
 
-  const onlineCount = cameras.filter((c) => c.health?.online ?? c.online).length
+  const removeCamera = (c: Camera) => {
+    if (window.confirm(`Remove camera "${c.name}"?`)) deleteCamera.mutate(c.id)
+  }
 
   return (
     <div>
@@ -132,13 +275,8 @@ export default function CamerasPage() {
         title="Camera Management"
         description="Configure cameras and monitor stream health: online status, FPS, latency, bandwidth, CPU/GPU, and recognition events."
         actions={
-          <Button
-            onClick={() => {
-              if (showForm) resetForm()
-              else setShowForm(true)
-            }}
-          >
-            {showForm ? 'Cancel' : 'Register camera'}
+          <Button onClick={() => (showForm ? resetForm() : setShowForm(true))} variant={showForm ? 'ghost' : 'primary'}>
+            {showForm ? 'Cancel' : '+ Register camera'}
           </Button>
         }
       />
@@ -274,9 +412,7 @@ export default function CamerasPage() {
               Status *
               <Combobox
                 value={form.status}
-                onChange={(value) =>
-                  setForm({ ...form, status: value as Camera['status'] })
-                }
+                onChange={(value) => setForm({ ...form, status: value as Camera['status'] })}
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
@@ -288,10 +424,7 @@ export default function CamerasPage() {
               <Combobox
                 value={form.deployment_mode}
                 onChange={(value) =>
-                  setForm({
-                    ...form,
-                    deployment_mode: value as Camera['deployment_mode'],
-                  })
+                  setForm({ ...form, deployment_mode: value as Camera['deployment_mode'] })
                 }
               >
                 <option value="cloud">Cloud (central AI)</option>
@@ -303,126 +436,120 @@ export default function CamerasPage() {
       )}
 
       {captureResult && (
-        <Card className="mb-6">
-          <p className="text-sm">
-            Stream test: {captureResult.face_count} face(s) in {captureResult.detect_ms}ms
-            {captureResult.health?.fps != null && ` · ${captureResult.health.fps} FPS`}
-            {captureResult.latency_ms != null && ` · ${captureResult.latency_ms}ms latency`}
-            {captureResult.bandwidth_kbps != null &&
-              ` · ${captureResult.bandwidth_kbps} kbps`}
-          </p>
-          {captureResult.identify && (
-            <p className="mt-2 text-sm">
-              {captureResult.identify.matched
-                ? `Matched: ${captureResult.identify.employee?.first_name} ${captureResult.identify.employee?.last_name}`
-                : `Not matched (${captureResult.identify.reason})`}
+        <Card className="mb-6 flex items-start justify-between gap-3 border-l-4 border-l-blue-500">
+          <div className="text-sm text-slate-200">
+            <p>
+              <span className="font-medium">Stream test:</span> {captureResult.face_count} face(s) in{' '}
+              {captureResult.detect_ms}ms
+              {captureResult.health?.fps != null && ` · ${captureResult.health.fps} FPS`}
+              {captureResult.latency_ms != null && ` · ${captureResult.latency_ms}ms latency`}
+              {captureResult.bandwidth_kbps != null && ` · ${captureResult.bandwidth_kbps} kbps`}
             </p>
-          )}
+            {captureResult.identify && (
+              <p className="mt-1 text-slate-400">
+                {captureResult.identify.matched
+                  ? `Matched: ${captureResult.identify.employee?.first_name} ${captureResult.identify.employee?.last_name}`
+                  : `Not matched (${captureResult.identify.reason})`}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setCaptureResult(null)}
+            className="shrink-0 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+          >
+            Dismiss
+          </button>
         </Card>
       )}
 
       <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
         <StatCard label="Total cameras" value={cameras.length} />
-        <StatCard label="Online" value={onlineCount} />
-        <StatCard label="Offline" value={cameras.length - onlineCount} tone="warn" />
+        <StatCard label="Online" value={onlineCount} tone="ok" />
+        <StatCard
+          label="Offline"
+          value={cameras.length - onlineCount}
+          tone={cameras.length - onlineCount > 0 ? 'warn' : undefined}
+        />
         <StatCard
           label="Recognitions today"
-          value={cameras.reduce((n, c) => n + (c.health?.recognition_events_today ?? c.recognition_count_today ?? 0), 0)}
+          value={cameras.reduce((n, c) => n + eventsToday(c), 0)}
         />
       </div>
 
-      <DataTable
-        data={cameras}
-        rowKey={(c) => c.id}
-        pageSize={10}
-        loading={isPending}
-        error={isError ? 'Failed to load cameras' : undefined}
-        empty="No cameras registered yet"
-        columns={[
-          { key: 'name', header: 'Name', cell: (c) => c.name },
-          { key: 'type', header: 'Type', className: 'uppercase text-xs', cell: (c) => c.camera_type ?? 'rtsp' },
-          {
-            key: 'location',
-            header: 'Location / Zone',
-            cell: (c) => (
-              <>
-                <div className="text-sm">{c.location?.name ?? '—'}</div>
-                {(c.zone || c.floor) && (
-                  <div className="text-xs text-slate-400">
-                    {[c.zone, c.floor].filter(Boolean).join(' · ')}
-                  </div>
+      {/* Filter chips */}
+      {!isPending && !isError && cameras.length > 0 && (
+        <div className="mb-4 inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1">
+          {FILTERS.map((f) => {
+            const count = f.key === 'all' ? cameras.length : f.key === 'online' ? onlineCount : cameras.length - onlineCount
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                className={cn(
+                  'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                  filter === f.key ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
                 )}
-              </>
-            ),
-          },
-          {
-            key: 'resolution',
-            header: 'Resolution',
-            cell: (c) => c.resolution ?? (c.target_fps ? `${c.target_fps} fps target` : '—'),
-          },
-          {
-            key: 'status',
-            header: 'Status',
-            cell: (c) => (
-              <Badge
-                tone={
-                  c.status === 'active'
-                    ? 'ok'
-                    : c.status === 'maintenance'
-                      ? 'warn'
-                      : 'neutral'
-                }
               >
-                {STATUS_LABELS[c.status]}
-              </Badge>
-            ),
-          },
-          {
-            key: 'online',
-            header: 'Online',
-            cell: (c) => {
-              const online = c.health?.online ?? c.online
-              return <Badge tone={online ? 'ok' : 'warn'}>{online ? 'Online' : 'Offline'}</Badge>
-            },
-          },
-          { key: 'fps', header: 'FPS', cell: (c) => (c.health?.fps != null ? c.health.fps.toFixed(1) : c.frame_rate_fps ?? '—') },
-          { key: 'latency', header: 'Latency', cell: (c) => (c.health?.latency_ms != null ? `${c.health.latency_ms}ms` : '—') },
-          { key: 'bandwidth', header: 'Bandwidth', cell: (c) => (c.health?.bandwidth_kbps != null ? `${c.health.bandwidth_kbps}` : '—') },
-          { key: 'cpu', header: 'CPU', cell: (c) => (c.health?.cpu_usage_percent != null ? `${c.health.cpu_usage_percent}%` : '—') },
-          { key: 'gpu', header: 'GPU', cell: (c) => (c.health?.gpu_usage_percent != null ? `${c.health.gpu_usage_percent}%` : '—') },
-          { key: 'dropped', header: 'Dropped', cell: (c) => c.health?.dropped_frames ?? 0 },
-          { key: 'events', header: 'Events', cell: (c) => c.health?.recognition_events_today ?? c.recognition_count_today ?? 0 },
-          {
-            key: 'actions',
-            header: 'Actions',
-            cell: (c) => (
-              <div className="flex gap-1">
-                <Button variant="ghost" onClick={() => startEdit(c)}>
-                  Edit
-                </Button>
-                {c.stream_url && (
-                  <Button
-                    variant="ghost"
-                    disabled={capturing === c.id}
-                    onClick={() => captureFromStream(c.id)}
-                  >
-                    {capturing === c.id ? '…' : 'Test'}
-                  </Button>
-                )}
-                <Button
-                  variant="danger"
-                  disabled={deleteCamera.isPending}
-                  onClick={() => {
-                    if (window.confirm(`Remove camera "${c.name}"?`)) deleteCamera.mutate(c.id)
-                  }}
-                >
-                  Delete
-                </Button>
+                {f.label}
+                <span className="ml-1.5 text-xs text-slate-500">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Content */}
+      {isPending ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Card key={i} padding={false} className="overflow-hidden">
+              <Skeleton className="aspect-video w-full rounded-none" />
+              <div className="grid grid-cols-3 gap-px bg-slate-800">
+                {Array.from({ length: 6 }).map((_, j) => (
+                  <div key={j} className="px-3 py-2">
+                    <Skeleton className="h-3 w-10" />
+                    <Skeleton className="mt-1 h-4 w-8" />
+                  </div>
+                ))}
               </div>
-            ),
-          },
-        ]}
-      />
+              <div className="border-t border-slate-800 px-3 py-2.5">
+                <Skeleton className="h-4 w-24" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : isError ? (
+        <Card className="py-10 text-center text-sm text-rose-400">Failed to load cameras</Card>
+      ) : cameras.length === 0 ? (
+        <Card className="flex flex-col items-center gap-2 py-12 text-center">
+          <span className="grid h-12 w-12 place-items-center rounded-full bg-slate-800 text-slate-500">
+            {CameraGlyph}
+          </span>
+          <p className="text-sm font-medium text-slate-300">No cameras registered yet</p>
+          <p className="text-xs text-slate-500">Register your first camera to start monitoring streams.</p>
+          <Button className="mt-2" onClick={() => setShowForm(true)}>
+            + Register camera
+          </Button>
+        </Card>
+      ) : filtered.length === 0 ? (
+        <Card className="py-10 text-center text-sm text-slate-500">No {filter} cameras</Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {filtered.map((c) => (
+            <CameraTile
+              key={c.id}
+              camera={c}
+              capturing={capturing === c.id}
+              deleting={deleteCamera.isPending}
+              onEdit={() => startEdit(c)}
+              onTest={() => captureFromStream(c.id)}
+              onDelete={() => removeCamera(c)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

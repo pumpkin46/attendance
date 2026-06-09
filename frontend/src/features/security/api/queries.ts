@@ -10,6 +10,7 @@ import type {
   SecurityConfig,
   SecurityAlert,
   SecurityDashboard,
+  SecurityMonitoringConfig,
 } from '@/features/security/types'
 
 export const securityKeys = {
@@ -19,8 +20,18 @@ export const securityKeys = {
 
 export const securityMonitoringKeys = {
   all: ['security-monitoring'] as const,
+  config: ['security-monitoring', 'config'] as const,
   dashboard: ['security-monitoring', 'dashboard'] as const,
   alerts: ['security-monitoring', 'alerts'] as const,
+}
+
+export function useSecurityMonitoringConfig() {
+  return useApiQuery<SecurityMonitoringConfig>(
+    securityMonitoringKeys.config,
+    '/security-monitoring/config',
+    undefined,
+    { silent: true }
+  )
 }
 
 /** `poll` comes from `useFallbackPoll` — undefined while the socket is healthy. */

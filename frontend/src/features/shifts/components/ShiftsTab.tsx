@@ -6,6 +6,7 @@ import { Combobox } from '@/shared/ui/Combobox'
 import { DatePicker } from '@/shared/ui/DatePicker'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
+import { SidePanel } from '@/shared/ui/SidePanel'
 import { DataTable } from '@/shared/ui/DataTable'
 import type { Shift } from '@/shared/types'
 import { useActiveEmployees } from '@/features/employees/api/queries'
@@ -56,7 +57,15 @@ export function ShiftsTab() {
     setForm(emptyForm)
   }
 
+  const openCreate = () => {
+    setAssignFor(null)
+    setEditingId(null)
+    setForm(emptyForm)
+    setFormOpen(true)
+  }
+
   const openEdit = (s: Shift) => {
+    setAssignFor(null)
     setEditingId(s.id)
     setForm({
       name: s.name,
@@ -69,6 +78,11 @@ export function ShiftsTab() {
       attendance_policy_id: '',
     })
     setFormOpen(true)
+  }
+
+  const openAssign = (s: Shift) => {
+    setFormOpen(false)
+    setAssignFor(s)
   }
 
   const submit = (e: React.FormEvent) => {
@@ -113,18 +127,33 @@ export function ShiftsTab() {
       : `${s.start_time ?? '—'}–${s.end_time ?? '—'}`
 
   return (
-    <div>
-      <div className="mb-4 flex justify-end">
-        <Button onClick={formOpen ? close : () => setFormOpen(true)}>
-          {formOpen ? 'Cancel' : 'New shift'}
-        </Button>
+    <Card padding={false} className="overflow-hidden">
+      <div className="flex items-center justify-between border-b border-slate-800 p-4">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-200">Shift schedules</h2>
+          <p className="text-xs text-slate-400">Define working hours and assign them to employees.</p>
+        </div>
+        <Button onClick={openCreate}>+ New shift</Button>
       </div>
 
       {formOpen && (
-        <Card className="mb-6">
-          <h2 className="mb-4 text-lg font-medium">{editingId ? 'Edit shift' : 'New shift'}</h2>
-          <form className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" onSubmit={submit}>
-            <Label>
+        <SidePanel
+          title={editingId ? 'Edit shift' : 'New shift'}
+          description="Working hours, grace, and policy"
+          onClose={close}
+          footer={
+            <>
+              <Button type="submit" form="shift-form" isLoading={saveShift.isPending}>
+                {editingId ? 'Save changes' : 'Create shift'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={close}>
+                Cancel
+              </Button>
+            </>
+          }
+        >
+          <form id="shift-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
+            <Label className="sm:col-span-2">
               Name *
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </Label>
@@ -168,7 +197,7 @@ export function ShiftsTab() {
               Break (min)
               <Input type="number" min={0} value={form.break_minutes} onChange={(e) => setForm({ ...form, break_minutes: e.target.value })} />
             </Label>
-            <Label>
+            <Label className="sm:col-span-2">
               Attendance policy
               <Combobox
                 value={form.attendance_policy_id}
@@ -182,19 +211,27 @@ export function ShiftsTab() {
                 ))}
               </Combobox>
             </Label>
-            <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
-              <Button type="submit" disabled={saveShift.isPending}>
-                {editingId ? 'Save changes' : 'Create shift'}
-              </Button>
-            </div>
           </form>
-        </Card>
+        </SidePanel>
       )}
 
       {assignFor && (
-        <Card className="mb-6 border-indigo-700/40">
-          <h2 className="mb-4 text-lg font-medium">Assign “{assignFor.name}” to employee</h2>
-          <form className="grid gap-4 sm:grid-cols-3" onSubmit={submitAssign}>
+        <SidePanel
+          title="Assign shift"
+          description={`Assign “${assignFor.name}” to an employee`}
+          onClose={() => setAssignFor(null)}
+          footer={
+            <>
+              <Button type="submit" form="assign-form" isLoading={assignShift.isPending}>
+                Assign
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setAssignFor(null)}>
+                Cancel
+              </Button>
+            </>
+          }
+        >
+          <form id="assign-form" className="grid gap-4" onSubmit={submitAssign}>
             <Label>
               Employee
               <Combobox value={assign.employee_id} onChange={(value) => setAssign({ ...assign, employee_id: value })} required>
@@ -214,16 +251,8 @@ export function ShiftsTab() {
               Effective to
               <DatePicker value={assign.effective_to} onChange={(value) => setAssign({ ...assign, effective_to: value })} />
             </Label>
-            <div className="flex items-end gap-2 sm:col-span-3">
-              <Button type="submit" disabled={assignShift.isPending}>
-                Assign
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setAssignFor(null)}>
-                Cancel
-              </Button>
-            </div>
           </form>
-        </Card>
+        </SidePanel>
       )}
 
       <DataTable
@@ -232,20 +261,19 @@ export function ShiftsTab() {
         loading={isPending}
         empty="No shifts yet"
         columns={[
-          { key: 'name', header: 'Name', cell: (s) => s.name },
+          { key: 'name', header: 'Name', cell: (s) => <span className="font-medium text-slate-100">{s.name}</span> },
           {
             key: 'type',
             header: 'Type',
-            className: 'capitalize',
             cell: (s) => (
-              <>
-                {s.type}
-                {s.rotation_slot ? ` (${s.rotation_slot})` : ''}
-              </>
+              <Badge tone="neutral">
+                <span className="capitalize">{s.type}</span>
+                {s.rotation_slot ? ` · ${s.rotation_slot}` : ''}
+              </Badge>
             ),
           },
-          { key: 'schedule', header: 'Schedule', cell: (s) => schedule(s) },
-          { key: 'grace', header: 'Grace', cell: (s) => s.grace_minutes },
+          { key: 'schedule', header: 'Schedule', className: 'font-mono text-xs text-slate-300', cell: (s) => schedule(s) },
+          { key: 'grace', header: 'Grace', cell: (s) => `${s.grace_minutes}m` },
           {
             key: 'status',
             header: 'Status',
@@ -255,15 +283,16 @@ export function ShiftsTab() {
             key: 'actions',
             header: 'Actions',
             cell: (s) => (
-              <div className="flex gap-2">
-                <Button variant="ghost" onClick={() => openEdit(s)}>
+              <div className="flex gap-1">
+                <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
                   Edit
                 </Button>
-                <Button variant="ghost" onClick={() => setAssignFor(s)}>
+                <Button variant="ghost" size="sm" onClick={() => openAssign(s)}>
                   Assign
                 </Button>
                 <Button
                   variant="danger"
+                  size="sm"
                   disabled={deleteShift.isPending}
                   onClick={() => {
                     if (window.confirm(`Remove shift "${s.name}"?`)) deleteShift.mutate(s.id)
@@ -276,6 +305,6 @@ export function ShiftsTab() {
           },
         ]}
       />
-    </div>
+    </Card>
   )
 }

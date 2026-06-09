@@ -7,9 +7,24 @@ import { Combobox } from '@/shared/ui/Combobox'
 import { DatePicker } from '@/shared/ui/DatePicker'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
+import { Tabs } from '@/shared/ui/Tabs'
 import { DataTable } from '@/shared/ui/DataTable'
 import { fetchReportExport, useDailyReport, useMonthlyReport } from '@/features/reports/api/queries'
 import type { ExportFormat, ReportTab } from '@/features/reports/types'
+import { attendanceStatusTone, formatMinutes, formatTime } from '@/shared/lib/format'
+
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
+  value: String(i + 1).padStart(2, '0'),
+  label: new Date(2000, i, 1).toLocaleString(undefined, { month: 'long' }),
+}))
+
+const DownloadIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+)
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<ReportTab>('daily')
@@ -24,8 +39,6 @@ export default function ReportsPage() {
   const dailyReport = dailyQuery.data
   const monthlyReport = monthlyQuery.data
   const loading = tab === 'daily' ? dailyQuery.isFetching : monthlyQuery.isFetching
-  const loadDaily = () => dailyQuery.refetch()
-  const loadMonthly = () => monthlyQuery.refetch()
 
   const downloadExport = async (format: ExportFormat) => {
     setExporting(format)
@@ -54,45 +67,32 @@ export default function ReportsPage() {
     }
   }
 
-  const statusTone = (status: string) => {
-    if (status === 'present') return 'ok'
-    if (status === 'late') return 'warn'
-    if (status === 'absent') return 'danger'
-    return 'neutral'
-  }
-
   return (
     <div>
       <PageHeader
         title="Reports"
-        description="FR-021 daily, FR-022 monthly attendance reports with CSV, Excel, and PDF export"
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant={tab === 'daily' ? 'primary' : 'ghost'} onClick={() => setTab('daily')}>
-              Daily
-            </Button>
-            <Button variant={tab === 'monthly' ? 'primary' : 'ghost'} onClick={() => setTab('monthly')}>
-              Monthly
-            </Button>
-          </div>
-        }
+        description="Daily and monthly attendance reports with CSV, Excel, and PDF export."
+      />
+
+      <Tabs
+        tabs={[
+          { id: 'daily', label: 'Daily' },
+          { id: 'monthly', label: 'Monthly' },
+        ]}
+        value={tab}
+        onChange={setTab}
       />
 
       <Card className="mb-6">
         <div className="flex flex-wrap items-end gap-4">
           {tab === 'daily' ? (
-            <>
-              <label className="flex flex-col gap-1 text-sm">
-                Date
-                <DatePicker value={dailyDate} onChange={(value) => setDailyDate(value)} />
-              </label>
-              <Button onClick={loadDaily} disabled={loading}>
-                {loading ? 'Loading…' : 'Run daily report'}
-              </Button>
-            </>
+            <label className="flex flex-col gap-1.5 text-sm text-slate-400">
+              Report date
+              <DatePicker className="w-44" value={dailyDate} onChange={setDailyDate} />
+            </label>
           ) : (
             <>
-              <label className="flex flex-col gap-1 text-sm">
+              <label className="flex flex-col gap-1.5 text-sm text-slate-400">
                 Year
                 <Input
                   type="number"
@@ -103,116 +103,140 @@ export default function ReportsPage() {
                   className="w-28"
                 />
               </label>
-              <label className="flex flex-col gap-1 text-sm">
+              <label className="flex flex-col gap-1.5 text-sm text-slate-400">
                 Month
-                <Combobox value={monthNum} onChange={(value) => setMonthNum(value)}>
-                  {Array.from({ length: 12 }, (_, i) => {
-                    const m = String(i + 1).padStart(2, '0')
-                    return (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    )
-                  })}
-                </Combobox>
+                <Combobox
+                  className="w-44"
+                  value={monthNum}
+                  onChange={setMonthNum}
+                  options={MONTH_OPTIONS}
+                />
               </label>
-              <Button onClick={loadMonthly} disabled={loading}>
-                {loading ? 'Loading…' : 'Run monthly report'}
-              </Button>
             </>
           )}
 
-          <div className="ml-auto flex flex-wrap gap-2">
-            <Button variant="ghost" disabled={!!exporting} onClick={() => downloadExport('csv')}>
-              {exporting === 'csv' ? '…' : 'Export CSV'}
-            </Button>
-            <Button variant="ghost" disabled={!!exporting} onClick={() => downloadExport('xlsx')}>
-              {exporting === 'xlsx' ? '…' : 'Export Excel'}
-            </Button>
-            <Button variant="ghost" disabled={!!exporting} onClick={() => downloadExport('pdf')}>
-              {exporting === 'pdf' ? '…' : 'Export PDF'}
-            </Button>
+          <div className="ml-auto flex flex-col gap-1.5">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Export</span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="ghost"
+                leftIcon={<DownloadIcon />}
+                isLoading={exporting === 'csv'}
+                disabled={!!exporting}
+                onClick={() => downloadExport('csv')}
+              >
+                CSV
+              </Button>
+              <Button
+                variant="ghost"
+                leftIcon={<DownloadIcon />}
+                isLoading={exporting === 'xlsx'}
+                disabled={!!exporting}
+                onClick={() => downloadExport('xlsx')}
+              >
+                Excel
+              </Button>
+              <Button
+                variant="ghost"
+                leftIcon={<DownloadIcon />}
+                isLoading={exporting === 'pdf'}
+                disabled={!!exporting}
+                onClick={() => downloadExport('pdf')}
+              >
+                PDF
+              </Button>
+            </div>
           </div>
         </div>
       </Card>
 
-      {tab === 'daily' && dailyReport && (
+      {tab === 'daily' && (
         <>
-          <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
-            <StatCard label="Present" value={dailyReport.present} />
-            <StatCard label="Absent" value={dailyReport.absent} tone="danger" />
-            <StatCard label="Late" value={dailyReport.late} tone="warn" />
-            <StatCard label="On leave" value={dailyReport.on_leave} />
+          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <StatCard label="Present" value={dailyReport?.present ?? 0} tone="ok" />
+            <StatCard label="Late" value={dailyReport?.late ?? 0} tone="warn" />
+            <StatCard label="Absent" value={dailyReport?.absent ?? 0} tone="danger" />
+            <StatCard label="On leave" value={dailyReport?.on_leave ?? 0} />
           </div>
 
           <DataTable
-            data={dailyReport.employees ?? []}
+            data={dailyReport?.employees ?? []}
             rowKey={(e) => e.employee_code}
             pageSize={10}
+            loading={loading && !dailyReport}
             empty="No attendance records for this date"
             columns={[
               {
                 key: 'employee',
                 header: 'Employee',
                 cell: (e) => (
-                  <>
-                    {e.employee_name}
-                    <span className="ml-2 text-xs text-slate-500">{e.employee_code}</span>
-                  </>
+                  <div>
+                    <div className="font-medium text-slate-100">{e.employee_name}</div>
+                    <div className="text-xs text-slate-500">{e.employee_code}</div>
+                  </div>
                 ),
               },
               {
                 key: 'status',
                 header: 'Status',
-                cell: (e) => <Badge tone={statusTone(e.status)}>{e.status}</Badge>,
+                cell: (e) => (
+                  <Badge tone={attendanceStatusTone(e.status)}>{e.status.replace(/_/g, ' ')}</Badge>
+                ),
               },
-              {
-                key: 'check_in',
-                header: 'Check in',
-                cell: (e) => (e.check_in_at ? new Date(e.check_in_at).toLocaleTimeString() : '—'),
-              },
-              {
-                key: 'check_out',
-                header: 'Check out',
-                cell: (e) => (e.check_out_at ? new Date(e.check_out_at).toLocaleTimeString() : '—'),
-              },
-              { key: 'worked', header: 'Worked', cell: (e) => `${e.worked_minutes} min` },
-              { key: 'overtime', header: 'Overtime', cell: (e) => `${e.overtime_minutes} min` },
+              { key: 'check_in', header: 'Check in', cell: (e) => formatTime(e.check_in_at) },
+              { key: 'check_out', header: 'Check out', cell: (e) => formatTime(e.check_out_at) },
+              { key: 'worked', header: 'Worked', cell: (e) => formatMinutes(e.worked_minutes) },
+              { key: 'overtime', header: 'Overtime', cell: (e) => formatMinutes(e.overtime_minutes) },
             ]}
           />
         </>
       )}
 
-      {tab === 'monthly' && monthlyReport && (
+      {tab === 'monthly' && (
         <>
-          <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
-            <StatCard label="Total working days" value={monthlyReport.summary.total_working_days} />
-            <StatCard label="Attendance %" value={`${monthlyReport.summary.attendance_percent}%`} />
+          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <StatCard label="Working days" value={monthlyReport?.summary.total_working_days ?? 0} />
+            <StatCard
+              label="Attendance"
+              value={`${monthlyReport?.summary.attendance_percent ?? 0}%`}
+              tone="ok"
+            />
             <StatCard
               label="Overtime"
-              value={`${Math.round(monthlyReport.summary.overtime_minutes / 60)} hrs`}
+              value={`${Math.round((monthlyReport?.summary.overtime_minutes ?? 0) / 60)}h`}
+              tone="warn"
             />
-            <StatCard label="Absence count" value={monthlyReport.summary.absence_count} tone="danger" />
+            <StatCard
+              label="Absences"
+              value={monthlyReport?.summary.absence_count ?? 0}
+              tone="danger"
+            />
           </div>
 
           <DataTable
-            data={monthlyReport.employees ?? []}
+            data={monthlyReport?.employees ?? []}
             rowKey={(e) => e.employee_code}
             pageSize={10}
+            loading={loading && !monthlyReport}
+            empty="No data for this month"
             columns={[
               {
                 key: 'employee',
                 header: 'Employee',
                 cell: (e) => (
-                  <>
-                    {e.employee_name}
-                    <span className="ml-2 text-xs text-slate-500">{e.employee_code}</span>
-                  </>
+                  <div>
+                    <div className="font-medium text-slate-100">{e.employee_name}</div>
+                    <div className="text-xs text-slate-500">{e.employee_code}</div>
+                  </div>
                 ),
               },
               { key: 'department', header: 'Department', cell: (e) => e.department ?? '—' },
               { key: 'working_days', header: 'Working days', cell: (e) => e.total_working_days },
-              { key: 'attendance', header: 'Attendance %', cell: (e) => `${e.attendance_percent}%` },
+              {
+                key: 'attendance',
+                header: 'Attendance %',
+                cell: (e) => `${e.attendance_percent}%`,
+              },
               { key: 'overtime', header: 'Overtime (hrs)', cell: (e) => e.overtime_hours },
               { key: 'absences', header: 'Absences', cell: (e) => e.absence_count },
               { key: 'late', header: 'Late', cell: (e) => e.late_count },

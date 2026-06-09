@@ -5,6 +5,7 @@ import { Card } from '@/shared/ui/Card'
 import { Checkbox } from '@/shared/ui/Checkbox'
 import { CameraSelect } from '@/features/cameras/components/CameraSelect'
 import { cn } from '@/shared/lib/cn'
+import { initialsOf } from '@/shared/lib/format'
 import { detectFaces, identifyFace } from '@/features/recognition/api/recognitionApi'
 import type { FaceBox, IdentifyResult } from '@/features/recognition/types'
 
@@ -24,6 +25,61 @@ const statusBarStyles: Record<KioskStatus, string> = {
   spoof: 'bg-red-600/90 text-white',
   duplicate: 'bg-amber-600/90 text-white',
 }
+
+const statusPillStyles: Record<KioskStatus, string> = {
+  idle: 'bg-slate-500/15 text-slate-300',
+  scanning: 'bg-blue-500/15 text-blue-300',
+  face_detected: 'bg-indigo-500/15 text-indigo-300',
+  recognized: 'bg-emerald-500/15 text-emerald-300',
+  unknown: 'bg-amber-500/15 text-amber-300',
+  spoof: 'bg-red-500/15 text-red-300',
+  duplicate: 'bg-amber-500/15 text-amber-300',
+}
+
+const STATUS_SHORT: Record<KioskStatus, string> = {
+  idle: 'Idle',
+  scanning: 'Scanning…',
+  face_detected: 'Face detected',
+  recognized: 'Recognized',
+  unknown: 'Unknown',
+  spoof: 'Spoof blocked',
+  duplicate: 'Duplicate',
+}
+
+const statusDotStyles: Record<KioskStatus, string> = {
+  idle: 'bg-slate-500',
+  scanning: 'bg-blue-400 animate-pulse',
+  face_detected: 'bg-indigo-400 animate-pulse',
+  recognized: 'bg-emerald-400',
+  unknown: 'bg-amber-400',
+  spoof: 'bg-red-400',
+  duplicate: 'bg-amber-400',
+}
+
+
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100)
+  const tone = pct >= 85 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-red-500'
+  return (
+    <div className="mt-3">
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="text-slate-400">Confidence</span>
+        <span className="font-mono font-medium text-slate-200">{pct}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-700">
+        <div className={cn('h-full rounded-full transition-all', tone)} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+const FaceScanIcon = (
+  <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+    <circle cx="12" cy="11" r="3" />
+    <path d="M7 17c.5-1.8 2.5-3 5-3s4.5 1.2 5 3" />
+  </svg>
+)
 
 // Actionable hints for the kiosk "unknown" state. Without a specific reason it
 // means no enrolled face matched; quality reasons mean the frame was rejected
@@ -271,11 +327,16 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
   return (
     <div className={cn(fullscreen && 'fixed inset-0 z-50 overflow-auto bg-slate-950 p-6')}>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Live recognition</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            FR-017 anti-spoof + FR-018 blink/head-movement active liveness
-          </p>
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-blue-500/15 text-blue-400">
+            {FaceScanIcon}
+          </span>
+          <div>
+            <h1 className="text-2xl font-semibold">Live recognition</h1>
+            <p className="mt-0.5 text-sm text-slate-400">
+              FR-017 anti-spoof + FR-018 blink/head-movement active liveness
+            </p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <CameraSelect
@@ -285,22 +346,24 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
             emptyLabel="No camera"
             className="w-48"
           />
-          <Checkbox
-            checked={requireLiveness}
-            onChange={(e) => setRequireLiveness(e.target.checked)}
-            label="Anti-spoof (AI model)"
-          />
-          <Checkbox
-            checked={activeLiveness}
-            onChange={(e) => setActiveLiveness(e.target.checked)}
-            label="Blink / movement"
-          />
+          <div className="flex items-center gap-4 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2">
+            <Checkbox
+              checked={requireLiveness}
+              onChange={(e) => setRequireLiveness(e.target.checked)}
+              label="Anti-spoof (AI model)"
+            />
+            <Checkbox
+              checked={activeLiveness}
+              onChange={(e) => setActiveLiveness(e.target.checked)}
+              label="Blink / movement"
+            />
+          </div>
           {!active ? (
             <Button type="button" onClick={handleStart}>
               Start camera
             </Button>
           ) : (
-            <Button type="button" variant="ghost" onClick={handleStop}>
+            <Button type="button" variant="danger" onClick={handleStop}>
               Stop
             </Button>
           )}
@@ -309,11 +372,35 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
 
       {camError && <p className="mb-4 text-sm text-red-400">{camError}</p>}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="relative overflow-hidden rounded-xl bg-black">
-          <video ref={videoRef} className="block w-full" playsInline muted autoPlay />
+      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+        <div className="relative aspect-video overflow-hidden rounded-xl bg-black ring-1 ring-slate-700/60">
+          <video ref={videoRef} className="h-full w-full" playsInline muted autoPlay />
           <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
           <canvas ref={canvasRef} hidden />
+
+          {!active && (
+            <div className="absolute inset-0 grid place-items-center">
+              <div className="flex flex-col items-center gap-3 text-slate-500">
+                <span className="grid h-14 w-14 place-items-center rounded-full bg-slate-800/80 text-slate-400">
+                  {FaceScanIcon}
+                </span>
+                <span className="text-sm">Camera off — press “Start camera”.</span>
+              </div>
+            </div>
+          )}
+
+          {active && (
+            <span
+              className={cn(
+                'absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium',
+                statusPillStyles[status]
+              )}
+            >
+              <span className={cn('h-1.5 w-1.5 rounded-full', statusDotStyles[status])} />
+              {STATUS_SHORT[status]}
+            </span>
+          )}
+
           <div
             className={cn(
               'absolute bottom-0 left-0 right-0 px-4 py-3 text-center text-sm font-medium',
@@ -324,73 +411,79 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           </div>
         </div>
 
-        <Card>
-          <h2 className="mb-4 text-lg font-medium">Live stats</h2>
-          <ul className="divide-y divide-slate-800 text-sm">
-            <li className="flex justify-between py-3">
-              <span className="text-slate-400">Status</span>
-              <strong className="max-w-[160px] text-right">{statusLabel[status]}</strong>
-            </li>
-            <li className="flex justify-between py-3">
-              <span className="text-slate-400">Liveness frames</span>
-              <strong>{bufferCount}</strong>
-            </li>
-            <li className="flex justify-between py-3">
-              <span className="text-slate-400">Faces in frame</span>
-              <strong>{faces.length}</strong>
-            </li>
-            <li className="flex justify-between py-3">
-              <span className="text-slate-400">Detect latency</span>
-              <strong>{detectMs ? `${detectMs} ms` : '—'}</strong>
-            </li>
-            <li className="flex justify-between py-3">
-              <span className="text-slate-400">Recognize latency</span>
-              <strong>{identifyMs ? `${identifyMs} ms` : '—'}</strong>
-            </li>
-            <li className="flex justify-between py-3">
-              <span className="text-slate-400">Throughput</span>
-              <strong>{fpsHint || '—'}</strong>
-            </li>
-          </ul>
+        <Card padding={false} className="overflow-hidden">
+          <div className="border-b border-slate-800 p-4">
+            <h2 className="text-xs font-medium uppercase tracking-wide text-slate-400">Live stats</h2>
+            <div className="mt-2 flex items-center gap-2">
+              <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDotStyles[status])} />
+              <span className="text-sm font-semibold text-slate-100">{statusLabel[status]}</span>
+            </div>
+          </div>
 
-          {lastMatch?.matched && lastMatch.employee && (
-            <div className="mt-4 rounded-lg border border-green-500/30 bg-green-500/10 p-4">
-              <p className="font-medium text-green-400">
-                {lastMatch.employee.first_name} {lastMatch.employee.last_name}
+          <dl className="grid grid-cols-2 gap-px bg-slate-800">
+            {[
+              ['Liveness frames', bufferCount],
+              ['Faces in frame', faces.length],
+              ['Detect latency', detectMs ? `${detectMs} ms` : '—'],
+              ['Recognize latency', identifyMs ? `${identifyMs} ms` : '—'],
+              ['Throughput', fpsHint || '—'],
+              ['Anti-spoof', requireLiveness ? 'On' : 'Off'],
+            ].map(([label, value]) => (
+              <div key={label as string} className="bg-slate-900 p-3">
+                <dt className="text-xs text-slate-400">{label}</dt>
+                <dd className="mt-0.5 font-mono text-sm font-semibold text-slate-100">{value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="p-4">
+            {lastMatch?.matched && lastMatch.employee ? (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+                <div className="flex items-center gap-3">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-emerald-500/20 text-sm font-semibold text-emerald-300">
+                    {initialsOf(lastMatch.employee.first_name, lastMatch.employee.last_name)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-emerald-300">
+                      {lastMatch.employee.first_name} {lastMatch.employee.last_name}
+                    </p>
+                    <p className="truncate text-sm text-slate-400">
+                      {lastMatch.employee.employee_code}
+                    </p>
+                  </div>
+                </div>
+                {lastMatch.confidence != null && <ConfidenceBar value={lastMatch.confidence} />}
+                {lastMatch.attendance?.action && (
+                  <div className="mt-3 flex items-center justify-between rounded-md bg-slate-900/60 px-3 py-2 text-sm">
+                    <span className="text-slate-400">Attendance</span>
+                    <span className="font-medium capitalize text-emerald-300">
+                      {lastMatch.attendance.action.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : status === 'spoof' ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                <p className="font-medium">{spoofLabel(lastMatch)}</p>
+                <p className="mt-1 text-xs text-slate-500">Use a live face — not a photo or screen.</p>
+              </div>
+            ) : status === 'unknown' ? (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
+                <p>{UNKNOWN_HINTS[lastMatch?.reason ?? ''] ?? UNKNOWN_HINTS.default}</p>
+                {(lastMatch?.reason || lastMatch?.confidence != null) && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {lastMatch?.reason ? `reason: ${lastMatch.reason}` : 'no match'}
+                    {lastMatch?.confidence != null &&
+                      ` · best match ${(lastMatch.confidence * 100).toFixed(1)}%`}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-center text-sm text-slate-500">
+                {running ? 'Look at the camera to identify.' : 'Start the camera to begin recognition.'}
               </p>
-              <p className="text-sm text-slate-400">{lastMatch.employee.employee_code}</p>
-              {lastMatch.confidence != null && (
-                <p className="mt-1 text-sm">
-                  Confidence: {(lastMatch.confidence * 100).toFixed(1)}%
-                </p>
-              )}
-              {lastMatch.attendance?.action && (
-                <p className="mt-1 text-sm">
-                  Attendance:{' '}
-                  <code className="rounded bg-slate-800 px-1.5 py-0.5 text-xs">
-                    {lastMatch.attendance.action}
-                  </code>
-                </p>
-              )}
-            </div>
-          )}
-
-          {status === 'spoof' && (
-            <p className="mt-4 text-sm text-red-400">{spoofLabel(lastMatch)}</p>
-          )}
-
-          {!lastMatch?.matched && status === 'unknown' && (
-            <div className="mt-4 text-sm text-amber-400">
-              <p>{UNKNOWN_HINTS[lastMatch?.reason ?? ''] ?? UNKNOWN_HINTS.default}</p>
-              {(lastMatch?.reason || lastMatch?.confidence != null) && (
-                <p className="mt-1 text-xs text-slate-500">
-                  {lastMatch?.reason ? `reason: ${lastMatch.reason}` : 'no match'}
-                  {lastMatch?.confidence != null &&
-                    ` · best match ${(lastMatch.confidence * 100).toFixed(1)}%`}
-                </p>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </Card>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Combobox } from '@/shared/ui/Combobox'
@@ -8,6 +9,13 @@ import { DataTable } from '@/shared/ui/DataTable'
 import { useAddBlacklist, useBlacklist, useRemoveBlacklist } from '@/features/visitors/api/queries'
 
 const emptyForm = { name: '', id_number: '', reason: 'blocked', notes: '' }
+
+const REASON_TONE: Record<string, 'danger' | 'warn' | 'neutral'> = {
+  blocked: 'danger',
+  watchlist: 'warn',
+  former_employee: 'neutral',
+  restricted_contractor: 'warn',
+}
 
 export function BlacklistTab() {
   const [form, setForm] = useState(emptyForm)
@@ -24,9 +32,12 @@ export function BlacklistTab() {
 
   return (
     <>
-      <Card className="mb-6">
-        <h3 className="mb-4 text-sm font-semibold text-slate-300">Add to blacklist / watchlist</h3>
-        <form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
+      <Card padding={false} className="mb-6 overflow-hidden">
+        <div className="border-b border-slate-800 px-5 py-4">
+          <h3 className="text-sm font-semibold text-slate-100">Add to blacklist / watchlist</h3>
+          <p className="mt-0.5 text-xs text-slate-500">Blocked individuals are flagged on recognition and denied access.</p>
+        </div>
+        <form className="grid gap-4 p-5 sm:grid-cols-2" onSubmit={submit}>
           <Label>
             Name *
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
@@ -49,7 +60,9 @@ export function BlacklistTab() {
             <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </Label>
           <div className="sm:col-span-2">
-            <Button type="submit" disabled={add.isPending}>Add to blacklist</Button>
+            <Button type="submit" variant="danger" isLoading={add.isPending}>
+              Add to blacklist
+            </Button>
           </div>
         </form>
       </Card>
@@ -59,14 +72,32 @@ export function BlacklistTab() {
         pageSize={10}
         empty="No blacklist entries."
         columns={[
-          { key: 'name', header: 'Name', cell: (b) => b.name },
-          { key: 'id_number', header: 'ID number', cell: (b) => b.id_number ?? '—' },
-          { key: 'reason', header: 'Reason', className: 'capitalize', cell: (b) => b.reason.replace(/_/g, ' ') },
+          { key: 'name', header: 'Name', cell: (b) => <span className="font-medium text-slate-100">{b.name}</span> },
+          { key: 'id_number', header: 'ID number', className: 'font-mono text-xs', cell: (b) => b.id_number ?? '—' },
+          {
+            key: 'reason',
+            header: 'Reason',
+            cell: (b) => (
+              <Badge tone={REASON_TONE[b.reason] ?? 'neutral'} className="capitalize">
+                {b.reason.replace(/_/g, ' ')}
+              </Badge>
+            ),
+          },
           { key: 'notes', header: 'Notes', cell: (b) => b.notes ?? '—' },
           {
             key: 'actions',
-            header: 'Actions',
-            cell: (b) => <Button variant="ghost" onClick={() => remove.mutate(b.id)}>Remove</Button>,
+            header: '',
+            align: 'right',
+            cell: (b) => (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                onClick={() => remove.mutate(b.id)}
+              >
+                Remove
+              </Button>
+            ),
           },
         ]}
       />

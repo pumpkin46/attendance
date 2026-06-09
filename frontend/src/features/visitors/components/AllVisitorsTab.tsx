@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
+import { Card } from '@/shared/ui/Card'
 import { Combobox } from '@/shared/ui/Combobox'
-import { Input } from '@/shared/ui/Input'
+import { SearchBox } from '@/shared/ui/SearchBox'
 import { DataTable } from '@/shared/ui/DataTable'
 import { FaceCaptureModal } from '@/shared/components/FaceCaptureModal'
 import {
@@ -13,6 +14,7 @@ import {
   useVisitorsList,
 } from '@/features/visitors/api/queries'
 import { STATUS_TONE } from '@/features/visitors/types'
+import { VisitorCell } from '@/features/visitors/components/VisitorUI'
 
 export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void }) {
   const [search, setSearch] = useState('')
@@ -35,13 +37,13 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap gap-3">
-        <Input
+      <Card className="mb-4 flex flex-wrap items-center gap-3">
+        <SearchBox
           placeholder="Search name, company, code…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && runSearch()}
-          className="max-w-xs"
+          onChange={setSearch}
+          onSearch={runSearch}
+          className="max-w-xs flex-1"
         />
         <Combobox value={statusFilter} onChange={(value) => setStatusFilter(value)} className="max-w-[180px]">
           <option value="">All statuses</option>
@@ -52,8 +54,8 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
           <option value="expired">Expired</option>
           <option value="cancelled">Cancelled</option>
         </Combobox>
-        <Button variant="ghost" onClick={runSearch}>Search</Button>
-      </div>
+        <Button onClick={runSearch}>Search</Button>
+      </Card>
       <DataTable
         data={visitors}
         rowKey={(v) => v.id}
@@ -65,11 +67,7 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
             key: 'visitor',
             header: 'Visitor',
             cell: (v) => (
-              <>
-                <div className="font-medium">{v.name}</div>
-                <div className="text-xs text-slate-500">{v.company ?? '—'}</div>
-                {v.visitor_code && <div className="font-mono text-xs text-slate-600">{v.visitor_code}</div>}
-              </>
+              <VisitorCell name={v.name} seed={v.id} sub={v.company ?? '—'} code={v.visitor_code} />
             ),
           },
           {
@@ -109,6 +107,7 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
           {
             key: 'face',
             header: 'Face',
+            align: 'center',
             cell: (v) => (
               <Badge tone={v.face_registered ? 'ok' : 'neutral'}>
                 {v.face_registered ? 'Enrolled' : 'No face'}
@@ -118,28 +117,40 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
           {
             key: 'status',
             header: 'Status',
-            cell: (v) => <Badge tone={STATUS_TONE[v.status] ?? 'neutral'}>{v.status.replace(/_/g, ' ')}</Badge>,
+            align: 'center',
+            cell: (v) => (
+              <Badge tone={STATUS_TONE[v.status] ?? 'neutral'} className="capitalize">
+                {v.status.replace(/_/g, ' ')}
+              </Badge>
+            ),
           },
           {
             key: 'actions',
-            header: 'Actions',
-            className: 'space-x-1',
+            header: '',
+            align: 'right',
             cell: (v) => (
-              <>
-                <Button variant="ghost" onClick={() => onSelect(v.id)}>View</Button>
+              <div className="flex justify-end gap-1">
+                <Button size="sm" variant="ghost" onClick={() => onSelect(v.id)}>View</Button>
                 {v.status === 'scheduled' && (
-                  <Button variant="ghost" onClick={() => checkIn.mutate(v.id)}>Check in</Button>
+                  <Button size="sm" variant="ghost" onClick={() => checkIn.mutate(v.id)}>Check in</Button>
                 )}
                 {v.status === 'checked_in' && (
-                  <Button variant="ghost" onClick={() => checkOut.mutate(v.id)}>Check out</Button>
+                  <Button size="sm" variant="ghost" onClick={() => checkOut.mutate(v.id)}>Check out</Button>
                 )}
                 {!v.face_registered && !['expired', 'cancelled', 'checked_out'].includes(v.status) && (
-                  <Button variant="ghost" onClick={() => setEnrollId(v.id)}>Enroll face</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEnrollId(v.id)}>Enroll face</Button>
                 )}
                 {!['cancelled', 'checked_out', 'expired'].includes(v.status) && (
-                  <Button variant="ghost" onClick={() => onCancel(v.id)}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    onClick={() => onCancel(v.id)}
+                  >
+                    Cancel
+                  </Button>
                 )}
-              </>
+              </div>
             ),
           },
         ]}

@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWebcam } from '@/shared/hooks/useWebcam'
 import { getToken } from '@/shared/lib/session'
 import { Button } from '@/shared/ui/Button'
 import { Combobox } from '@/shared/ui/Combobox'
 import { detectFaces, identifyFace } from '@/features/recognition/api/recognitionApi'
 import { useEngineStreams } from '@/features/recognition/api/queries'
+import { useCameras } from '@/features/cameras/api/queries'
+import { initialsOf } from '@/shared/lib/format'
 import type { IdentifyResult } from '@/features/recognition/types'
 
 /**
@@ -61,10 +63,63 @@ const STATUS_LABEL: Record<MonitorStatus, string> = {
   spoof: 'Spoof blocked',
 }
 
+const STATUS_DOT: Record<MonitorStatus, string> = {
+  idle: 'bg-slate-500',
+  scanning: 'bg-blue-400 animate-pulse',
+  face: 'bg-indigo-400 animate-pulse',
+  recognized: 'bg-emerald-400',
+  duplicate: 'bg-amber-400',
+  unknown: 'bg-yellow-400',
+  spoof: 'bg-red-400',
+}
+
+function StatusPill({ status }: { status: MonitorStatus }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[status]}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />
+      {STATUS_LABEL[status]}
+    </span>
+  )
+}
+
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100)
+  const tone = pct >= 85 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-red-500'
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="text-slate-400">Confidence</span>
+        <span className="font-mono font-medium text-slate-200">{pct}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-700">
+        <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+const ScanIcon = (
+  <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+    <circle cx="12" cy="11" r="3" />
+    <path d="M7 17c.5-1.8 2.5-3 5-3s4.5 1.2 5 3" />
+  </svg>
+)
+
 export default function WebcamMonitor() {
   const { videoRef, canvasRef, active, error: camError, start, stop, captureFrame } = useWebcam()
   const { data: streamsData } = useEngineStreams()
   const streams = Object.values(streamsData?.streams ?? {})
+
+  // Map camera_id → name so the source picker shows names, not raw ids.
+  const { data: camerasData } = useCameras()
+  const cameraNames = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const c of camerasData?.data ?? []) map.set(c.id, c.name)
+    return map
+  }, [camerasData])
 
   const [source, setSource] = useState<'webcam' | number>('webcam')
   const [running, setRunning] = useState(false)
@@ -250,69 +305,81 @@ export default function WebcamMonitor() {
   }
 
   const isWebcam = source === 'webcam'
-  const mediaClass = isFullscreen ? 'mx-auto h-full w-full object-contain' : 'block w-full'
+  const mediaClass = isFullscreen
+    ? 'mx-auto h-full w-full object-contain'
+    : 'h-full w-full object-cover'
   const showFullscreenBtn = isWebcam ? active : !!streamImg
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-slate-100">Webcam monitor</h2>
-          <p className="text-xs text-slate-400">
-            Local camera spot-check, or a live view of a registered stream.
-          </p>
-        </div>
         <div className="flex items-center gap-3">
+          <span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-500/15 text-blue-400">
+            {ScanIcon}
+          </span>
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">Webcam monitor</h2>
+            <p className="text-xs text-slate-400">
+              Local camera spot-check, or a live view of a registered stream.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
           <Combobox
             value={isWebcam ? 'webcam' : String(source)}
             onChange={(value) => changeSource(value)}
+            className="max-w-[180px]"
           >
             <option value="webcam">Local webcam</option>
             {streams.map((s) => (
               <option key={s.camera_id} value={s.camera_id}>
-                Camera #{s.camera_id} ({s.status})
+                {`${cameraNames.get(s.camera_id) ?? `Camera #${s.camera_id}`} (${s.status})`}
               </option>
             ))}
           </Combobox>
 
           {isWebcam ? (
-            <>
-              <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${STATUS_STYLE[status]}`}>
-                {STATUS_LABEL[status]}
-              </span>
-              {running ? (
-                <Button variant="danger" onClick={handleStop}>
-                  Stop
-                </Button>
-              ) : (
-                <Button onClick={handleStart}>Start camera</Button>
-              )}
-            </>
+            running ? (
+              <Button variant="danger" onClick={handleStop}>
+                Stop
+              </Button>
+            ) : (
+              <Button onClick={handleStart}>Start camera</Button>
+            )
           ) : (
-            <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${streamImg ? STATUS_STYLE.recognized : STATUS_STYLE.idle}`}>
-              {streamImg ? '● Live' : 'Offline'}
-            </span>
+            <StatusPill status={streamImg ? 'recognized' : 'idle'} />
           )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div ref={videoBoxRef} className="relative overflow-hidden rounded-lg bg-black">
+        <div
+          ref={videoBoxRef}
+          className={`relative overflow-hidden rounded-lg bg-black ${isFullscreen ? '' : 'aspect-video ring-1 ring-slate-700/60'}`}
+        >
           {isWebcam ? (
             <>
               <video ref={videoRef} className={mediaClass} playsInline muted autoPlay />
               <canvas ref={canvasRef} hidden />
               {!active && (
-                <div className="absolute inset-0 grid place-items-center text-sm text-slate-400">
-                  Camera off
+                <div className="absolute inset-0 grid place-items-center">
+                  <div className="flex flex-col items-center gap-2 text-slate-500">
+                    <span className="grid h-12 w-12 place-items-center rounded-full bg-slate-800/80 text-slate-400">
+                      {ScanIcon}
+                    </span>
+                    <span className="text-sm">Camera off</span>
+                  </div>
                 </div>
               )}
             </>
           ) : streamImg ? (
             <img src={streamImg} alt={`Camera ${source}`} className={mediaClass} />
           ) : (
-            <div className="grid min-h-[240px] place-items-center p-6 text-center text-sm text-slate-400">
-              {streamErr ?? 'Connecting…'}
+            <div className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-400">
+              <span className="inline-flex items-center gap-2">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
+                {streamErr ?? 'Connecting…'}
+              </span>
             </div>
           )}
 
@@ -346,8 +413,8 @@ export default function WebcamMonitor() {
           {/* Recognition overlay (local webcam only) — visible in fullscreen too. */}
           {isWebcam && active && (
             <>
-              <span className={`absolute left-2 top-2 inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${STATUS_STYLE[status]}`}>
-                {STATUS_LABEL[status]}
+              <span className="absolute left-2 top-2">
+                <StatusPill status={status} />
               </span>
 
               {(last || status === 'spoof') && (
@@ -388,53 +455,104 @@ export default function WebcamMonitor() {
           )}
         </div>
 
-        <div className="flex flex-col justify-center gap-2 text-sm">
-          {!isWebcam ? (
-            <div className="text-slate-400">
-              <p className="text-slate-200">Live view · Camera #{source}</p>
-              <p className="mt-2 text-xs">
-                Recognition and attendance for registered streams are handled by the engine
-                pipeline (use “Start engine” and start this stream below). This panel is a
-                live preview.
-              </p>
-              {streamErr && <p className="mt-2 text-xs text-amber-400">{streamErr}</p>}
-            </div>
-          ) : camError ? (
-            <p className="text-red-400">{camError}</p>
-          ) : last?.matched && last.employee ? (
-            <>
-              <p className="text-lg font-semibold text-slate-100">
-                {last.employee.first_name} {last.employee.last_name}
-              </p>
-              {last.employee.employee_code && (
-                <p className="text-slate-400">{last.employee.employee_code}</p>
-              )}
-              {last.confidence != null && (
-                <p className="text-slate-400">Confidence: {(last.confidence * 100).toFixed(1)}%</p>
-              )}
-              {last.attendance?.action && (
-                <p className="text-slate-400">
-                  Attendance: <span className="font-medium text-slate-200">{last.attendance.action}</span>
+        <div className="flex flex-col rounded-lg border border-slate-700/60 bg-slate-800/30 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              {isWebcam ? 'Recognition result' : 'Stream info'}
+            </h3>
+            {isWebcam && <StatusPill status={status} />}
+          </div>
+
+          <div className="flex flex-1 flex-col justify-center">
+            {!isWebcam ? (
+              <div className="space-y-3 text-sm text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${streamImg ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                  <span className="font-medium text-slate-200">
+                    {streamImg ? 'Live preview' : 'Connecting'} · Camera #{source}
+                  </span>
+                </div>
+                <p className="text-xs leading-relaxed">
+                  Recognition and attendance for registered streams are handled by the engine
+                  pipeline — use “Start engine” and start this stream below. This panel is a live
+                  preview only.
                 </p>
-              )}
-            </>
-          ) : status === 'spoof' ? (
-            <p className="text-red-400">Spoof / liveness check failed.</p>
-          ) : status === 'unknown' ? (
-            <div className="text-amber-400">
-              <p>{UNKNOWN_HINTS[last?.reason ?? ''] ?? UNKNOWN_HINTS.default}</p>
-              {last?.confidence != null && (
-                <p className="mt-1 text-xs text-slate-500">
-                  best match {(last.confidence * 100).toFixed(1)}%
-                  {last.reason ? ` · ${last.reason}` : ''}
+                {streamErr && <p className="text-xs text-amber-400">{streamErr}</p>}
+              </div>
+            ) : camError ? (
+              <div className="flex flex-col items-center gap-2 text-center text-red-400">
+                <span className="grid h-12 w-12 place-items-center rounded-full bg-red-500/15">
+                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                    <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+                  </svg>
+                </span>
+                <p className="text-sm">{camError}</p>
+              </div>
+            ) : last?.matched && last.employee ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-base font-semibold text-emerald-300">
+                    {initialsOf(last.employee.first_name, last.employee.last_name)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-lg font-semibold text-slate-100">
+                      {last.employee.first_name} {last.employee.last_name}
+                    </p>
+                    {last.employee.employee_code && (
+                      <p className="truncate text-sm text-slate-400">{last.employee.employee_code}</p>
+                    )}
+                  </div>
+                </div>
+                {last.confidence != null && <ConfidenceBar value={last.confidence} />}
+                {last.attendance?.action && (
+                  <div className="flex items-center justify-between rounded-lg bg-slate-800/60 px-3 py-2 text-sm">
+                    <span className="text-slate-400">Attendance</span>
+                    <span className="font-medium capitalize text-emerald-300">
+                      {last.attendance.action.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : status === 'spoof' ? (
+              <div className="flex flex-col items-center gap-2 text-center text-red-400">
+                <span className="grid h-12 w-12 place-items-center rounded-full bg-red-500/15">
+                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4Z" />
+                    <path d="M9.5 9.5l5 5M14.5 9.5l-5 5" />
+                  </svg>
+                </span>
+                <p className="text-sm font-medium">Spoof / liveness check failed</p>
+                <p className="text-xs text-slate-500">Use a live face, not a photo or screen.</p>
+              </div>
+            ) : status === 'unknown' ? (
+              <div className="flex flex-col items-center gap-2 text-center text-amber-400">
+                <span className="grid h-12 w-12 place-items-center rounded-full bg-amber-500/15">
+                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M9.5 9.5a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3M12 17h.01" />
+                  </svg>
+                </span>
+                <p className="text-sm font-medium">
+                  {UNKNOWN_HINTS[last?.reason ?? ''] ?? UNKNOWN_HINTS.default}
                 </p>
-              )}
-            </div>
-          ) : (
-            <p className="text-slate-400">
-              {running ? 'Look at the camera to identify.' : 'Start the camera to monitor recognition.'}
-            </p>
-          )}
+                {last?.confidence != null && (
+                  <p className="text-xs text-slate-500">
+                    best match {(last.confidence * 100).toFixed(1)}%
+                    {last.reason ? ` · ${last.reason}` : ''}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 text-center text-slate-400">
+                <span className={`grid h-12 w-12 place-items-center rounded-full ${running ? 'bg-blue-500/15 text-blue-400' : 'bg-slate-800/80 text-slate-500'}`}>
+                  {ScanIcon}
+                </span>
+                <p className="text-sm">
+                  {running ? 'Look at the camera to identify.' : 'Start the camera to monitor recognition.'}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

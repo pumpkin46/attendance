@@ -26,6 +26,14 @@ interface ComboboxProps {
   'aria-label'?: string
 }
 
+/** Flatten an option's children into plain label text (handles `Text {expr}` mixes). */
+function nodeText(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(nodeText).join('')
+  return ''
+}
+
 /** Read `<option>` children into the option model. */
 function optionsFromChildren(children: React.ReactNode): ComboboxOption[] {
   const out: ComboboxOption[] = []
@@ -33,10 +41,7 @@ function optionsFromChildren(children: React.ReactNode): ComboboxOption[] {
     if (!isValidElement(child)) return
     const props = child.props as { value?: string | number; children?: React.ReactNode; disabled?: boolean }
     const value = props.value == null ? '' : String(props.value)
-    const label =
-      typeof props.children === 'string' || typeof props.children === 'number'
-        ? String(props.children)
-        : value
+    const label = nodeText(props.children).trim() || value
     out.push({ value, label, disabled: props.disabled })
   })
   return out

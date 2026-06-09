@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from '@/features/auth/ProtectedRoute'
 import { ErrorBoundary } from '@/shared/components/ErrorBoundary'
+import { Loading } from '@/shared/ui/Loading'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import { RealtimeProvider } from '@/features/realtime/RealtimeContext'
 import AppLayout from '@/layouts/AppLayout'
@@ -33,7 +34,7 @@ const PrivacyPage = lazy(() => import('@/features/privacy/PrivacyPage'))
 const LoginPage = lazy(() => import('@/features/auth/LoginPage'))
 
 function FullScreenFallback() {
-  return <div className="grid min-h-screen place-items-center text-slate-400">Loading…</div>
+  return <Loading fullScreen />
 }
 
 export default function App() {

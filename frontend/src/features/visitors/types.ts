@@ -53,7 +53,6 @@ export interface BlacklistEntry {
 
 export type VisitorTab =
   | 'dashboard'
-  | 'register'
   | 'visitors'
   | 'active'
   | 'approvals'

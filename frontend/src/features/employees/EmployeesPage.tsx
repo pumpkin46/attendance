@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
+import { Card } from '@/shared/ui/Card'
 import { Input } from '@/shared/ui/Input'
 import { Combobox } from '@/shared/ui/Combobox'
 import { DatePicker } from '@/shared/ui/DatePicker'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { SidePanel } from '@/shared/ui/SidePanel'
+import { SearchBox } from '@/shared/ui/SearchBox'
 import { DataTable } from '@/shared/ui/DataTable'
+import { cn } from '@/shared/lib/cn'
+import { initialsOf } from '@/shared/lib/format'
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue'
 import type { Employee } from '@/shared/types'
 import {
@@ -17,6 +21,55 @@ import {
   useSaveEmployee,
 } from '@/features/employees/api/queries'
 import { emptyEmployeeForm, type EmployeeForm } from '@/features/employees/types'
+
+/** Deterministic accent colour for an employee avatar, derived from their id. */
+const AVATAR_TONES = [
+  'bg-blue-500/15 text-blue-300',
+  'bg-emerald-500/15 text-emerald-300',
+  'bg-violet-500/15 text-violet-300',
+  'bg-amber-500/15 text-amber-300',
+  'bg-rose-500/15 text-rose-300',
+  'bg-cyan-500/15 text-cyan-300',
+]
+
+function Avatar({ employee }: { employee: Employee }) {
+  const tone = AVATAR_TONES[employee.id % AVATAR_TONES.length]
+  return (
+    <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold', tone)}>
+      {initialsOf(employee.first_name, employee.last_name)}
+    </span>
+  )
+}
+
+function MiniStat({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string
+  value: React.ReactNode
+  hint?: string
+  tone?: 'ok' | 'warn' | 'accent'
+}) {
+  return (
+    <Card className="flex flex-col gap-1">
+      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+      <span
+        className={cn(
+          'text-2xl font-semibold',
+          tone === 'ok' && 'text-emerald-400',
+          tone === 'warn' && 'text-amber-400',
+          tone === 'accent' && 'text-blue-400',
+          !tone && 'text-slate-100'
+        )}
+      >
+        {value}
+      </span>
+      {hint && <span className="text-xs text-slate-500">{hint}</span>}
+    </Card>
+  )
+}
 
 export default function EmployeesPage() {
   const [search, setSearch] = useState('')
@@ -31,6 +84,12 @@ export default function EmployeesPage() {
 
   const saveEmployee = useSaveEmployee()
   const deleteMutation = useDeleteEmployee()
+
+  const total = data?.total ?? employees.length
+  const enrolledCount = employees.filter((e) => e.face_enrolled).length
+  const rfidCount = employees.filter((e) => (e.active_rfid_cards_count ?? 0) > 0).length
+  const inactiveCount = employees.filter((e) => !e.is_active).length
+  const pct = (n: number) => (employees.length ? Math.round((n / employees.length) * 100) : 0)
 
   const closeForm = () => {
     setFormOpen(false)
@@ -77,19 +136,41 @@ export default function EmployeesPage() {
         title="Employees"
         description="Workforce registry, face enrollment, and RFID card status"
         actions={
-          <div className="flex gap-2">
-            <Input
+          <div className="flex flex-wrap gap-2">
+            <SearchBox
               className="min-w-56"
               placeholder="Search employees…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={setSearch}
             />
-            <Button onClick={formOpen ? closeForm : openCreate}>
-              {formOpen ? 'Cancel' : 'New employee'}
+            <Button onClick={formOpen ? closeForm : openCreate} variant={formOpen ? 'ghost' : 'primary'}>
+              {formOpen ? 'Cancel' : '+ New employee'}
             </Button>
           </div>
         }
       />
+
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <MiniStat label="Total employees" value={total} hint={`${inactiveCount} inactive`} />
+        <MiniStat
+          label="Face enrolled"
+          value={enrolledCount}
+          hint={`${pct(enrolledCount)}% of loaded`}
+          tone="ok"
+        />
+        <MiniStat
+          label="RFID assigned"
+          value={rfidCount}
+          hint={`${pct(rfidCount)}% of loaded`}
+          tone="accent"
+        />
+        <MiniStat
+          label="Inactive"
+          value={inactiveCount}
+          hint={inactiveCount ? 'Needs review' : 'All active'}
+          tone={inactiveCount ? 'warn' : undefined}
+        />
+      </div>
 
       {formOpen && (
         <SidePanel
@@ -200,24 +281,66 @@ export default function EmployeesPage() {
         rowKey={(e) => e.id}
         pageSize={10}
         loading={loading}
-        empty="No employees found"
+        empty={search ? `No employees match “${search}”` : 'No employees found'}
         columns={[
-          { key: 'code', header: 'Code', cell: (e) => e.employee_code },
-          { key: 'name', header: 'Name', cell: (e) => `${e.first_name} ${e.last_name}` },
-          { key: 'department', header: 'Department', cell: (e) => e.department ?? '—' },
-          { key: 'location', header: 'Location', cell: (e) => e.location?.name ?? '—' },
+          {
+            key: 'code',
+            header: 'Code',
+            sortable: true,
+            width: '8rem',
+            cell: (e) => <span className="font-mono text-xs text-slate-400">{e.employee_code}</span>,
+          },
+          {
+            key: 'name',
+            header: 'Employee',
+            sortable: true,
+            sortValue: (e) => `${e.first_name} ${e.last_name}`,
+            cell: (e) => (
+              <div className="flex items-center gap-3">
+                <Avatar employee={e} />
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-slate-100">
+                    {e.first_name} {e.last_name}
+                  </div>
+                  <div className="truncate text-xs text-slate-500">
+                    {e.job_title || e.email || '—'}
+                  </div>
+                </div>
+              </div>
+            ),
+          },
+          {
+            key: 'department',
+            header: 'Department',
+            sortable: true,
+            sortValue: (e) => e.department ?? '',
+            cell: (e) => e.department ?? <span className="text-slate-600">—</span>,
+          },
+          {
+            key: 'location',
+            header: 'Location',
+            sortable: true,
+            sortValue: (e) => e.location?.name ?? '',
+            cell: (e) => e.location?.name ?? <span className="text-slate-600">—</span>,
+          },
           {
             key: 'face_enrolled',
-            header: 'Face enrolled',
+            header: 'Face',
+            align: 'center',
+            sortable: true,
+            sortValue: (e) => (e.face_enrolled ? 1 : 0),
             cell: (e) => (
               <Badge tone={e.face_enrolled ? 'ok' : 'warn'}>
-                {e.face_enrolled ? 'Yes' : 'No'}
+                {e.face_enrolled ? 'Enrolled' : 'Missing'}
               </Badge>
             ),
           },
           {
             key: 'rfid',
-            header: 'RFID card',
+            header: 'RFID',
+            align: 'center',
+            sortable: true,
+            sortValue: (e) => e.active_rfid_cards_count ?? 0,
             cell: (e) => (
               <Badge tone={(e.active_rfid_cards_count ?? 0) > 0 ? 'ok' : 'neutral'}>
                 {(e.active_rfid_cards_count ?? 0) > 0 ? 'Assigned' : 'None'}
@@ -227,22 +350,29 @@ export default function EmployeesPage() {
           {
             key: 'status',
             header: 'Status',
+            align: 'center',
+            sortable: true,
+            sortValue: (e) => (e.is_active ? 1 : 0),
             cell: (e) => (
-              <Badge tone={e.is_active ? 'ok' : 'warn'}>
+              <Badge tone={e.is_active ? 'ok' : 'danger'}>
                 {e.is_active ? 'Active' : 'Inactive'}
               </Badge>
             ),
           },
           {
             key: 'actions',
-            header: 'Actions',
+            header: '',
+            align: 'right',
+            width: '7rem',
             cell: (e) => (
-              <div className="flex gap-2">
-                <Button variant="ghost" onClick={() => openEdit(e)}>
+              <div className="flex justify-end gap-1">
+                <Button size="sm" variant="ghost" onClick={() => openEdit(e)}>
                   Edit
                 </Button>
                 <Button
-                  variant="danger"
+                  size="sm"
+                  variant="ghost"
+                  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
                   onClick={() => remove(e)}
                   disabled={deleteMutation.isPending}
                 >

@@ -267,8 +267,8 @@ export default function SidebarNav() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search"
-          className="w-full rounded-lg border border-slate-700/80 bg-slate-950/80 py-2 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-500 focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+          placeholder="Search menu…"
+          className="w-full rounded-lg border border-slate-700/80 bg-slate-950/60 py-2 pl-9 pr-3 text-sm text-slate-200 transition-colors placeholder:text-slate-500 hover:border-slate-600 focus:border-blue-500/60 focus:outline-none focus:ring-1 focus:ring-blue-500/40 [&::-webkit-search-cancel-button]:appearance-none"
         />
       </label>
 
@@ -289,16 +289,29 @@ export default function SidebarNav() {
                     onClick={() => openGroup(group)}
                     onMouseEnter={() => group.items[0] && prefetchRoute(group.items[0].to)}
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[15px] font-medium transition-colors',
-                      isActiveGroup && isOpen
-                        ? 'bg-slate-800 text-slate-100 [&_span_svg]:text-slate-200'
-                        : 'text-slate-400 hover:bg-slate-800/70 hover:text-slate-200'
+                      'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[15px] font-medium transition-colors',
+                      isActiveGroup
+                        ? 'bg-slate-800 text-slate-100 [&_span_svg]:text-blue-400'
+                        : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 hover:[&_span_svg]:text-slate-300'
                     )}
                   >
-                    <span className={cn(isActiveGroup && isOpen && '[&_span]:text-slate-200')}>
-                      {group.icon}
-                    </span>
+                    {group.icon}
                     <span className="min-w-0 flex-1 truncate">{group.title}</span>
+                    <svg
+                      viewBox="0 0 24 24"
+                      className={cn(
+                        'h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200',
+                        isOpen ? 'rotate-0' : '-rotate-90'
+                      )}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
                   </button>
 
                   {isOpen && (
@@ -308,7 +321,7 @@ export default function SidebarNav() {
                       aria-label={group.title}
                     >
                       <span
-                        className="pointer-events-none absolute bottom-1 left-7 top-1 w-px bg-slate-700"
+                        className="pointer-events-none absolute bottom-1 left-7 top-1 w-px bg-slate-700/70"
                         aria-hidden
                       />
                       <ul className="flex flex-col">
@@ -321,7 +334,7 @@ export default function SidebarNav() {
                             >
                               {isActive && (
                                 <span
-                                  className="pointer-events-none absolute left-7 top-1/2 z-10 h-5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-200"
+                                  className="pointer-events-none absolute left-7 top-1/2 z-10 h-5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-400"
                                   aria-hidden
                                 />
                               )}
@@ -332,10 +345,10 @@ export default function SidebarNav() {
                                 onFocus={() => prefetchRoute(item.to)}
                                 className={({ isActive: linkActive }) =>
                                   cn(
-                                    'flex w-full items-center rounded-sm py-1.5 pl-10 pr-3 text-[14px] transition-colors',
+                                    'mr-1 flex w-full items-center rounded-md py-1.5 pl-10 pr-3 text-[14px] transition-colors',
                                     linkActive
-                                      ? 'font-semibold text-slate-100'
-                                      : 'font-medium text-slate-500 hover:text-slate-300'
+                                      ? 'bg-blue-500/10 font-semibold text-blue-300'
+                                      : 'font-medium text-slate-500 hover:bg-slate-800/50 hover:text-slate-300'
                                   )
                                 }
                               >

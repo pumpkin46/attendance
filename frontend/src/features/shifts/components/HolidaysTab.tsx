@@ -6,49 +6,74 @@ import { Checkbox } from '@/shared/ui/Checkbox'
 import { DatePicker } from '@/shared/ui/DatePicker'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
+import { SidePanel } from '@/shared/ui/SidePanel'
 import { DataTable } from '@/shared/ui/DataTable'
 import { useCreateHoliday, useHolidays } from '@/features/shifts/api/queries'
+
+const emptyForm = { name: '', date: '', is_recurring: false }
 
 export function HolidaysTab() {
   const { data: holidays = [], isPending } = useHolidays()
   const createHoliday = useCreateHoliday()
-  const [form, setForm] = useState({ name: '', date: '', is_recurring: false })
+  const [formOpen, setFormOpen] = useState(false)
+  const [form, setForm] = useState(emptyForm)
+
+  const close = () => {
+    setFormOpen(false)
+    setForm(emptyForm)
+  }
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
     createHoliday.mutate(
       { name: form.name.trim(), date: form.date, is_recurring: form.is_recurring },
-      { onSuccess: () => setForm({ name: '', date: '', is_recurring: false }) }
+      { onSuccess: close }
     )
   }
 
   return (
-    <div>
-      <Card className="mb-6">
-        <h2 className="mb-4 text-lg font-medium">Add holiday</h2>
-        <form className="grid items-end gap-4 sm:grid-cols-4" onSubmit={submit}>
-          <Label className="sm:col-span-2">
-            Name *
-            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          </Label>
-          <Label>
-            Date *
-            <DatePicker value={form.date} onChange={(value) => setForm({ ...form, date: value })} required />
-          </Label>
-          <Label className="flex-row items-center gap-2">
+    <Card padding={false} className="overflow-hidden">
+      <div className="flex items-center justify-between border-b border-slate-800 p-4">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-200">Holiday calendar</h2>
+          <p className="text-xs text-slate-400">Company holidays excluded from attendance rules.</p>
+        </div>
+        <Button onClick={() => setFormOpen(true)}>+ Add holiday</Button>
+      </div>
+
+      {formOpen && (
+        <SidePanel
+          title="Add holiday"
+          description="A non-working day for the organization"
+          onClose={close}
+          footer={
+            <>
+              <Button type="submit" form="holiday-form" isLoading={createHoliday.isPending}>
+                Add holiday
+              </Button>
+              <Button type="button" variant="ghost" onClick={close}>
+                Cancel
+              </Button>
+            </>
+          }
+        >
+          <form id="holiday-form" className="grid gap-4" onSubmit={submit}>
+            <Label>
+              Name *
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </Label>
+            <Label>
+              Date *
+              <DatePicker value={form.date} onChange={(value) => setForm({ ...form, date: value })} required />
+            </Label>
             <Checkbox
               checked={form.is_recurring}
               onChange={(e) => setForm({ ...form, is_recurring: e.target.checked })}
-              label="Recurring"
+              label="Recurs every year"
             />
-          </Label>
-          <div className="sm:col-span-4">
-            <Button type="submit" disabled={createHoliday.isPending}>
-              Add holiday
-            </Button>
-          </div>
-        </form>
-      </Card>
+          </form>
+        </SidePanel>
+      )}
 
       <DataTable
         data={holidays}
@@ -57,11 +82,15 @@ export function HolidaysTab() {
         loading={isPending}
         empty="No holidays configured"
         columns={[
-          { key: 'date', header: 'Date', cell: (h) => h.date },
-          { key: 'name', header: 'Name', cell: (h) => h.name },
-          { key: 'recurring', header: 'Recurring', cell: (h) => h.is_recurring && <Badge tone="neutral">Yearly</Badge> },
+          { key: 'date', header: 'Date', className: 'font-mono text-xs text-slate-300', cell: (h) => h.date },
+          { key: 'name', header: 'Name', cell: (h) => <span className="font-medium text-slate-100">{h.name}</span> },
+          {
+            key: 'recurring',
+            header: 'Recurring',
+            cell: (h) => (h.is_recurring ? <Badge tone="neutral">Yearly</Badge> : <span className="text-slate-600">—</span>),
+          },
         ]}
       />
-    </div>
+    </Card>
   )
 }
