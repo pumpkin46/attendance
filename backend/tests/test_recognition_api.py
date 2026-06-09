@@ -38,6 +38,16 @@ class FakeSession:
         )
 
 
+@pytest.fixture(autouse=True)
+def _reset_unknown_throttle():
+    """Isolate the per-process unknown-event throttle state between tests."""
+    import app.services.recognition_service as rs
+
+    rs._last_unknown_at.clear()
+    yield
+    rs._last_unknown_at.clear()
+
+
 @pytest.fixture
 def fake_session():
     return FakeSession()
@@ -184,3 +194,88 @@ def test_identify_with_unevaluated_liveness(client, fake_session, monkeypatch):
     resp = client.post("/api/v1/recognition/identify", json={"image": "x"})
     assert resp.status_code == 200
     assert resp.json()["liveness_passed"] is None
+
+
+def test_save_event_snapshot_writes_file(tmp_path, monkeypatch):
+    """A submitted frame is persisted so the Unknown Faces thumbnail can load."""
+    import base64
+
+    from app.core.config import settings
+    import app.services.recognition_service as rs
+
+    monkeypatch.setattr(settings, "engine_snapshot_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "unknown_snapshot_enabled", True)
+
+    jpeg = base64.b64encode(b"\xff\xd8\xff\xe0\x00\x10JFIF-fake").decode()
+    path = rs._save_event_snapshot(f"data:image/jpeg;base64,{jpeg}", 123)
+
+    assert path is not None
+    from pathlib import Path
+
+    saved = Path(path)
+    assert saved.exists()
+    assert saved.read_bytes().startswith(b"\xff\xd8")  # JPEG magic
+
+
+def test_save_event_snapshot_disabled(monkeypatch):
+    from app.core.config import settings
+    import app.services.recognition_service as rs
+
+    monkeypatch.setattr(settings, "unknown_snapshot_enabled", False)
+    assert rs._save_event_snapshot("data:image/jpeg;base64,AAAA", 1) is None
+
+
+def test_save_event_snapshot_no_image():
+    import app.services.recognition_service as rs
+
+    assert rs._save_event_snapshot(None, 1) is None
+
+
+def test_unknown_event_throttle(monkeypatch):
+    """With the window set, repeat unknowns within it are suppressed per tenant."""
+    from app.core.config import settings
+    import app.services.recognition_service as rs
+
+    monkeypatch.setattr(settings, "unknown_event_throttle_seconds", 30)
+    rs._last_unknown_at.clear()
+
+    assert rs._unknown_throttled(1) is False  # first → record
+    assert rs._unknown_throttled(1) is True  # within window → skip
+    assert rs._unknown_throttled(2) is False  # different tenant → record
+
+
+def test_unknown_event_throttle_disabled(monkeypatch):
+    from app.core.config import settings
+    import app.services.recognition_service as rs
+
+    monkeypatch.setattr(settings, "unknown_event_throttle_seconds", 0)
+    rs._last_unknown_at.clear()
+
+    assert rs._unknown_throttled(1) is False
+    assert rs._unknown_throttled(1) is False  # 0 = never throttle
+
+
+def test_purge_old_snapshots_removes_expired(tmp_path, monkeypatch):
+    """Files older than the retention window are deleted; fresh ones kept."""
+    import os
+    import time
+
+    from app.core.config import settings
+    import app.services.recognition_service as rs
+
+    monkeypatch.setattr(settings, "engine_snapshot_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "unknown_snapshot_retention_days", 30)
+
+    old = tmp_path / "event_1.jpg"
+    fresh = tmp_path / "event_2.jpg"
+    old.write_bytes(b"\xff\xd8old")
+    fresh.write_bytes(b"\xff\xd8new")
+    # Backdate the old file 40 days.
+    old_ts = time.time() - 40 * 86400
+    os.utime(old, (old_ts, old_ts))
+
+    removed = rs.purge_old_snapshots()
+
+    assert removed == 1
+    assert not old.exists()
+    assert fresh.exists()

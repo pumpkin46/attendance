@@ -44,5 +44,9 @@ celery_app.conf.update(
             "task": "maintenance.purge_retention",
             "schedule": float(settings.beat_retention_purge_seconds),
         },
+        "purge-snapshots": {
+            "task": "maintenance.purge_snapshots",
+            "schedule": float(settings.beat_retention_purge_seconds),
+        },
     },
 )

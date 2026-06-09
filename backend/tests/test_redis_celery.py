@@ -72,8 +72,14 @@ def test_beat_schedule_registered():
         "expire-visitors",
         "detect-anomalies",
         "purge-retention",
+        "purge-snapshots",
     }
-    for task in ("expire_visitors", "detect_anomalies", "purge_retention"):
+    for task in (
+        "expire_visitors",
+        "detect_anomalies",
+        "purge_retention",
+        "purge_snapshots",
+    ):
         assert f"maintenance.{task}" in celery_app.tasks
 
 

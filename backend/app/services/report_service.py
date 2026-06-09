@@ -63,6 +63,8 @@ def format_unknown_person_event(event: RecognitionEvent) -> dict:
         "camera_id": event.camera_id,
         "result": result,
         "confidence": float(event.confidence) if event.confidence is not None else None,
+        "liveness_passed": event.liveness_passed,
+        "processing_ms": event.processing_ms,
         "snapshot_path": event.snapshot_path,
         "snapshot_url": (
             f"/api/v1/recognition/events/{event.id}/snapshot" if event.snapshot_path else None

@@ -131,6 +131,8 @@ export interface RecognitionEvent {
   camera_id?: number
   result: string
   confidence?: number
+  liveness_passed?: boolean | null
+  processing_ms?: number | null
   snapshot_path?: string
   snapshot_url?: string
   notified_at?: string

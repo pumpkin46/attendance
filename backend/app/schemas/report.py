@@ -94,6 +94,8 @@ class UnknownPersonEvent(BaseModel):
     camera_id: int | None = None
     result: str | None = None
     confidence: float | None = None
+    liveness_passed: bool | None = None
+    processing_ms: int | None = None
     snapshot_path: str | None = None
     snapshot_url: str | None = None
     notified_at: datetime | None = None

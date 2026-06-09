@@ -143,6 +143,12 @@ class Settings(BaseSettings):
     unknown_notify_admins: bool = True
     unknown_alert_cooldown_seconds: int = 300
     unknown_snapshot_retention_days: int = 30
+    # Minimum seconds between persisted "unknown" recognition events per tenant.
+    # A continuously-scanning kiosk produces an unknown on nearly every frame; set
+    # this (e.g. 30) to throttle DB rows + snapshots. 0 disables throttling (record
+    # every unknown). The UI still shows "unknown" live regardless — only the
+    # persisted event/snapshot is rate-limited.
+    unknown_event_throttle_seconds: int = 0
 
     # ── Camera / Edge / RFID ──────────────────────────────────────────────
     camera_stream_poll_interval_seconds: int = 5

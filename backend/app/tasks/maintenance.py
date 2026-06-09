@@ -52,6 +52,17 @@ def detect_anomalies_task() -> dict:
     return result
 
 
+@celery_app.task(name="maintenance.purge_snapshots")
+def purge_snapshots_task() -> dict:
+    """Delete recognition snapshot files older than the retention window."""
+    from app.services import recognition_service
+
+    removed = recognition_service.purge_old_snapshots()
+    if removed:
+        logger.info("Purged %d old snapshot file(s)", removed)
+    return {"removed": removed}
+
+
 @celery_app.task(name="maintenance.purge_retention")
 def purge_retention_task() -> dict:
     """Delete data older than the configured GDPR retention windows."""

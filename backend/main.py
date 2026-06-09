@@ -41,6 +41,8 @@ async def lifespan(app: FastAPI):
     # otherwise fall back to the in-process loop so single-process deploys still work.
     if not settings.celery_enabled:
         start_visitor_expiry_task()
+        from app.services.recognition_service import start_snapshot_cleanup_task
+        start_snapshot_cleanup_task()
 
     # Multi-worker realtime: each worker subscribes to Redis and fans events out
     # to its local connections. No-op when Redis is disabled (local-only mode).
