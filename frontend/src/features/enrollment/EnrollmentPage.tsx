@@ -1,11 +1,11 @@
-import { useCallback, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useState, type FormEvent } from 'react'
 import { useWebcam } from '@/shared/hooks/useWebcam'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input } from '@/shared/ui/Input'
+import { ImageDropzone } from '@/shared/ui/ImageDropzone'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
-import { Select } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { cn } from '@/shared/lib/cn'
 import { useEnrollFace, useEnrollableEmployees, useEnrollmentConfig, useValidateImage } from '@/features/enrollment/api/queries'
 import { reasonLabel, type PoseCapture } from '@/features/enrollment/types'
@@ -20,7 +20,6 @@ export default function EnrollmentPage() {
   const [stepIndex, setStepIndex] = useState(0)
   const [message, setMessage] = useState('')
   const [useCamera, setUseCamera] = useState(true)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const validateImage = useValidateImage()
   const enrollFace = useEnrollFace()
@@ -150,7 +149,7 @@ export default function EnrollmentPage() {
         <form className="flex flex-col gap-5" onSubmit={submit}>
           <Label>
             Employee
-            <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} required>
+            <Combobox value={employeeId} onChange={(value) => setEmployeeId(value)} required>
               <option value="">Select employee</option>
               {employees.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -158,7 +157,7 @@ export default function EnrollmentPage() {
                   {e.face_enrolled ? ' (re-enroll)' : ''}
                 </option>
               ))}
-            </Select>
+            </Combobox>
           </Label>
 
           {config && (
@@ -234,15 +233,15 @@ export default function EnrollmentPage() {
               {camError && <p className="text-sm text-red-400">{camError}</p>}
             </div>
           ) : (
-            <Label>
-              Image for current step
-              <Input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
-              />
-            </Label>
+            <ImageDropzone
+              label="Image for current step"
+              onFile={onFile}
+              hint={
+                currentPose
+                  ? `Upload the ${currentPose.replace(/_/g, ' ')} pose · JPEG or PNG`
+                  : 'JPEG or PNG · one clear, front-facing face'
+              }
+            />
           )}
 
           {currentPose && poses[currentPose] && (

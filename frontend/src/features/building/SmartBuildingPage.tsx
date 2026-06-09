@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Input } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Badge } from '@/shared/ui/Badge'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import {
   useBuildingConfig,
   useBuildingEvents,
@@ -108,13 +109,13 @@ export default function SmartBuildingPage() {
           </Label>
           <Label>
             Driver
-            <Select value={form.driver} onChange={(e) => setForm({ ...form, driver: e.target.value })}>
+            <Combobox value={form.driver} onChange={(value) => setForm({ ...form, driver: value })}>
               {Object.entries(drivers).map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
                 </option>
               ))}
-            </Select>
+            </Combobox>
           </Label>
           <Label className="sm:col-span-2">
             Webhook URL
@@ -133,90 +134,75 @@ export default function SmartBuildingPage() {
       </Card>
 
       <div className="mb-6">
-        <TableShell>
-          <TableHead>
-            <Th>Name</Th>
-            <Th>Driver</Th>
-            <Th>Events today</Th>
-            <Th>Status</Th>
-            <Th>Actions</Th>
-          </TableHead>
-          <TableBody>
-            {connectorsLoading ? (
-              <tr>
-                <Td colSpan={5} className="text-slate-400">
-                  Loading…
-                </Td>
-              </tr>
-            ) : (
-              connectors.map((c) => (
-                <tr key={c.id}>
-                  <Td>{c.name}</Td>
-                  <Td>{c.driver}</Td>
-                  <Td>{c.events_today}</Td>
-                  <Td>
-                    <Badge tone={c.is_active ? 'ok' : 'neutral'}>{c.is_active ? 'Active' : 'Off'}</Badge>
-                  </Td>
-                  <Td>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        onClick={() => testConnector.mutate(c.id)}
-                        disabled={testConnector.isPending}
-                      >
-                        Test
-                      </Button>
-                      <Button
-                        variant="danger"
-                        disabled={deleteConnector.isPending}
-                        onClick={() => {
-                          if (window.confirm(`Delete connector "${c.name}"?`)) deleteConnector.mutate(c.id)
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </Td>
-                </tr>
-              ))
-            )}
-          </TableBody>
-        </TableShell>
+        <DataTable
+          data={connectors}
+          rowKey={(c) => c.id}
+          loading={connectorsLoading}
+          empty="No connectors configured yet"
+          columns={[
+            { key: 'name', header: 'Name', cell: (c) => c.name },
+            { key: 'driver', header: 'Driver', cell: (c) => c.driver },
+            { key: 'events_today', header: 'Events today', cell: (c) => c.events_today },
+            {
+              key: 'status',
+              header: 'Status',
+              cell: (c) => <Badge tone={c.is_active ? 'ok' : 'neutral'}>{c.is_active ? 'Active' : 'Off'}</Badge>,
+            },
+            {
+              key: 'actions',
+              header: 'Actions',
+              cell: (c) => (
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => testConnector.mutate(c.id)}
+                    disabled={testConnector.isPending}
+                  >
+                    Test
+                  </Button>
+                  <Button
+                    variant="danger"
+                    disabled={deleteConnector.isPending}
+                    onClick={() => {
+                      if (window.confirm(`Delete connector "${c.name}"?`)) deleteConnector.mutate(c.id)
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+        />
       </div>
 
       <h2 className="mb-3 text-lg font-medium">Recent building events</h2>
-      <TableShell>
-        <TableHead>
-          <Th>Time</Th>
-          <Th>Connector</Th>
-          <Th>Event</Th>
-          <Th>Status</Th>
-        </TableHead>
-        <TableBody>
-          {eventsLoading ? (
-            <tr>
-              <Td colSpan={4} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          ) : (
-            events.map((ev) => (
-              <tr key={ev.id}>
-                <Td className="text-xs">
-                  {ev.created_at ? new Date(ev.created_at).toLocaleString() : '—'}
-                </Td>
-                <Td>{ev.connector?.name ?? '—'}</Td>
-                <Td>{ev.event_type}</Td>
-                <Td>
-                  <Badge tone={ev.status === 'sent' ? 'ok' : ev.status === 'failed' ? 'danger' : 'neutral'}>
-                    {ev.status}
-                  </Badge>
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={events}
+        rowKey={(ev) => ev.id}
+        pageSize={10}
+        loading={eventsLoading}
+        empty="No building events yet"
+        columns={[
+          {
+            key: 'time',
+            header: 'Time',
+            className: 'text-xs',
+            cell: (ev) => (ev.created_at ? new Date(ev.created_at).toLocaleString() : '—'),
+          },
+          { key: 'connector', header: 'Connector', cell: (ev) => ev.connector?.name ?? '—' },
+          { key: 'event', header: 'Event', cell: (ev) => ev.event_type },
+          {
+            key: 'status',
+            header: 'Status',
+            cell: (ev) => (
+              <Badge tone={ev.status === 'sent' ? 'ok' : ev.status === 'failed' ? 'danger' : 'neutral'}>
+                {ev.status}
+              </Badge>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

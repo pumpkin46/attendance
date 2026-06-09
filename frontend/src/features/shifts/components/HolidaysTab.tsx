@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
+import { Checkbox } from '@/shared/ui/Checkbox'
+import { DatePicker } from '@/shared/ui/DatePicker'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { useCreateHoliday, useHolidays } from '@/features/shifts/api/queries'
 
 export function HolidaysTab() {
@@ -31,15 +33,14 @@ export function HolidaysTab() {
           </Label>
           <Label>
             Date *
-            <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
+            <DatePicker value={form.date} onChange={(value) => setForm({ ...form, date: value })} required />
           </Label>
           <Label className="flex-row items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={form.is_recurring}
               onChange={(e) => setForm({ ...form, is_recurring: e.target.checked })}
+              label="Recurring"
             />
-            Recurring
           </Label>
           <div className="sm:col-span-4">
             <Button type="submit" disabled={createHoliday.isPending}>
@@ -49,36 +50,18 @@ export function HolidaysTab() {
         </form>
       </Card>
 
-      <TableShell>
-        <TableHead>
-          <Th>Date</Th>
-          <Th>Name</Th>
-          <Th>Recurring</Th>
-        </TableHead>
-        <TableBody>
-          {isPending ? (
-            <tr>
-              <Td colSpan={3} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          ) : holidays.length === 0 ? (
-            <tr>
-              <Td colSpan={3} className="text-slate-400">
-                No holidays configured
-              </Td>
-            </tr>
-          ) : (
-            holidays.map((h) => (
-              <tr key={h.id}>
-                <Td>{h.date}</Td>
-                <Td>{h.name}</Td>
-                <Td>{h.is_recurring && <Badge tone="neutral">Yearly</Badge>}</Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={holidays}
+        rowKey={(h) => h.id}
+        pageSize={10}
+        loading={isPending}
+        empty="No holidays configured"
+        columns={[
+          { key: 'date', header: 'Date', cell: (h) => h.date },
+          { key: 'name', header: 'Name', cell: (h) => h.name },
+          { key: 'recurring', header: 'Recurring', cell: (h) => h.is_recurring && <Badge tone="neutral">Yearly</Badge> },
+        ]}
+      />
     </div>
   )
 }

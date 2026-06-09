@@ -10,6 +10,10 @@ class EnrollRequest(BaseModel):
 
 class IdentifyRequest(BaseModel):
     image: str
+    camera_id: int | None = Field(
+        default=None,
+        description="Registered camera the frame came from; attributed to the attendance/recognition event",
+    )
     require_liveness: bool = True
     liveness_frames: list[str] | None = Field(
         default=None,

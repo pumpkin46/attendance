@@ -1,7 +1,7 @@
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { PageHeader } from '@/shared/ui/PageHeader'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -44,54 +44,50 @@ export default function NotificationsPage() {
         }
       />
 
-      <TableShell>
-        <TableHead>
-          <Th>Time</Th>
-          <Th>Type</Th>
-          <Th>Message</Th>
-          <Th>Status</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {isPending ? (
-            <tr>
-              <Td colSpan={5} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          ) : notifications.length === 0 ? (
-            <tr>
-              <Td colSpan={5} className="text-slate-400">
-                No notifications
-              </Td>
-            </tr>
-          ) : (
-            notifications.map((n) => (
-              <tr key={n.id} className={n.read_at ? '' : 'bg-slate-800/30'}>
-                <Td className="text-xs">
-                  {n.created_at ? new Date(n.created_at).toLocaleString() : '—'}
-                </Td>
-                <Td className="text-xs uppercase text-slate-400">{n.type.replace(/[._]/g, ' ')}</Td>
-                <Td>{label(n)}</Td>
-                <Td>
-                  <Badge tone={n.read_at ? 'neutral' : 'warn'}>{n.read_at ? 'Read' : 'Unread'}</Badge>
-                </Td>
-                <Td>
-                  {!n.read_at && (
-                    <Button
-                      variant="ghost"
-                      disabled={markRead.isPending}
-                      onClick={() => markRead.mutate(n.id)}
-                    >
-                      Mark read
-                    </Button>
-                  )}
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={notifications}
+        rowKey={(n) => n.id}
+        pageSize={10}
+        loading={isPending}
+        empty="No notifications"
+        rowClassName={(n) => (n.read_at ? undefined : 'bg-slate-800/30')}
+        columns={[
+          {
+            key: 'time',
+            header: 'Time',
+            className: 'text-xs',
+            cell: (n) => (n.created_at ? new Date(n.created_at).toLocaleString() : '—'),
+          },
+          {
+            key: 'type',
+            header: 'Type',
+            className: 'text-xs uppercase text-slate-400',
+            cell: (n) => n.type.replace(/[._]/g, ' '),
+          },
+          { key: 'message', header: 'Message', cell: (n) => label(n) },
+          {
+            key: 'status',
+            header: 'Status',
+            cell: (n) => (
+              <Badge tone={n.read_at ? 'neutral' : 'warn'}>{n.read_at ? 'Read' : 'Unread'}</Badge>
+            ),
+          },
+          {
+            key: 'actions',
+            header: 'Actions',
+            cell: (n) =>
+              !n.read_at && (
+                <Button
+                  variant="ghost"
+                  disabled={markRead.isPending}
+                  onClick={() => markRead.mutate(n.id)}
+                >
+                  Mark read
+                </Button>
+              ),
+          },
+        ]}
+      />
     </div>
   )
 }

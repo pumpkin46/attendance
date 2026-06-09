@@ -2,10 +2,10 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { getApiErrorMessage } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
-import { Input } from '@/shared/ui/Input'
+import { DatePicker } from '@/shared/ui/DatePicker'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { SnapshotImage } from '@/shared/components/SnapshotImage'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { useUnknownFaces } from '@/features/recognition/api/queries'
 import type { RecognitionEvent } from '@/shared/types'
 
@@ -28,83 +28,59 @@ export default function UnknownFacesPage() {
         description="FR-011: Flagged unrecognized persons with saved snapshots and admin alerts"
         actions={
           <>
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <DatePicker value={dateFrom} onChange={(value) => setDateFrom(value)} />
             <span className="text-slate-500">to</span>
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            <DatePicker value={dateTo} onChange={(value) => setDateTo(value)} />
           </>
         }
       />
 
-      <TableShell>
-        <TableHead>
-          <Th>Snapshot</Th>
-          <Th>Time</Th>
-          <Th>Camera</Th>
-          <Th>Confidence</Th>
-          <Th>Alert sent</Th>
-          <Th>Source</Th>
-        </TableHead>
-        {isPending ? (
-          <TableBody>
-            <tr>
-              <Td colSpan={6} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          </TableBody>
-        ) : isError ? (
-          <TableBody>
-            <tr>
-              <Td colSpan={6} className="text-rose-400">
-                {getApiErrorMessage(error, 'Failed to load unknown face events')}
-              </Td>
-            </tr>
-          </TableBody>
-        ) : (
-          <TableBody>
-            {events.length === 0 ? (
-              <tr>
-                <Td colSpan={6} className="text-slate-400">
-                  No unknown face events in this period
-                </Td>
-              </tr>
-            ) : (
-              events.map((e, i) => (
-                <tr key={e.id}>
-                  <Td>
-                    {e.snapshot_path ? (
-                      <button
-                        type="button"
-                        onClick={() => setIndex(i)}
-                        title="View details"
-                        className="rounded-lg ring-blue-500/0 transition hover:ring-2 hover:ring-blue-500/70 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <SnapshotImage
-                          eventId={e.id}
-                          className="h-16 w-16 cursor-pointer rounded-lg object-cover"
-                        />
-                      </button>
-                    ) : (
-                      <span className="text-slate-500">—</span>
-                    )}
-                  </Td>
-                  <Td>{new Date(e.recognized_at).toLocaleString()}</Td>
-                  <Td>{e.camera?.name ?? '—'}</Td>
-                  <Td>
-                    {e.confidence != null ? `${(Number(e.confidence) * 100).toFixed(1)}%` : '—'}
-                  </Td>
-                  <Td>
-                    <Badge tone={e.notified_at ? 'ok' : 'neutral'}>
-                      {e.notified_at ? 'Yes' : 'No'}
-                    </Badge>
-                  </Td>
-                  <Td>{e.metadata?.source ?? '—'}</Td>
-                </tr>
-              ))
-            )}
-          </TableBody>
-        )}
-      </TableShell>
+      <DataTable
+        data={events}
+        rowKey={(e) => e.id}
+        pageSize={10}
+        loading={isPending}
+        error={isError ? getApiErrorMessage(error, 'Failed to load unknown face events') : undefined}
+        empty="No unknown face events in this period"
+        columns={[
+          {
+            key: 'snapshot',
+            header: 'Snapshot',
+            cell: (e, i) =>
+              e.snapshot_path ? (
+                <button
+                  type="button"
+                  onClick={() => setIndex(i)}
+                  title="View details"
+                  className="rounded-lg ring-blue-500/0 transition hover:ring-2 hover:ring-blue-500/70 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <SnapshotImage
+                    eventId={e.id}
+                    className="h-16 w-16 cursor-pointer rounded-lg object-cover"
+                  />
+                </button>
+              ) : (
+                <span className="text-slate-500">—</span>
+              ),
+          },
+          { key: 'time', header: 'Time', cell: (e) => new Date(e.recognized_at).toLocaleString() },
+          { key: 'camera', header: 'Camera', cell: (e) => e.camera?.name ?? '—' },
+          {
+            key: 'confidence',
+            header: 'Confidence',
+            cell: (e) =>
+              e.confidence != null ? `${(Number(e.confidence) * 100).toFixed(1)}%` : '—',
+          },
+          {
+            key: 'alert',
+            header: 'Alert sent',
+            cell: (e) => (
+              <Badge tone={e.notified_at ? 'ok' : 'neutral'}>{e.notified_at ? 'Yes' : 'No'}</Badge>
+            ),
+          },
+          { key: 'source', header: 'Source', cell: (e) => e.metadata?.source ?? '—' },
+        ]}
+      />
 
       {index !== null && events[index] && (
         <UnknownFaceModal

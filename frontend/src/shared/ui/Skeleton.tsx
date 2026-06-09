@@ -1,8 +1,8 @@
 import { cn } from '@/shared/lib/cn'
 
 /** Animated placeholder shown while data loads. */
-export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn('animate-pulse rounded bg-slate-800', className)} />
+export function Skeleton({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return <div style={style} className={cn('animate-pulse rounded bg-slate-800', className)} />
 }
 
 /** A StatCard-shaped skeleton used by dashboards. */

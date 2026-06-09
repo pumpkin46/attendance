@@ -4,7 +4,7 @@ import { Card } from '@/shared/ui/Card'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { StatCardSkeleton } from '@/shared/ui/Skeleton'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import {
   useAnomalySummary,
   useCameraMonitoring,
@@ -68,36 +68,32 @@ export default function DashboardPage() {
           />
         </div>
 
-        <TableShell>
-          <TableHead>
-            <Th>Camera</Th>
-            <Th>Location</Th>
-            <Th>Online</Th>
-            <Th>Frame rate</Th>
-            <Th>Recognitions today</Th>
-          </TableHead>
-          <TableBody>
-            {!cameraMonitoring?.cameras.length ? (
-              <tr>
-                <Td colSpan={5} className="text-slate-400">
-                  No cameras registered
-                </Td>
-              </tr>
-            ) : (
-              cameraMonitoring.cameras.map((c) => (
-                <tr key={c.id}>
-                  <Td>{c.name}</Td>
-                  <Td>{c.location?.name ?? '—'}</Td>
-                  <Td>
-                    <Badge tone={c.online ? 'ok' : 'warn'}>{c.online ? 'Online' : 'Offline'}</Badge>
-                  </Td>
-                  <Td>{c.frame_rate_fps != null ? `${c.frame_rate_fps} fps` : '—'}</Td>
-                  <Td>{c.recognition_count_today ?? 0}</Td>
-                </tr>
-              ))
-            )}
-          </TableBody>
-        </TableShell>
+        <DataTable
+          data={cameraMonitoring?.cameras ?? []}
+          rowKey={(c) => c.id}
+          empty="No cameras registered"
+          columns={[
+            { key: 'camera', header: 'Camera', cell: (c) => c.name },
+            { key: 'location', header: 'Location', cell: (c) => c.location?.name ?? '—' },
+            {
+              key: 'online',
+              header: 'Online',
+              cell: (c) => (
+                <Badge tone={c.online ? 'ok' : 'warn'}>{c.online ? 'Online' : 'Offline'}</Badge>
+              ),
+            },
+            {
+              key: 'frame_rate',
+              header: 'Frame rate',
+              cell: (c) => (c.frame_rate_fps != null ? `${c.frame_rate_fps} fps` : '—'),
+            },
+            {
+              key: 'recognitions',
+              header: 'Recognitions today',
+              cell: (c) => c.recognition_count_today ?? 0,
+            },
+          ]}
+        />
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">

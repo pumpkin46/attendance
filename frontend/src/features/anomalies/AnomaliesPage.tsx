@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Select } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import {
   useAnomalies,
   useAnomalySummary,
@@ -69,9 +69,9 @@ export default function AnomaliesPage() {
 
       <Card className="mb-6">
         <div className="flex flex-wrap gap-4">
-          <Select
+          <Combobox
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(value) => setStatusFilter(value)}
             className="min-w-40"
           >
             <option value="">All statuses</option>
@@ -79,10 +79,10 @@ export default function AnomaliesPage() {
             <option value="acknowledged">Acknowledged</option>
             <option value="resolved">Resolved</option>
             <option value="false_positive">False positive</option>
-          </Select>
-          <Select
+          </Combobox>
+          <Combobox
             value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
+            onChange={(value) => setSeverityFilter(value)}
             className="min-w-40"
           >
             <option value="">All severities</option>
@@ -90,78 +90,80 @@ export default function AnomaliesPage() {
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
-          </Select>
+          </Combobox>
         </div>
       </Card>
 
-      <TableShell>
-        <TableHead>
-          <Th>Detected</Th>
-          <Th>Employee</Th>
-          <Th>Type</Th>
-          <Th>Severity</Th>
-          <Th>Score</Th>
-          <Th>Description</Th>
-          <Th>Status</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {loading ? (
-            <tr>
-              <Td colSpan={8} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          ) : anomalies.length === 0 ? (
-            <tr>
-              <Td colSpan={8} className="text-slate-400">
-                No anomalies found — run detection to scan recent attendance
-              </Td>
-            </tr>
-          ) : (
-            anomalies.map((a) => (
-              <tr key={a.id}>
-                <Td className="whitespace-nowrap text-xs">
-                  {new Date(a.detected_at).toLocaleString()}
-                </Td>
-                <Td>
-                  {a.employee
-                    ? `${a.employee.first_name} ${a.employee.last_name}`
-                    : `#${a.employee_id}`}
-                </Td>
-                <Td>{TYPE_LABELS[a.anomaly_type] ?? a.anomaly_type}</Td>
-                <Td>
-                  <Badge tone={SEVERITY_TONE[a.severity] ?? 'neutral'}>{a.severity}</Badge>
-                </Td>
-                <Td>{(a.score * 100).toFixed(0)}%</Td>
-                <Td className="max-w-xs text-xs text-slate-400">{a.description}</Td>
-                <Td>
-                  <Badge tone={a.status === 'open' ? 'warn' : 'ok'}>{a.status}</Badge>
-                </Td>
-                <Td>
-                  <div className="flex gap-1">
-                    {a.status === 'open' && (
-                      <Button variant="ghost" onClick={() => updateStatus(a.id, 'acknowledged')}>
-                        Ack
-                      </Button>
-                    )}
-                    {a.status !== 'resolved' && a.status !== 'false_positive' && (
-                      <>
-                        <Button variant="ghost" onClick={() => updateStatus(a.id, 'resolved')}>
-                          Resolve
-                        </Button>
-                        <Button variant="ghost" onClick={() => updateStatus(a.id, 'false_positive')}>
-                          Dismiss
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={anomalies}
+        rowKey={(a) => a.id}
+        pageSize={10}
+        loading={loading}
+        empty="No anomalies found — run detection to scan recent attendance"
+        columns={[
+          {
+            key: 'detected',
+            header: 'Detected',
+            className: 'whitespace-nowrap text-xs',
+            cell: (a) => new Date(a.detected_at).toLocaleString(),
+          },
+          {
+            key: 'employee',
+            header: 'Employee',
+            cell: (a) =>
+              a.employee
+                ? `${a.employee.first_name} ${a.employee.last_name}`
+                : `#${a.employee_id}`,
+          },
+          {
+            key: 'type',
+            header: 'Type',
+            cell: (a) => TYPE_LABELS[a.anomaly_type] ?? a.anomaly_type,
+          },
+          {
+            key: 'severity',
+            header: 'Severity',
+            cell: (a) => (
+              <Badge tone={SEVERITY_TONE[a.severity] ?? 'neutral'}>{a.severity}</Badge>
+            ),
+          },
+          { key: 'score', header: 'Score', cell: (a) => `${(a.score * 100).toFixed(0)}%` },
+          {
+            key: 'description',
+            header: 'Description',
+            className: 'max-w-xs text-xs text-slate-400',
+            cell: (a) => a.description,
+          },
+          {
+            key: 'status',
+            header: 'Status',
+            cell: (a) => <Badge tone={a.status === 'open' ? 'warn' : 'ok'}>{a.status}</Badge>,
+          },
+          {
+            key: 'actions',
+            header: 'Actions',
+            cell: (a) => (
+              <div className="flex gap-1">
+                {a.status === 'open' && (
+                  <Button variant="ghost" onClick={() => updateStatus(a.id, 'acknowledged')}>
+                    Ack
+                  </Button>
+                )}
+                {a.status !== 'resolved' && a.status !== 'false_positive' && (
+                  <>
+                    <Button variant="ghost" onClick={() => updateStatus(a.id, 'resolved')}>
+                      Resolve
+                    </Button>
+                    <Button variant="ghost" onClick={() => updateStatus(a.id, 'false_positive')}>
+                      Dismiss
+                    </Button>
+                  </>
+                )}
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

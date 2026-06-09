@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Input } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { useActiveEmployees } from '@/features/employees/api/queries'
 import {
   useAssignCard,
@@ -141,9 +142,9 @@ export default function RfidPage() {
             </Label>
             <Label>
               Location *
-              <Select
+              <Combobox
                 value={readerForm.location_id}
-                onChange={(e) => setReaderForm({ ...readerForm, location_id: e.target.value })}
+                onChange={(value) => setReaderForm({ ...readerForm, location_id: value })}
                 required
               >
                 <option value="">Select location</option>
@@ -152,20 +153,20 @@ export default function RfidPage() {
                     {l.name}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Direction
-              <Select
+              <Combobox
                 value={readerForm.direction}
-                onChange={(e) =>
-                  setReaderForm({ ...readerForm, direction: e.target.value as ReaderForm['direction'] })
+                onChange={(value) =>
+                  setReaderForm({ ...readerForm, direction: value as ReaderForm['direction'] })
                 }
               >
                 <option value="both">Check in &amp; out</option>
                 <option value="in">Check in only</option>
                 <option value="out">Check out only</option>
-              </Select>
+              </Combobox>
             </Label>
             <div className="flex items-end sm:col-span-2">
               <Button type="submit">Register reader</Button>
@@ -187,9 +188,9 @@ export default function RfidPage() {
           <form className="grid gap-4" onSubmit={assignCard}>
             <Label>
               Employee
-              <Select
+              <Combobox
                 value={selectedEmployeeId}
-                onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                onChange={(value) => setSelectedEmployeeId(value)}
               >
                 <option value="">Select employee</option>
                 {employees.map((e) => (
@@ -197,7 +198,7 @@ export default function RfidPage() {
                     {e.employee_code} — {e.first_name} {e.last_name}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Card UID *
@@ -252,9 +253,9 @@ export default function RfidPage() {
           <form className="grid gap-4" onSubmit={simulateTap}>
             <Label>
               Reader
-              <Select
+              <Combobox
                 value={simulateReaderId}
-                onChange={(e) => setSimulateReaderId(e.target.value)}
+                onChange={(value) => setSimulateReaderId(value)}
                 required
               >
                 <option value="">Select reader</option>
@@ -263,7 +264,7 @@ export default function RfidPage() {
                     {r.name}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Card UID
@@ -297,94 +298,70 @@ export default function RfidPage() {
 
       <div className="mb-8">
         <h2 className="mb-3 text-lg font-medium">Readers</h2>
-        <TableShell>
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Location</Th>
-          <Th>Direction</Th>
-          <Th>Online</Th>
-          <Th>Taps today</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {readers.length === 0 ? (
-            <tr>
-              <Td colSpan={6} className="text-slate-400">
-                No RFID readers registered yet
-              </Td>
-            </tr>
-          ) : (
-            readers.map((r) => (
-              <tr key={r.id}>
-                <Td>{r.name}</Td>
-                <Td>{r.location?.name ?? '—'}</Td>
-                <Td>{r.direction}</Td>
-                <Td>
-                  <Badge tone={r.online ? 'ok' : 'warn'}>{r.online ? 'Online' : 'Offline'}</Badge>
-                </Td>
-                <Td>{r.taps_today ?? 0}</Td>
-                <Td>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" onClick={() => regenerateToken(r.id)}>
-                      New token
-                    </Button>
-                    <Button
-                      variant="danger"
-                      disabled={deleteReader.isPending}
-                      onClick={() => {
-                        if (window.confirm(`Deactivate reader "${r.name}"?`)) deleteReader.mutate(r.id)
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+        <DataTable
+          data={readers}
+          rowKey={(r) => r.id}
+          empty="No RFID readers registered yet"
+          columns={[
+            { key: 'name', header: 'Name', cell: (r) => r.name },
+            { key: 'location', header: 'Location', cell: (r) => r.location?.name ?? '—' },
+            { key: 'direction', header: 'Direction', cell: (r) => r.direction },
+            {
+              key: 'online',
+              header: 'Online',
+              cell: (r) => <Badge tone={r.online ? 'ok' : 'warn'}>{r.online ? 'Online' : 'Offline'}</Badge>,
+            },
+            { key: 'taps', header: 'Taps today', cell: (r) => r.taps_today ?? 0 },
+            {
+              key: 'actions',
+              header: 'Actions',
+              cell: (r) => (
+                <div className="flex gap-2">
+                  <Button variant="ghost" onClick={() => regenerateToken(r.id)}>
+                    New token
+                  </Button>
+                  <Button
+                    variant="danger"
+                    disabled={deleteReader.isPending}
+                    onClick={() => {
+                      if (window.confirm(`Deactivate reader "${r.name}"?`)) deleteReader.mutate(r.id)
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+        />
       </div>
 
       <h2 className="mb-3 text-lg font-medium">Recent tap events</h2>
-      <TableShell>
-        <TableHead>
-          <Th>Time</Th>
-          <Th>UID</Th>
-          <Th>Employee</Th>
-          <Th>Reader</Th>
-          <Th>Result</Th>
-        </TableHead>
-        <TableBody>
-          {events.length === 0 ? (
-            <tr>
-              <Td colSpan={5} className="text-slate-400">
-                No tap events yet
-              </Td>
-            </tr>
-          ) : (
-            events.map((e) => (
-              <tr key={e.id}>
-                <Td>{new Date(e.tapped_at).toLocaleString()}</Td>
-                <Td>
-                  <code className="text-xs">{e.uid}</code>
-                </Td>
-                <Td>
-                  {e.employee
-                    ? `${e.employee.first_name} ${e.employee.last_name}`
-                    : '—'}
-                </Td>
-                <Td>{e.reader?.name ?? '—'}</Td>
-                <Td>
-                  <Badge tone={e.result === 'matched' ? 'ok' : e.result === 'unknown' ? 'danger' : 'warn'}>
-                    {e.result}
-                  </Badge>
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={events}
+        rowKey={(e) => e.id}
+        pageSize={10}
+        empty="No tap events yet"
+        columns={[
+          { key: 'time', header: 'Time', cell: (e) => new Date(e.tapped_at).toLocaleString() },
+          { key: 'uid', header: 'UID', cell: (e) => <code className="text-xs">{e.uid}</code> },
+          {
+            key: 'employee',
+            header: 'Employee',
+            cell: (e) => (e.employee ? `${e.employee.first_name} ${e.employee.last_name}` : '—'),
+          },
+          { key: 'reader', header: 'Reader', cell: (e) => e.reader?.name ?? '—' },
+          {
+            key: 'result',
+            header: 'Result',
+            cell: (e) => (
+              <Badge tone={e.result === 'matched' ? 'ok' : e.result === 'unknown' ? 'danger' : 'warn'}>
+                {e.result}
+              </Badge>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

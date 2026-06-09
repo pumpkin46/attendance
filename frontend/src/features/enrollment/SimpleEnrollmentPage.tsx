@@ -2,10 +2,10 @@ import { useState, type FormEvent } from 'react'
 import { useWebcam } from '@/shared/hooks/useWebcam'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input } from '@/shared/ui/Input'
+import { ImageDropzone } from '@/shared/ui/ImageDropzone'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
-import { Select } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { cn } from '@/shared/lib/cn'
 import { useEnrollableEmployees, useSimpleEnroll } from '@/features/enrollment/api/queries'
 import { reasonLabel } from '@/features/enrollment/types'
@@ -87,7 +87,7 @@ export default function SimpleEnrollmentPage() {
         <form className="flex flex-col gap-5" onSubmit={submit}>
           <Label>
             Employee
-            <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} required>
+            <Combobox value={employeeId} onChange={(value) => setEmployeeId(value)} required>
               <option value="">Select employee</option>
               {employees.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -95,7 +95,7 @@ export default function SimpleEnrollmentPage() {
                   {e.face_enrolled ? ' (re-enroll)' : ''}
                 </option>
               ))}
-            </Select>
+            </Combobox>
           </Label>
 
           <div className="flex gap-2">
@@ -139,15 +139,16 @@ export default function SimpleEnrollmentPage() {
               {camError && <p className="text-sm text-red-400">{camError}</p>}
             </div>
           ) : (
-            <Label>
-              Photo
-              <Input
-                type="file"
-                accept="image/*"
-                disabled={shots.length >= MAX_SHOTS}
-                onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
-              />
-            </Label>
+            <ImageDropzone
+              label="Photo"
+              onFile={onFile}
+              disabled={shots.length >= MAX_SHOTS}
+              hint={
+                shots.length >= MAX_SHOTS
+                  ? `Maximum ${MAX_SHOTS} photos reached`
+                  : 'JPEG or PNG · one clear, single face per photo'
+              }
+            />
           )}
 
           {shots.length > 0 && (

@@ -118,6 +118,7 @@ async def record_identification(
     result: dict,
     org_id: int | None,
     image_b64: str | None = None,
+    camera_id: int | None = None,
 ) -> dict:
     """Persist attendance/recognition events + realtime for an identify result.
 
@@ -152,6 +153,7 @@ async def record_identification(
         record = await attendance_service.process_recognition(
             db=db,
             employee_id=employee_id,
+            camera_id=camera_id,
             confidence=confidence,
             liveness_passed=liveness_passed,
             processing_ms=processing_ms,
@@ -166,6 +168,7 @@ async def record_identification(
         event = RecognitionEvent(
             employee_id=employee_id,
             organization_id=event_org_id,
+            camera_id=camera_id,
             result="matched",
             confidence=confidence,
             liveness_passed=liveness_passed,
@@ -213,6 +216,7 @@ async def record_identification(
     event = RecognitionEvent(
         employee_id=None,
         organization_id=org_id,
+        camera_id=camera_id,
         result="unknown",
         confidence=result.get("confidence"),
         liveness_passed=result.get("liveness_passed"),

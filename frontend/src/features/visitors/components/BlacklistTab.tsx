@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
+import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { useAddBlacklist, useBlacklist, useRemoveBlacklist } from '@/features/visitors/api/queries'
 
 const emptyForm = { name: '', id_number: '', reason: 'blocked', notes: '' }
@@ -36,12 +37,12 @@ export function BlacklistTab() {
           </Label>
           <Label>
             Reason
-            <Select value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })}>
+            <Combobox value={form.reason} onChange={(value) => setForm({ ...form, reason: value })}>
               <option value="blocked">Blocked</option>
               <option value="watchlist">Watchlist</option>
               <option value="former_employee">Former employee</option>
               <option value="restricted_contractor">Restricted contractor</option>
-            </Select>
+            </Combobox>
           </Label>
           <Label>
             Notes
@@ -52,34 +53,23 @@ export function BlacklistTab() {
           </div>
         </form>
       </Card>
-      <TableShell>
-        <TableHead>
-          <Th>Name</Th>
-          <Th>ID number</Th>
-          <Th>Reason</Th>
-          <Th>Notes</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {blacklist.length === 0 ? (
-            <tr>
-              <Td colSpan={5} className="text-center text-slate-500">No blacklist entries.</Td>
-            </tr>
-          ) : (
-            blacklist.map((b) => (
-              <tr key={b.id}>
-                <Td>{b.name}</Td>
-                <Td>{b.id_number ?? '—'}</Td>
-                <Td className="capitalize">{b.reason.replace(/_/g, ' ')}</Td>
-                <Td>{b.notes ?? '—'}</Td>
-                <Td>
-                  <Button variant="ghost" onClick={() => remove.mutate(b.id)}>Remove</Button>
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={blacklist}
+        rowKey={(b) => b.id}
+        pageSize={10}
+        empty="No blacklist entries."
+        columns={[
+          { key: 'name', header: 'Name', cell: (b) => b.name },
+          { key: 'id_number', header: 'ID number', cell: (b) => b.id_number ?? '—' },
+          { key: 'reason', header: 'Reason', className: 'capitalize', cell: (b) => b.reason.replace(/_/g, ' ') },
+          { key: 'notes', header: 'Notes', cell: (b) => b.notes ?? '—' },
+          {
+            key: 'actions',
+            header: 'Actions',
+            cell: (b) => <Button variant="ghost" onClick={() => remove.mutate(b.id)}>Remove</Button>,
+          },
+        ]}
+      />
     </>
   )
 }

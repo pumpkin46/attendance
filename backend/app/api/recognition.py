@@ -71,7 +71,9 @@ async def identify_face(
         session_id=body.session_id,
         source=body.source,
     )
-    outcome = await recognition_service.record_identification(db, result, org_id, image_b64=body.image)
+    outcome = await recognition_service.record_identification(
+        db, result, org_id, image_b64=body.image, camera_id=body.camera_id
+    )
     return IdentifyResponse(
         **result,
         matched=outcome.get("matched", False),

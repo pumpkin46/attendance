@@ -2,7 +2,7 @@ import { Badge } from '@/shared/ui/Badge'
 import { Card } from '@/shared/ui/Card'
 import { StatCard } from '@/shared/ui/StatCard'
 import { StatCardSkeleton } from '@/shared/ui/Skeleton'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { useActiveVisitors, useVisitorStats } from '@/features/visitors/api/queries'
 import { formatDuration } from '@/features/visitors/types'
 
@@ -36,35 +36,32 @@ export function VisitorDashboardTab() {
         {activeVisitors.length === 0 ? (
           <p className="text-sm text-slate-500">No visitors on site.</p>
         ) : (
-          <TableShell>
-            <TableHead>
-              <Th>Visitor</Th>
-              <Th>Host</Th>
-              <Th>Zone</Th>
-              <Th>Check-in</Th>
-              <Th>Duration</Th>
-              <Th>Status</Th>
-            </TableHead>
-            <TableBody>
-              {activeVisitors.map((v) => (
-                <tr key={v.id}>
-                  <Td>
+          <DataTable
+            data={activeVisitors}
+            rowKey={(v) => v.id}
+            columns={[
+              {
+                key: 'visitor',
+                header: 'Visitor',
+                cell: (v) => (
+                  <>
                     <div className="font-medium">{v.name}</div>
                     <div className="text-xs text-slate-500">{v.company ?? '—'}</div>
-                  </Td>
-                  <Td>{v.host ? `${v.host.first_name} ${v.host.last_name}` : '—'}</Td>
-                  <Td>{v.current_zone ?? 'Reception'}</Td>
-                  <Td className="text-xs">
-                    {v.checked_in_at ? new Date(v.checked_in_at).toLocaleTimeString() : '—'}
-                  </Td>
-                  <Td>{v.checked_in_at ? formatDuration(v.checked_in_at) : '—'}</Td>
-                  <Td>
-                    <Badge tone="ok">On site</Badge>
-                  </Td>
-                </tr>
-              ))}
-            </TableBody>
-          </TableShell>
+                  </>
+                ),
+              },
+              { key: 'host', header: 'Host', cell: (v) => (v.host ? `${v.host.first_name} ${v.host.last_name}` : '—') },
+              { key: 'zone', header: 'Zone', cell: (v) => v.current_zone ?? 'Reception' },
+              {
+                key: 'checkin',
+                header: 'Check-in',
+                className: 'text-xs',
+                cell: (v) => (v.checked_in_at ? new Date(v.checked_in_at).toLocaleTimeString() : '—'),
+              },
+              { key: 'duration', header: 'Duration', cell: (v) => (v.checked_in_at ? formatDuration(v.checked_in_at) : '—') },
+              { key: 'status', header: 'Status', cell: () => <Badge tone="ok">On site</Badge> },
+            ]}
+          />
         )}
       </Card>
     </>

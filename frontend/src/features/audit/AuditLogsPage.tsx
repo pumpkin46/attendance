@@ -1,6 +1,6 @@
 import { getApiErrorMessage } from '@/shared/api/client'
 import { PageHeader } from '@/shared/ui/PageHeader'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { useAuditLogs } from '@/features/audit/api/queries'
 
 export default function AuditLogsPage() {
@@ -11,46 +11,30 @@ export default function AuditLogsPage() {
     <div>
       <PageHeader title="Audit Logs" description="GDPR-ready activity trail for compliance" />
 
-      <TableShell>
-        <TableHead>
-          <Th>Time</Th>
-          <Th>User</Th>
-          <Th>Action</Th>
-          <Th>Entity</Th>
-          <Th>IP</Th>
-        </TableHead>
-        {isPending ? (
-          <TableBody>
-            <tr>
-              <Td colSpan={5} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          </TableBody>
-        ) : isError ? (
-          <TableBody>
-            <tr>
-              <Td colSpan={5} className="text-rose-400">
-                {getApiErrorMessage(error, 'Failed to load audit logs')}
-              </Td>
-            </tr>
-          </TableBody>
-        ) : (
-          <TableBody>
-            {logs.map((log) => (
-              <tr key={log.id}>
-                <Td>{new Date(log.created_at).toLocaleString()}</Td>
-                <Td>{log.user?.name ?? 'System'}</Td>
-                <Td>
-                  <code className="rounded bg-slate-800 px-1.5 py-0.5 text-xs">{log.action}</code>
-                </Td>
-                <Td>{log.entity_type ? `${log.entity_type}#${log.entity_id}` : '—'}</Td>
-                <Td>{log.ip_address ?? '—'}</Td>
-              </tr>
-            ))}
-          </TableBody>
-        )}
-      </TableShell>
+      <DataTable
+        data={logs}
+        rowKey={(log) => log.id}
+        pageSize={10}
+        loading={isPending}
+        error={isError ? getApiErrorMessage(error, 'Failed to load audit logs') : undefined}
+        columns={[
+          { key: 'time', header: 'Time', cell: (log) => new Date(log.created_at).toLocaleString() },
+          { key: 'user', header: 'User', cell: (log) => log.user?.name ?? 'System' },
+          {
+            key: 'action',
+            header: 'Action',
+            cell: (log) => (
+              <code className="rounded bg-slate-800 px-1.5 py-0.5 text-xs">{log.action}</code>
+            ),
+          },
+          {
+            key: 'entity',
+            header: 'Entity',
+            cell: (log) => (log.entity_type ? `${log.entity_type}#${log.entity_id}` : '—'),
+          },
+          { key: 'ip', header: 'IP', cell: (log) => log.ip_address ?? '—' },
+        ]}
+      />
     </div>
   )
 }

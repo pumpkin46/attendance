@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
-import { Input, Select } from '@/shared/ui/Input'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { Combobox } from '@/shared/ui/Combobox'
+import { Input } from '@/shared/ui/Input'
+import { DataTable } from '@/shared/ui/DataTable'
 import { FaceCaptureModal } from '@/shared/components/FaceCaptureModal'
 import {
   useCancelVisit,
@@ -42,7 +43,7 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
           onKeyDown={(e) => e.key === 'Enter' && runSearch()}
           className="max-w-xs"
         />
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-[180px]">
+        <Combobox value={statusFilter} onChange={(value) => setStatusFilter(value)} className="max-w-[180px]">
           <option value="">All statuses</option>
           <option value="scheduled">Scheduled</option>
           <option value="pending_approval">Pending approval</option>
@@ -50,78 +51,99 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
           <option value="checked_out">Checked out</option>
           <option value="expired">Expired</option>
           <option value="cancelled">Cancelled</option>
-        </Select>
+        </Combobox>
         <Button variant="ghost" onClick={runSearch}>Search</Button>
       </div>
-      <TableShell>
-        <TableHead>
-          <Th>Visitor</Th>
-          <Th>Category / Type</Th>
-          <Th>Host</Th>
-          <Th>Visit window</Th>
-          <Th>Code / Badge</Th>
-          <Th>Face</Th>
-          <Th>Status</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {isLoading ? (
-            <tr>
-              <Td colSpan={8} className="text-center text-slate-500">Loading…</Td>
-            </tr>
-          ) : visitors.length === 0 ? (
-            <tr>
-              <Td colSpan={8} className="text-center text-slate-500">No visitors found.</Td>
-            </tr>
-          ) : (
-            visitors.map((v) => (
-              <tr key={v.id}>
-                <Td>
-                  <div className="font-medium">{v.name}</div>
-                  <div className="text-xs text-slate-500">{v.company ?? '—'}</div>
-                  {v.visitor_code && <div className="font-mono text-xs text-slate-600">{v.visitor_code}</div>}
-                </Td>
-                <Td className="text-xs capitalize">
-                  {v.visitor_category?.replace(/_/g, ' ') ?? '—'}
-                  {v.visit_type && <div className="text-slate-500">{v.visit_type.replace(/_/g, ' ')}</div>}
-                </Td>
-                <Td>{v.host ? `${v.host.first_name} ${v.host.last_name}` : '—'}</Td>
-                <Td className="text-xs">
-                  {new Date(v.visit_start_at).toLocaleString()} – {new Date(v.visit_end_at).toLocaleString()}
-                </Td>
-                <Td className="font-mono text-xs">
-                  {v.check_in_code ?? '—'}
-                  {v.badge_number && <div className="text-slate-500">{v.badge_number}</div>}
-                  {v.pin_code && <div className="text-slate-600">PIN: {v.pin_code}</div>}
-                </Td>
-                <Td>
-                  <Badge tone={v.face_registered ? 'ok' : 'neutral'}>
-                    {v.face_registered ? 'Enrolled' : 'No face'}
-                  </Badge>
-                </Td>
-                <Td>
-                  <Badge tone={STATUS_TONE[v.status] ?? 'neutral'}>{v.status.replace(/_/g, ' ')}</Badge>
-                </Td>
-                <Td className="space-x-1">
-                  <Button variant="ghost" onClick={() => onSelect(v.id)}>View</Button>
-                  {v.status === 'scheduled' && (
-                    <Button variant="ghost" onClick={() => checkIn.mutate(v.id)}>Check in</Button>
-                  )}
-                  {v.status === 'checked_in' && (
-                    <Button variant="ghost" onClick={() => checkOut.mutate(v.id)}>Check out</Button>
-                  )}
-                  {!v.face_registered && !['expired', 'cancelled', 'checked_out'].includes(v.status) && (
-                    <Button variant="ghost" onClick={() => setEnrollId(v.id)}>Enroll face</Button>
-                  )}
-                  {!['cancelled', 'checked_out', 'expired'].includes(v.status) && (
-                    <Button variant="ghost" onClick={() => onCancel(v.id)}>Cancel</Button>
-                  )}
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={visitors}
+        rowKey={(v) => v.id}
+        pageSize={10}
+        loading={isLoading}
+        empty="No visitors found."
+        columns={[
+          {
+            key: 'visitor',
+            header: 'Visitor',
+            cell: (v) => (
+              <>
+                <div className="font-medium">{v.name}</div>
+                <div className="text-xs text-slate-500">{v.company ?? '—'}</div>
+                {v.visitor_code && <div className="font-mono text-xs text-slate-600">{v.visitor_code}</div>}
+              </>
+            ),
+          },
+          {
+            key: 'category',
+            header: 'Category / Type',
+            className: 'text-xs capitalize',
+            cell: (v) => (
+              <>
+                {v.visitor_category?.replace(/_/g, ' ') ?? '—'}
+                {v.visit_type && <div className="text-slate-500">{v.visit_type.replace(/_/g, ' ')}</div>}
+              </>
+            ),
+          },
+          {
+            key: 'host',
+            header: 'Host',
+            cell: (v) => (v.host ? `${v.host.first_name} ${v.host.last_name}` : '—'),
+          },
+          {
+            key: 'window',
+            header: 'Visit window',
+            className: 'text-xs',
+            cell: (v) => `${new Date(v.visit_start_at).toLocaleString()} – ${new Date(v.visit_end_at).toLocaleString()}`,
+          },
+          {
+            key: 'code',
+            header: 'Code / Badge',
+            className: 'font-mono text-xs',
+            cell: (v) => (
+              <>
+                {v.check_in_code ?? '—'}
+                {v.badge_number && <div className="text-slate-500">{v.badge_number}</div>}
+                {v.pin_code && <div className="text-slate-600">PIN: {v.pin_code}</div>}
+              </>
+            ),
+          },
+          {
+            key: 'face',
+            header: 'Face',
+            cell: (v) => (
+              <Badge tone={v.face_registered ? 'ok' : 'neutral'}>
+                {v.face_registered ? 'Enrolled' : 'No face'}
+              </Badge>
+            ),
+          },
+          {
+            key: 'status',
+            header: 'Status',
+            cell: (v) => <Badge tone={STATUS_TONE[v.status] ?? 'neutral'}>{v.status.replace(/_/g, ' ')}</Badge>,
+          },
+          {
+            key: 'actions',
+            header: 'Actions',
+            className: 'space-x-1',
+            cell: (v) => (
+              <>
+                <Button variant="ghost" onClick={() => onSelect(v.id)}>View</Button>
+                {v.status === 'scheduled' && (
+                  <Button variant="ghost" onClick={() => checkIn.mutate(v.id)}>Check in</Button>
+                )}
+                {v.status === 'checked_in' && (
+                  <Button variant="ghost" onClick={() => checkOut.mutate(v.id)}>Check out</Button>
+                )}
+                {!v.face_registered && !['expired', 'cancelled', 'checked_out'].includes(v.status) && (
+                  <Button variant="ghost" onClick={() => setEnrollId(v.id)}>Enroll face</Button>
+                )}
+                {!['cancelled', 'checked_out', 'expired'].includes(v.status) && (
+                  <Button variant="ghost" onClick={() => onCancel(v.id)}>Cancel</Button>
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
 
       {enrollId !== null && (
         <FaceCaptureModal

@@ -1,11 +1,16 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { getApiErrorMessage } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Input } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
+import { Checkbox } from '@/shared/ui/Checkbox'
 import { Label } from '@/shared/ui/Label'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { PageHeader } from '@/shared/ui/PageHeader'
+import { CameraSelect } from '@/features/cameras/components/CameraSelect'
+import { DataTable } from '@/shared/ui/DataTable'
+import { cn } from '@/shared/lib/cn'
 import {
   useAddStream,
   useControlStream,
@@ -22,27 +27,64 @@ import {
 import type { EngineAlert, EngineConfigDict } from '@/features/recognition/types'
 import WebcamMonitor from '@/features/recognition/WebcamMonitor'
 
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+function Metric({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string
+  value: ReactNode
+  sub?: string
+  tone?: 'ok' | 'warn' | 'danger'
+}) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
-      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">{label}</div>
-      <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{value}</div>
-      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
-    </div>
+    <Card>
+      <span className="block text-xs font-medium uppercase tracking-wide text-slate-400">
+        {label}
+      </span>
+      <span
+        className={cn(
+          'mt-1 block text-2xl font-semibold text-slate-100',
+          tone === 'ok' && 'text-emerald-400',
+          tone === 'warn' && 'text-amber-400',
+          tone === 'danger' && 'text-red-400'
+        )}
+      >
+        {value}
+      </span>
+      {sub && <span className="mt-1 block text-xs text-slate-500">{sub}</span>}
+    </Card>
   )
 }
 
-function SlaIndicator({ name, target, actual, met }: { name: string; target: number; actual: number; met: boolean }) {
+function InfoCard({ title, rows }: { title: string; rows: [string, ReactNode][] }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
-      <span className="text-sm text-gray-600 dark:text-gray-300">{name}</span>
-      <div className="flex items-center gap-3">
-        <span className="text-sm font-mono">{actual.toFixed(1)}ms / {target}ms</span>
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${met ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}`}>
-          {met ? '✓ Met' : '✗ Missed'}
-        </span>
-      </div>
-    </div>
+    <Card>
+      <h2 className="mb-3 text-base font-semibold text-slate-100">{title}</h2>
+      <dl className="space-y-2">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between text-sm">
+            <dt className="text-slate-400">{label}</dt>
+            <dd className="font-medium text-slate-200">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  )
+}
+
+function StatusPill({ running }: { running: boolean }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium',
+        running ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-500/15 text-slate-400'
+      )}
+    >
+      <span className={cn('h-2 w-2 rounded-full', running ? 'bg-emerald-400' : 'bg-slate-500')} />
+      {running ? 'Running' : 'Stopped'}
+    </span>
   )
 }
 
@@ -68,13 +110,11 @@ export default function RecognitionEnginePage() {
       ? getApiErrorMessage(queryError, 'Failed to fetch engine status')
       : null
   const actionLoading = toggleEngine.isPending
-  const handleStart = () => toggleEngine.mutate('start')
-  const handleStop = () => toggleEngine.mutate('stop')
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <div className="flex h-64 items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-500" />
       </div>
     )
   }
@@ -82,176 +122,182 @@ export default function RecognitionEnginePage() {
   const metrics = status?.metrics?.recognition_metrics
   const pipeline = status?.metrics?.pipeline_performance
   const sla = status?.sla_compliance
+  const running = status?.running ?? false
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">AI Recognition Engine</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Real-time face detection, tracking, identification, and attendance generation
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${status?.running ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}>
-            {status?.running ? '● Running' : '○ Stopped'}
-          </span>
-          {status?.running ? (
-            <button onClick={handleStop} disabled={actionLoading} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50">
-              Stop Engine
-            </button>
-          ) : (
-            <button onClick={handleStart} disabled={actionLoading} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
-              Start Engine
-            </button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="AI Recognition Engine"
+        description="Real-time face detection, tracking, identification, and attendance generation."
+        actions={
+          <>
+            <StatusPill running={running} />
+            {running ? (
+              <Button variant="danger" disabled={actionLoading} onClick={() => toggleEngine.mutate('stop')}>
+                Stop engine
+              </Button>
+            ) : (
+              <Button disabled={actionLoading} onClick={() => toggleEngine.mutate('start')}>
+                Start engine
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {error && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm text-red-700 dark:text-red-300">
+        <div className="rounded-lg border border-red-800 bg-red-500/10 p-3 text-sm text-red-300">
           {error}
         </div>
       )}
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        <StatCard label="Detections" value={metrics?.total_detections ?? 0} />
-        <StatCard label="Recognized" value={metrics?.total_recognized ?? 0} sub={`${((metrics?.recognition_rate ?? 0) * 100).toFixed(1)}% rate`} />
-        <StatCard label="Unknown" value={metrics?.total_unknown ?? 0} sub={`${((metrics?.unknown_rate ?? 0) * 100).toFixed(1)}% rate`} />
-        <StatCard label="Liveness Pass" value={metrics?.total_liveness_passed ?? 0} />
-        <StatCard label="Quality Rejected" value={metrics?.total_quality_rejected ?? 0} />
-        <StatCard label="Attendance Events" value={status?.attendance?.total_events_generated ?? 0} />
+      {/* Key metrics */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+        <Metric label="Detections" value={metrics?.total_detections ?? 0} />
+        <Metric
+          label="Recognized"
+          value={metrics?.total_recognized ?? 0}
+          sub={`${((metrics?.recognition_rate ?? 0) * 100).toFixed(1)}% rate`}
+          tone="ok"
+        />
+        <Metric
+          label="Unknown"
+          value={metrics?.total_unknown ?? 0}
+          sub={`${((metrics?.unknown_rate ?? 0) * 100).toFixed(1)}% rate`}
+          tone="warn"
+        />
+        <Metric label="Liveness pass" value={metrics?.total_liveness_passed ?? 0} />
+        <Metric label="Quality rejected" value={metrics?.total_quality_rejected ?? 0} />
+        <Metric label="Attendance events" value={status?.attendance?.total_events_generated ?? 0} />
       </div>
 
       {/* Local webcam monitor */}
       <WebcamMonitor />
 
-      {/* Pipeline & Streams */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pipeline Performance */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Pipeline Performance</h2>
+      {/* Pipeline & SLA */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <h2 className="mb-4 text-base font-semibold text-slate-100">Pipeline performance</h2>
           <div className="space-y-3">
-            {pipeline?.stage_averages_ms && Object.entries(pipeline.stage_averages_ms).map(([stage, ms]) => (
-              <div key={stage} className="flex items-center gap-3">
-                <span className="text-sm text-gray-600 dark:text-gray-300 w-40 truncate">{stage.replace(/_/g, ' ')}</span>
-                <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (ms / 100) * 100)}%` }}
-                  />
+            {pipeline?.stage_averages_ms &&
+              Object.entries(pipeline.stage_averages_ms).map(([stage, ms]) => (
+                <div key={stage} className="flex items-center gap-3">
+                  <span className="w-40 truncate text-sm capitalize text-slate-300">
+                    {stage.replace(/_/g, ' ')}
+                  </span>
+                  <div className="h-2 flex-1 rounded-full bg-slate-800">
+                    <div
+                      className="h-2 rounded-full bg-blue-500 transition-all"
+                      style={{ width: `${Math.min(100, ms)}%` }}
+                    />
+                  </div>
+                  <span className="w-16 text-right font-mono text-xs text-slate-400">
+                    {ms.toFixed(1)}ms
+                  </span>
                 </div>
-                <span className="text-xs font-mono text-gray-500 w-16 text-right">{ms.toFixed(1)}ms</span>
-              </div>
-            ))}
+              ))}
             {pipeline && (
-              <div className="pt-2 border-t border-gray-100 dark:border-gray-700 flex justify-between">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Total Pipeline</span>
-                <span className="text-sm font-mono font-bold">{pipeline.total_pipeline_avg_ms.toFixed(1)}ms</span>
+              <div className="flex justify-between border-t border-slate-800 pt-3">
+                <span className="text-sm font-medium text-slate-200">Total pipeline</span>
+                <span className="font-mono text-sm font-semibold text-slate-100">
+                  {pipeline.total_pipeline_avg_ms.toFixed(1)}ms
+                </span>
               </div>
             )}
+            {!pipeline && <p className="text-sm text-slate-500">No pipeline data yet.</p>}
           </div>
-        </div>
+        </Card>
 
-        {/* SLA Compliance */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">SLA Compliance</h2>
-          <div>
-            {sla && Object.entries(sla).map(([key, item]) => (
-              <SlaIndicator
-                key={key}
-                name={key.replace(/_/g, ' ')}
-                target={item.target_ms}
-                actual={item.actual_ms}
-                met={item.met}
-              />
-            ))}
-          </div>
-        </div>
+        <Card>
+          <h2 className="mb-4 text-base font-semibold text-slate-100">SLA compliance</h2>
+          {sla ? (
+            <div>
+              {Object.entries(sla).map(([key, item]) => (
+                <div
+                  key={key}
+                  className="flex items-center justify-between border-b border-slate-800 py-2 last:border-0"
+                >
+                  <span className="text-sm capitalize text-slate-300">{key.replace(/_/g, ' ')}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-sm text-slate-400">
+                      {item.actual_ms.toFixed(1)} / {item.target_ms} ms
+                    </span>
+                    <Badge tone={item.met ? 'ok' : 'danger'}>{item.met ? 'Met' : 'Missed'}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">No SLA data yet.</p>
+          )}
+        </Card>
       </div>
 
-      {/* Streams & Tracking */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Camera Streams</h2>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Active</span>
-              <span className="font-medium">{status?.streams?.active_streams ?? 0}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Total</span>
-              <span className="font-medium">{status?.streams?.total_streams ?? 0}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Avg FPS</span>
-              <span className="font-medium">{status?.metrics?.camera_health?.avg_fps?.toFixed(1) ?? '-'}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Avg Latency</span>
-              <span className="font-medium">{status?.metrics?.camera_health?.avg_latency_ms?.toFixed(0) ?? '-'}ms</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Face Tracking</h2>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Active Tracks</span>
-              <span className="font-medium">{status?.tracking?.total_tracks ?? 0}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Recognized</span>
-              <span className="font-medium">{status?.tracking?.recognized_tracks ?? 0}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Unknown</span>
-              <span className="font-medium">{status?.tracking?.unknown_tracks ?? 0}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Vector Index</h2>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Embeddings</span>
-              <span className="font-medium">{status?.search_index?.total_embeddings ?? 0}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Employees</span>
-              <span className="font-medium">{status?.search_index?.total_employees ?? 0}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Duplicates Prevented</span>
-              <span className="font-medium">{status?.attendance?.duplicates_prevented ?? 0}</span>
-            </div>
-          </div>
-        </div>
+      {/* Streams / tracking / index */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <InfoCard
+          title="Camera streams"
+          rows={[
+            ['Active', status?.streams?.active_streams ?? 0],
+            ['Total', status?.streams?.total_streams ?? 0],
+            ['Avg FPS', status?.metrics?.camera_health?.avg_fps?.toFixed(1) ?? '—'],
+            [
+              'Avg latency',
+              status?.metrics?.camera_health?.avg_latency_ms != null
+                ? `${status.metrics.camera_health.avg_latency_ms.toFixed(0)}ms`
+                : '—',
+            ],
+          ]}
+        />
+        <InfoCard
+          title="Face tracking"
+          rows={[
+            ['Active tracks', status?.tracking?.total_tracks ?? 0],
+            ['Recognized', status?.tracking?.recognized_tracks ?? 0],
+            ['Unknown', status?.tracking?.unknown_tracks ?? 0],
+          ]}
+        />
+        <InfoCard
+          title="Vector index"
+          rows={[
+            ['Embeddings', status?.search_index?.total_embeddings ?? 0],
+            ['Employees', status?.search_index?.total_employees ?? 0],
+            ['Duplicates prevented', status?.attendance?.duplicates_prevented ?? 0],
+          ]}
+        />
       </div>
 
       {/* Alerts */}
       {status?.metrics?.alerts?.recent && status.metrics.alerts.recent.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Alerts</h2>
+        <Card>
+          <h2 className="mb-4 text-base font-semibold text-slate-100">Recent alerts</h2>
           <div className="space-y-2">
             {status.metrics.alerts.recent.map((alert: EngineAlert, i: number) => (
-              <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 dark:bg-gray-700/50">
-                <span className={`w-2 h-2 rounded-full ${alert.severity === 'critical' ? 'bg-red-500' : alert.severity === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'}`} />
-                <span className="text-sm text-gray-700 dark:text-gray-200 flex-1">{alert.message}</span>
-                <span className="text-xs text-gray-400">{new Date(alert.timestamp).toLocaleTimeString()}</span>
+              <div key={i} className="flex items-center gap-3 rounded-lg bg-slate-800/50 p-2">
+                <span
+                  className={cn(
+                    'h-2 w-2 shrink-0 rounded-full',
+                    alert.severity === 'critical'
+                      ? 'bg-red-500'
+                      : alert.severity === 'warning'
+                        ? 'bg-amber-500'
+                        : 'bg-blue-500'
+                  )}
+                />
+                <span className="flex-1 text-sm text-slate-200">{alert.message}</span>
+                <span className="text-xs text-slate-500">
+                  {new Date(alert.timestamp).toLocaleTimeString()}
+                </span>
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* Stream Management */}
+      {/* Stream management */}
       <Card>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-medium text-slate-100">Camera streams</h2>
+          <h2 className="text-base font-semibold text-slate-100">Manage streams</h2>
           <Button variant="ghost" disabled={reloadIndex.isPending} onClick={() => reloadIndex.mutate()}>
             Reload index
           </Button>
@@ -267,11 +313,14 @@ export default function RecognitionEnginePage() {
           }}
         >
           <Label>
-            Camera ID
-            <Input
-              type="number"
+            Camera
+            <CameraSelect
               value={streamForm.camera_id}
-              onChange={(e) => setStreamForm({ ...streamForm, camera_id: e.target.value })}
+              onChange={(camera_id) => setStreamForm({ ...streamForm, camera_id })}
+              onCameraChange={(camera) =>
+                camera?.stream_url &&
+                setStreamForm((prev) => ({ ...prev, stream_url: camera.stream_url ?? prev.stream_url }))
+              }
               required
             />
           </Label>
@@ -290,15 +339,15 @@ export default function RecognitionEnginePage() {
           </Label>
           <Label>
             Protocol
-            <Select
+            <Combobox
               value={streamForm.protocol}
-              onChange={(e) => setStreamForm({ ...streamForm, protocol: e.target.value })}
+              onChange={(value) => setStreamForm({ ...streamForm, protocol: value })}
             >
               <option value="rtsp">RTSP</option>
               <option value="http">HTTP</option>
               <option value="webrtc">WebRTC</option>
               <option value="usb">USB / Webcam</option>
-            </Select>
+            </Combobox>
           </Label>
           <div className="sm:col-span-4">
             <Button type="submit" disabled={addStream.isPending}>
@@ -306,72 +355,68 @@ export default function RecognitionEnginePage() {
             </Button>
           </div>
         </form>
-        <TableShell>
-          <TableHead>
-            <Th>Camera</Th>
-            <Th>Status</Th>
-            <Th>FPS</Th>
-            <Th>Latency</Th>
-            <Th>Actions</Th>
-          </TableHead>
-          <TableBody>
-            {streams.length === 0 ? (
-              <tr>
-                <Td colSpan={5} className="text-slate-400">
-                  No streams registered
-                </Td>
-              </tr>
-            ) : (
-              streams.map((s) => (
-                <tr key={s.camera_id}>
-                  <Td>#{s.camera_id}</Td>
-                  <Td>
-                    <Badge
-                      tone={
-                        s.status === 'streaming' || s.status === 'active'
-                          ? 'ok'
-                          : s.status === 'error'
-                            ? 'danger'
-                            : 'neutral'
-                      }
-                    >
-                      {s.status}
-                    </Badge>
-                  </Td>
-                  <Td>{s.health?.fps ?? '—'}</Td>
-                  <Td>{s.health?.latency_ms != null ? `${s.health.latency_ms}ms` : '—'}</Td>
-                  <Td>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        disabled={controlStream.isPending}
-                        onClick={() => controlStream.mutate({ action: 'start', camera_id: s.camera_id })}
-                      >
-                        Start
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={controlStream.isPending}
-                        onClick={() => controlStream.mutate({ action: 'stop', camera_id: s.camera_id })}
-                      >
-                        Stop
-                      </Button>
-                      <Button
-                        variant="danger"
-                        disabled={removeStream.isPending}
-                        onClick={() => {
-                          if (window.confirm(`Remove stream #${s.camera_id}?`)) removeStream.mutate(s.camera_id)
-                        }}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </Td>
-                </tr>
-              ))
-            )}
-          </TableBody>
-        </TableShell>
+        <DataTable
+          data={streams}
+          rowKey={(s) => s.camera_id}
+          empty="No streams registered"
+          columns={[
+            { key: 'camera', header: 'Camera', cell: (s) => `#${s.camera_id}` },
+            {
+              key: 'status',
+              header: 'Status',
+              cell: (s) => (
+                <Badge
+                  tone={
+                    s.status === 'streaming' || s.status === 'active'
+                      ? 'ok'
+                      : s.status === 'error'
+                        ? 'danger'
+                        : 'neutral'
+                  }
+                >
+                  {s.status}
+                </Badge>
+              ),
+            },
+            { key: 'fps', header: 'FPS', cell: (s) => s.health?.fps ?? '—' },
+            {
+              key: 'latency',
+              header: 'Latency',
+              cell: (s) => (s.health?.latency_ms != null ? `${s.health.latency_ms}ms` : '—'),
+            },
+            {
+              key: 'actions',
+              header: 'Actions',
+              cell: (s) => (
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    disabled={controlStream.isPending}
+                    onClick={() => controlStream.mutate({ action: 'start', camera_id: s.camera_id })}
+                  >
+                    Start
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={controlStream.isPending}
+                    onClick={() => controlStream.mutate({ action: 'stop', camera_id: s.camera_id })}
+                  >
+                    Stop
+                  </Button>
+                  <Button
+                    variant="danger"
+                    disabled={removeStream.isPending}
+                    onClick={() => {
+                      if (window.confirm(`Remove stream #${s.camera_id}?`)) removeStream.mutate(s.camera_id)
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+        />
       </Card>
 
       {/* Runtime configuration */}
@@ -413,7 +458,7 @@ function EngineConfigForm({
 
   return (
     <Card>
-      <h2 className="mb-4 text-lg font-medium text-slate-100">Runtime configuration</h2>
+      <h2 className="mb-4 text-base font-semibold text-slate-100">Runtime configuration</h2>
       <form
         className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
         onSubmit={(e) => {
@@ -461,22 +506,16 @@ function EngineConfigForm({
             onChange={(e) => setForm({ ...form, max_faces_per_frame: e.target.value })}
           />
         </Label>
-        <Label className="flex-row items-center gap-2">
-          <input
-            type="checkbox"
-            checked={form.liveness_enabled}
-            onChange={(e) => setForm({ ...form, liveness_enabled: e.target.checked })}
-          />
-          Liveness enabled
-        </Label>
-        <Label className="flex-row items-center gap-2">
-          <input
-            type="checkbox"
-            checked={form.unknown_person_enabled}
-            onChange={(e) => setForm({ ...form, unknown_person_enabled: e.target.checked })}
-          />
-          Unknown-person alerts
-        </Label>
+        <Checkbox
+          checked={form.liveness_enabled}
+          onChange={(e) => setForm({ ...form, liveness_enabled: e.target.checked })}
+          label="Liveness enabled"
+        />
+        <Checkbox
+          checked={form.unknown_person_enabled}
+          onChange={(e) => setForm({ ...form, unknown_person_enabled: e.target.checked })}
+          label="Unknown-person alerts"
+        />
         <div className="sm:col-span-2 lg:col-span-3">
           <Button type="submit" disabled={save.isPending}>
             Save configuration

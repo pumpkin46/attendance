@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useWebcam } from '@/shared/hooks/useWebcam'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input } from '@/shared/ui/Input'
+import { Checkbox } from '@/shared/ui/Checkbox'
+import { CameraSelect } from '@/features/cameras/components/CameraSelect'
 import { cn } from '@/shared/lib/cn'
 import { detectFaces, identifyFace } from '@/features/recognition/api/recognitionApi'
 import type { FaceBox, IdentifyResult } from '@/features/recognition/types'
@@ -277,31 +278,23 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Input
-            type="number"
-            placeholder="Camera ID"
+          <CameraSelect
             value={cameraId}
-            onChange={(e) => setCameraId(e.target.value)}
-            className="w-32"
+            onChange={setCameraId}
+            allowEmpty
+            emptyLabel="No camera"
+            className="w-48"
           />
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              className="rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
-              checked={requireLiveness}
-              onChange={(e) => setRequireLiveness(e.target.checked)}
-            />
-            Anti-spoof (AI model)
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              className="rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
-              checked={activeLiveness}
-              onChange={(e) => setActiveLiveness(e.target.checked)}
-            />
-            Blink / movement
-          </label>
+          <Checkbox
+            checked={requireLiveness}
+            onChange={(e) => setRequireLiveness(e.target.checked)}
+            label="Anti-spoof (AI model)"
+          />
+          <Checkbox
+            checked={activeLiveness}
+            onChange={(e) => setActiveLiveness(e.target.checked)}
+            label="Blink / movement"
+          />
           {!active ? (
             <Button type="button" onClick={handleStart}>
               Start camera

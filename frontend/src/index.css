@@ -8,6 +8,18 @@ body {
   @apply min-h-screen bg-slate-950 font-sans text-slate-100 antialiased;
 }
 
+/* Popover / dropdown entrance (used by Combobox, DatePicker) */
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* Slim dark scrollbars for main content and other scroll regions */
 .scrollbar-styled {
   scrollbar-width: thin;

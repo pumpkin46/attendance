@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Input } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Badge } from '@/shared/ui/Badge'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
+import { CameraSelect } from '@/features/cameras/components/CameraSelect'
 import { useWebcam } from '@/shared/hooks/useWebcam'
 import {
   useAccessConfig,
@@ -102,9 +104,9 @@ export default function AccessControlPage() {
           </Label>
           <Label>
             Device type
-            <Select
+            <Combobox
               value={form.device_type}
-              onChange={(e) => setForm({ ...form, device_type: e.target.value })}
+              onChange={(value) => setForm({ ...form, device_type: value })}
             >
               {config &&
                 Object.entries(config.device_types).map(([k, label]) => (
@@ -112,13 +114,13 @@ export default function AccessControlPage() {
                     {label}
                   </option>
                 ))}
-            </Select>
+            </Combobox>
           </Label>
           <Label>
             Default action
-            <Select
+            <Combobox
               value={form.default_action}
-              onChange={(e) => setForm({ ...form, default_action: e.target.value })}
+              onChange={(value) => setForm({ ...form, default_action: value })}
             >
               {config &&
                 Object.entries(config.actions).map(([k, label]) => (
@@ -126,7 +128,7 @@ export default function AccessControlPage() {
                     {label}
                   </option>
                 ))}
-            </Select>
+            </Combobox>
           </Label>
           <Label>
             Controller URL (optional)
@@ -136,47 +138,57 @@ export default function AccessControlPage() {
               onChange={(e) => setForm({ ...form, controller_url: e.target.value })}
             />
           </Label>
+          <Label>
+            Camera (optional)
+            <CameraSelect
+              value={form.camera_id}
+              onChange={(camera_id) => setForm({ ...form, camera_id })}
+              allowEmpty
+            />
+          </Label>
           <div className="sm:col-span-2">
             <Button type="submit">Create access point</Button>
           </div>
         </form>
       </Card>
 
-      <TableShell>
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Type</Th>
-          <Th>Action</Th>
-          <Th>Camera</Th>
-          <Th>Face grant</Th>
-          <Th>Manual control</Th>
-        </TableHead>
-        <TableBody>
-          {points.map((p) => (
-            <tr key={p.id}>
-              <Td>{p.name}</Td>
-              <Td>{p.device_type}</Td>
-              <Td>{config?.actions[p.default_action] ?? p.default_action}</Td>
-              <Td>{p.camera?.name ?? '—'}</Td>
-              <Td>
-                <Button variant="ghost" onClick={() => openFaceGrant(p.id)}>
-                  Test face grant
-                </Button>
-              </Td>
-              <Td>
-                <div className="flex flex-wrap gap-1">
-                  {config &&
-                    Object.keys(config.actions).map((action) => (
-                      <Button key={action} variant="ghost" onClick={() => execute(p.id, action)}>
-                        {config.actions[action]}
-                      </Button>
-                    ))}
-                </div>
-              </Td>
-            </tr>
-          ))}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={points}
+        rowKey={(p) => p.id}
+        columns={[
+          { key: 'name', header: 'Name', cell: (p) => p.name },
+          { key: 'type', header: 'Type', cell: (p) => p.device_type },
+          {
+            key: 'action',
+            header: 'Action',
+            cell: (p) => config?.actions[p.default_action] ?? p.default_action,
+          },
+          { key: 'camera', header: 'Camera', cell: (p) => p.camera?.name ?? '—' },
+          {
+            key: 'face_grant',
+            header: 'Face grant',
+            cell: (p) => (
+              <Button variant="ghost" onClick={() => openFaceGrant(p.id)}>
+                Test face grant
+              </Button>
+            ),
+          },
+          {
+            key: 'manual_control',
+            header: 'Manual control',
+            cell: (p) => (
+              <div className="flex flex-wrap gap-1">
+                {config &&
+                  Object.keys(config.actions).map((action) => (
+                    <Button key={action} variant="ghost" onClick={() => execute(p.id, action)}>
+                      {config.actions[action]}
+                    </Button>
+                  ))}
+              </div>
+            ),
+          },
+        ]}
+      />
 
       {faceGrantPoint !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">

@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
+import { DatePicker } from '@/shared/ui/DatePicker'
+import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import type { Shift } from '@/shared/types'
 import { useActiveEmployees } from '@/features/employees/api/queries'
 import {
@@ -128,26 +130,26 @@ export function ShiftsTab() {
             </Label>
             <Label>
               Type
-              <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <Combobox value={form.type} onChange={(value) => setForm({ ...form, type: value })}>
                 {Object.entries(shiftTypes).map(([k, meta]) => (
                   <option key={k} value={k}>
                     {meta.label}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             {form.type === 'rotational' && (
               <Label>
                 Rotation slot
-                <Select
+                <Combobox
                   value={form.rotation_slot}
-                  onChange={(e) => setForm({ ...form, rotation_slot: e.target.value })}
+                  onChange={(value) => setForm({ ...form, rotation_slot: value })}
                 >
                   <option value="">—</option>
                   <option value="morning">Morning</option>
                   <option value="evening">Evening</option>
                   <option value="night">Night</option>
-                </Select>
+                </Combobox>
               </Label>
             )}
             <Label>
@@ -168,9 +170,9 @@ export function ShiftsTab() {
             </Label>
             <Label>
               Attendance policy
-              <Select
+              <Combobox
                 value={form.attendance_policy_id}
-                onChange={(e) => setForm({ ...form, attendance_policy_id: e.target.value })}
+                onChange={(value) => setForm({ ...form, attendance_policy_id: value })}
               >
                 <option value="">Default</option>
                 {policies.map((p) => (
@@ -178,7 +180,7 @@ export function ShiftsTab() {
                     {p.name}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
               <Button type="submit" disabled={saveShift.isPending}>
@@ -195,22 +197,22 @@ export function ShiftsTab() {
           <form className="grid gap-4 sm:grid-cols-3" onSubmit={submitAssign}>
             <Label>
               Employee
-              <Select value={assign.employee_id} onChange={(e) => setAssign({ ...assign, employee_id: e.target.value })} required>
+              <Combobox value={assign.employee_id} onChange={(value) => setAssign({ ...assign, employee_id: value })} required>
                 <option value="">Select employee</option>
                 {employees.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.employee_code} — {e.first_name} {e.last_name}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Effective from
-              <Input type="date" value={assign.effective_from} onChange={(e) => setAssign({ ...assign, effective_from: e.target.value })} required />
+              <DatePicker value={assign.effective_from} onChange={(value) => setAssign({ ...assign, effective_from: value })} required />
             </Label>
             <Label>
               Effective to
-              <Input type="date" value={assign.effective_to} onChange={(e) => setAssign({ ...assign, effective_to: e.target.value })} />
+              <DatePicker value={assign.effective_to} onChange={(value) => setAssign({ ...assign, effective_to: value })} />
             </Label>
             <div className="flex items-end gap-2 sm:col-span-3">
               <Button type="submit" disabled={assignShift.isPending}>
@@ -224,65 +226,56 @@ export function ShiftsTab() {
         </Card>
       )}
 
-      <TableShell>
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Type</Th>
-          <Th>Schedule</Th>
-          <Th>Grace</Th>
-          <Th>Status</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {isPending ? (
-            <tr>
-              <Td colSpan={6} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          ) : shifts.length === 0 ? (
-            <tr>
-              <Td colSpan={6} className="text-slate-400">
-                No shifts yet
-              </Td>
-            </tr>
-          ) : (
-            shifts.map((s) => (
-              <tr key={s.id}>
-                <Td>{s.name}</Td>
-                <Td className="capitalize">
-                  {s.type}
-                  {s.rotation_slot ? ` (${s.rotation_slot})` : ''}
-                </Td>
-                <Td>{schedule(s)}</Td>
-                <Td>{s.grace_minutes}</Td>
-                <Td>
-                  <Badge tone={s.is_active ? 'ok' : 'neutral'}>{s.is_active ? 'Active' : 'Inactive'}</Badge>
-                </Td>
-                <Td>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" onClick={() => openEdit(s)}>
-                      Edit
-                    </Button>
-                    <Button variant="ghost" onClick={() => setAssignFor(s)}>
-                      Assign
-                    </Button>
-                    <Button
-                      variant="danger"
-                      disabled={deleteShift.isPending}
-                      onClick={() => {
-                        if (window.confirm(`Remove shift "${s.name}"?`)) deleteShift.mutate(s.id)
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={shifts}
+        rowKey={(s) => s.id}
+        loading={isPending}
+        empty="No shifts yet"
+        columns={[
+          { key: 'name', header: 'Name', cell: (s) => s.name },
+          {
+            key: 'type',
+            header: 'Type',
+            className: 'capitalize',
+            cell: (s) => (
+              <>
+                {s.type}
+                {s.rotation_slot ? ` (${s.rotation_slot})` : ''}
+              </>
+            ),
+          },
+          { key: 'schedule', header: 'Schedule', cell: (s) => schedule(s) },
+          { key: 'grace', header: 'Grace', cell: (s) => s.grace_minutes },
+          {
+            key: 'status',
+            header: 'Status',
+            cell: (s) => <Badge tone={s.is_active ? 'ok' : 'neutral'}>{s.is_active ? 'Active' : 'Inactive'}</Badge>,
+          },
+          {
+            key: 'actions',
+            header: 'Actions',
+            cell: (s) => (
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => openEdit(s)}>
+                  Edit
+                </Button>
+                <Button variant="ghost" onClick={() => setAssignFor(s)}>
+                  Assign
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={deleteShift.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Remove shift "${s.name}"?`)) deleteShift.mutate(s.id)
+                  }}
+                >
+                  Delete
+                </Button>
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

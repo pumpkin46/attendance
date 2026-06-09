@@ -1,6 +1,6 @@
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { useActiveEmployees } from '@/features/employees/api/queries'
 import { useDecideLeave, useLeaveRequests } from '@/features/shifts/api/queries'
 
@@ -17,66 +17,45 @@ export function LeaveTab() {
   )
 
   return (
-    <TableShell>
-      <TableHead>
-        <Th>Employee</Th>
-        <Th>Type</Th>
-        <Th>From</Th>
-        <Th>To</Th>
-        <Th>Reason</Th>
-        <Th>Status</Th>
-        <Th>Actions</Th>
-      </TableHead>
-      <TableBody>
-        {isPending ? (
-          <tr>
-            <Td colSpan={7} className="text-slate-400">
-              Loading…
-            </Td>
-          </tr>
-        ) : leave.length === 0 ? (
-          <tr>
-            <Td colSpan={7} className="text-slate-400">
-              No leave requests
-            </Td>
-          </tr>
-        ) : (
-          leave.map((l) => (
-            <tr key={l.id}>
-              <Td>{empName.get(l.employee_id) ?? `#${l.employee_id}`}</Td>
-              <Td className="capitalize">{l.type}</Td>
-              <Td>{l.start_date}</Td>
-              <Td>{l.end_date}</Td>
-              <Td className="max-w-xs truncate text-slate-400">{l.reason ?? '—'}</Td>
-              <Td>
-                <Badge tone={STATUS_TONE[l.status]}>{l.status}</Badge>
-              </Td>
-              <Td>
-                {l.status === 'pending' ? (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      disabled={decide.isPending}
-                      onClick={() => decide.mutate({ id: l.id, status: 'approved' })}
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      variant="danger"
-                      disabled={decide.isPending}
-                      onClick={() => decide.mutate({ id: l.id, status: 'rejected' })}
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                ) : (
-                  <span className="text-xs text-slate-500">—</span>
-                )}
-              </Td>
-            </tr>
-          ))
-        )}
-      </TableBody>
-    </TableShell>
+    <DataTable
+      data={leave}
+      rowKey={(l) => l.id}
+      pageSize={10}
+      loading={isPending}
+      empty="No leave requests"
+      columns={[
+        { key: 'employee', header: 'Employee', cell: (l) => empName.get(l.employee_id) ?? `#${l.employee_id}` },
+        { key: 'type', header: 'Type', className: 'capitalize', cell: (l) => l.type },
+        { key: 'from', header: 'From', cell: (l) => l.start_date },
+        { key: 'to', header: 'To', cell: (l) => l.end_date },
+        { key: 'reason', header: 'Reason', className: 'max-w-xs truncate text-slate-400', cell: (l) => l.reason ?? '—' },
+        { key: 'status', header: 'Status', cell: (l) => <Badge tone={STATUS_TONE[l.status]}>{l.status}</Badge> },
+        {
+          key: 'actions',
+          header: 'Actions',
+          cell: (l) =>
+            l.status === 'pending' ? (
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  disabled={decide.isPending}
+                  onClick={() => decide.mutate({ id: l.id, status: 'approved' })}
+                >
+                  Approve
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={decide.isPending}
+                  onClick={() => decide.mutate({ id: l.id, status: 'rejected' })}
+                >
+                  Reject
+                </Button>
+              </div>
+            ) : (
+              <span className="text-xs text-slate-500">—</span>
+            ),
+        },
+      ]}
+    />
   )
 }

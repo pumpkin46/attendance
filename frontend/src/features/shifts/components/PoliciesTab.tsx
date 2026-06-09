@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
+import { Checkbox } from '@/shared/ui/Checkbox'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { usePolicies, useSavePolicy } from '@/features/shifts/api/queries'
 import type { AttendancePolicy } from '@/features/shifts/types'
 
@@ -99,12 +100,11 @@ export function PoliciesTab() {
             {numField('overtime_after_minutes', 'Overtime after (min)')}
             {numField('half_day_minutes', 'Half-day (min)')}
             <Label className="flex-row items-center gap-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={form.is_default}
                 onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
+                label="Default policy"
               />
-              Default policy
             </Label>
             <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
               <Button type="submit" disabled={savePolicy.isPending}>
@@ -115,50 +115,37 @@ export function PoliciesTab() {
         </Card>
       )}
 
-      <TableShell>
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Grace</Th>
-          <Th>Work min/max</Th>
-          <Th>Break</Th>
-          <Th>Overtime after</Th>
-          <Th>Default</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {isPending ? (
-            <tr>
-              <Td colSpan={7} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          ) : policies.length === 0 ? (
-            <tr>
-              <Td colSpan={7} className="text-slate-400">
-                No policies yet
-              </Td>
-            </tr>
-          ) : (
-            policies.map((p) => (
-              <tr key={p.id}>
-                <Td>{p.name}</Td>
-                <Td>{p.grace_minutes}m</Td>
-                <Td>
-                  {p.min_work_minutes}–{p.max_work_minutes}m
-                </Td>
-                <Td>{p.break_minutes}m</Td>
-                <Td>{p.overtime_after_minutes}m</Td>
-                <Td>{p.is_default && <Badge tone="ok">Default</Badge>}</Td>
-                <Td>
-                  <Button variant="ghost" onClick={() => openEdit(p)}>
-                    Edit
-                  </Button>
-                </Td>
-              </tr>
-            ))
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={policies}
+        rowKey={(p) => p.id}
+        loading={isPending}
+        empty="No policies yet"
+        columns={[
+          { key: 'name', header: 'Name', cell: (p) => p.name },
+          { key: 'grace', header: 'Grace', cell: (p) => `${p.grace_minutes}m` },
+          {
+            key: 'work',
+            header: 'Work min/max',
+            cell: (p) => (
+              <>
+                {p.min_work_minutes}–{p.max_work_minutes}m
+              </>
+            ),
+          },
+          { key: 'break', header: 'Break', cell: (p) => `${p.break_minutes}m` },
+          { key: 'overtime', header: 'Overtime after', cell: (p) => `${p.overtime_after_minutes}m` },
+          { key: 'default', header: 'Default', cell: (p) => p.is_default && <Badge tone="ok">Default</Badge> },
+          {
+            key: 'actions',
+            header: 'Actions',
+            cell: (p) => (
+              <Button variant="ghost" onClick={() => openEdit(p)}>
+                Edit
+              </Button>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

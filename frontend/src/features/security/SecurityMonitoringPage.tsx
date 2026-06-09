@@ -4,7 +4,7 @@ import { Card } from '@/shared/ui/Card'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { Badge } from '@/shared/ui/Badge'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import {
   useAcknowledgeAlert,
   useResolveAlert,
@@ -55,29 +55,49 @@ export default function SecurityMonitoringPage() {
         </Card>
       )}
 
-      <TableShell>
-        <TableHead>
-          <Th>Time</Th>
-          <Th>Severity</Th>
-          <Th>Type</Th>
-          <Th>Title</Th>
-          <Th>Status</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {alerts.map((a) => (
-            <tr key={a.id}>
-              <Td className="text-xs whitespace-nowrap">{new Date(a.occurred_at).toLocaleString()}</Td>
-              <Td>
-                <Badge tone={severityTone[a.severity] ?? 'neutral'}>{a.severity}</Badge>
-              </Td>
-              <Td className="text-xs">{a.alert_type.replace(/_/g, ' ')}</Td>
-              <Td>
+      <DataTable
+        data={alerts}
+        rowKey={(a) => a.id}
+        columns={[
+          {
+            key: 'time',
+            header: 'Time',
+            className: 'text-xs whitespace-nowrap',
+            cell: (a) => new Date(a.occurred_at).toLocaleString(),
+          },
+          {
+            key: 'severity',
+            header: 'Severity',
+            cell: (a) => <Badge tone={severityTone[a.severity] ?? 'neutral'}>{a.severity}</Badge>,
+          },
+          {
+            key: 'type',
+            header: 'Type',
+            className: 'text-xs',
+            cell: (a) => a.alert_type.replace(/_/g, ' '),
+          },
+          {
+            key: 'title',
+            header: 'Title',
+            cell: (a) => (
+              <>
                 <div className="font-medium">{a.title}</div>
                 <div className="text-xs text-slate-400">{a.message}</div>
-              </Td>
-              <Td className="capitalize">{a.status}</Td>
-              <Td className="flex gap-1">
+              </>
+            ),
+          },
+          {
+            key: 'status',
+            header: 'Status',
+            className: 'capitalize',
+            cell: (a) => a.status,
+          },
+          {
+            key: 'actions',
+            header: 'Actions',
+            className: 'flex gap-1',
+            cell: (a) => (
+              <>
                 {a.status === 'open' && (
                   <Button variant="ghost" onClick={() => acknowledge(a.id)}>
                     Ack
@@ -88,11 +108,11 @@ export default function SecurityMonitoringPage() {
                     Resolve
                   </Button>
                 )}
-              </Td>
-            </tr>
-          ))}
-        </TableBody>
-      </TableShell>
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

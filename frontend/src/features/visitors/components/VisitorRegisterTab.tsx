@@ -1,7 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Checkbox } from '@/shared/ui/Checkbox'
+import { Combobox } from '@/shared/ui/Combobox'
+import { DatePicker } from '@/shared/ui/DatePicker'
+import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { useEmployeeOptions, useRegisterVisitor } from '@/features/visitors/api/queries'
 import { VISIT_TYPES, VISITOR_CATEGORIES } from '@/features/visitors/types'
@@ -95,30 +98,30 @@ export function VisitorRegisterTab({ onRegistered }: { onRegistered: () => void 
         </Label>
         <Label>
           Category
-          <Select value={form.visitor_category} onChange={(e) => setForm({ ...form, visitor_category: e.target.value })}>
+          <Combobox value={form.visitor_category} onChange={(value) => setForm({ ...form, visitor_category: value })}>
             {VISITOR_CATEGORIES.map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}
-          </Select>
+          </Combobox>
         </Label>
         <Label>
           Visit type
-          <Select value={form.visit_type} onChange={(e) => setForm({ ...form, visit_type: e.target.value })}>
+          <Combobox value={form.visit_type} onChange={(value) => setForm({ ...form, visit_type: value })}>
             {VISIT_TYPES.map((t) => (
               <option key={t.value} value={t.value}>{t.label}</option>
             ))}
-          </Select>
+          </Combobox>
         </Label>
         <Label>
           Host employee
-          <Select value={form.host_employee_id} onChange={(e) => setForm({ ...form, host_employee_id: e.target.value })}>
+          <Combobox value={form.host_employee_id} onChange={(value) => setForm({ ...form, host_employee_id: value })}>
             <option value="">—</option>
             {employees.map((emp) => (
               <option key={emp.id} value={emp.id}>
                 {emp.first_name} {emp.last_name}
               </option>
             ))}
-          </Select>
+          </Combobox>
         </Label>
         <Label className="sm:col-span-2">
           Purpose
@@ -130,21 +133,21 @@ export function VisitorRegisterTab({ onRegistered }: { onRegistered: () => void 
         </Label>
         <Label>
           Visit start
-          <Input type="datetime-local" value={form.visit_start_at} onChange={(e) => setForm({ ...form, visit_start_at: e.target.value })} />
+          <DatePicker withTime value={form.visit_start_at} onChange={(value) => setForm({ ...form, visit_start_at: value })} />
         </Label>
         <Label>
           Visit end
-          <Input type="datetime-local" value={form.visit_end_at} onChange={(e) => setForm({ ...form, visit_end_at: e.target.value })} />
+          <DatePicker withTime value={form.visit_end_at} onChange={(value) => setForm({ ...form, visit_end_at: value })} />
         </Label>
         {form.visitor_category === 'contractor' && (
           <>
             <Label>
               Contract start
-              <Input type="date" value={form.contract_start_date} onChange={(e) => setForm({ ...form, contract_start_date: e.target.value })} />
+              <DatePicker value={form.contract_start_date} onChange={(value) => setForm({ ...form, contract_start_date: value })} />
             </Label>
             <Label>
               Contract end
-              <Input type="date" value={form.contract_end_date} onChange={(e) => setForm({ ...form, contract_end_date: e.target.value })} />
+              <DatePicker value={form.contract_end_date} onChange={(value) => setForm({ ...form, contract_end_date: value })} />
             </Label>
           </>
         )}
@@ -157,12 +160,11 @@ export function VisitorRegisterTab({ onRegistered }: { onRegistered: () => void 
           <Input value={form.parking_zone} onChange={(e) => setForm({ ...form, parking_zone: e.target.value })} />
         </Label>
         <Label className="flex items-center gap-2 sm:col-span-2">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={form.pre_registered}
             onChange={(e) => setForm({ ...form, pre_registered: e.target.checked })}
+            label="Pre-registration (requires approval workflow)"
           />
-          Pre-registration (requires approval workflow)
         </Label>
         <div className="sm:col-span-2">
           <Button type="submit" disabled={register.isPending}>

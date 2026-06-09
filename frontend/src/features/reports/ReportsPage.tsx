@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Input } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
+import { DatePicker } from '@/shared/ui/DatePicker'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { fetchReportExport, useDailyReport, useMonthlyReport } from '@/features/reports/api/queries'
 import type { ExportFormat, ReportTab } from '@/features/reports/types'
 
@@ -82,7 +84,7 @@ export default function ReportsPage() {
             <>
               <label className="flex flex-col gap-1 text-sm">
                 Date
-                <Input type="date" value={dailyDate} onChange={(e) => setDailyDate(e.target.value)} />
+                <DatePicker value={dailyDate} onChange={(value) => setDailyDate(value)} />
               </label>
               <Button onClick={loadDaily} disabled={loading}>
                 {loading ? 'Loading…' : 'Run daily report'}
@@ -103,7 +105,7 @@ export default function ReportsPage() {
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 Month
-                <Select value={monthNum} onChange={(e) => setMonthNum(e.target.value)}>
+                <Combobox value={monthNum} onChange={(value) => setMonthNum(value)}>
                   {Array.from({ length: 12 }, (_, i) => {
                     const m = String(i + 1).padStart(2, '0')
                     return (
@@ -112,7 +114,7 @@ export default function ReportsPage() {
                       </option>
                     )
                   })}
-                </Select>
+                </Combobox>
               </label>
               <Button onClick={loadMonthly} disabled={loading}>
                 {loading ? 'Loading…' : 'Run monthly report'}
@@ -143,41 +145,41 @@ export default function ReportsPage() {
             <StatCard label="On leave" value={dailyReport.on_leave} />
           </div>
 
-          <TableShell>
-            <TableHead>
-              <Th>Employee</Th>
-              <Th>Status</Th>
-              <Th>Check in</Th>
-              <Th>Check out</Th>
-              <Th>Worked</Th>
-              <Th>Overtime</Th>
-            </TableHead>
-            <TableBody>
-              {(dailyReport.employees ?? []).length === 0 ? (
-                <tr>
-                  <Td colSpan={6} className="text-slate-400">
-                    No attendance records for this date
-                  </Td>
-                </tr>
-              ) : (
-                dailyReport.employees?.map((e) => (
-                  <tr key={e.employee_code}>
-                    <Td>
-                      {e.employee_name}
-                      <span className="ml-2 text-xs text-slate-500">{e.employee_code}</span>
-                    </Td>
-                    <Td>
-                      <Badge tone={statusTone(e.status)}>{e.status}</Badge>
-                    </Td>
-                    <Td>{e.check_in_at ? new Date(e.check_in_at).toLocaleTimeString() : '—'}</Td>
-                    <Td>{e.check_out_at ? new Date(e.check_out_at).toLocaleTimeString() : '—'}</Td>
-                    <Td>{e.worked_minutes} min</Td>
-                    <Td>{e.overtime_minutes} min</Td>
-                  </tr>
-                ))
-              )}
-            </TableBody>
-          </TableShell>
+          <DataTable
+            data={dailyReport.employees ?? []}
+            rowKey={(e) => e.employee_code}
+            pageSize={10}
+            empty="No attendance records for this date"
+            columns={[
+              {
+                key: 'employee',
+                header: 'Employee',
+                cell: (e) => (
+                  <>
+                    {e.employee_name}
+                    <span className="ml-2 text-xs text-slate-500">{e.employee_code}</span>
+                  </>
+                ),
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                cell: (e) => <Badge tone={statusTone(e.status)}>{e.status}</Badge>,
+              },
+              {
+                key: 'check_in',
+                header: 'Check in',
+                cell: (e) => (e.check_in_at ? new Date(e.check_in_at).toLocaleTimeString() : '—'),
+              },
+              {
+                key: 'check_out',
+                header: 'Check out',
+                cell: (e) => (e.check_out_at ? new Date(e.check_out_at).toLocaleTimeString() : '—'),
+              },
+              { key: 'worked', header: 'Worked', cell: (e) => `${e.worked_minutes} min` },
+              { key: 'overtime', header: 'Overtime', cell: (e) => `${e.overtime_minutes} min` },
+            ]}
+          />
         </>
       )}
 
@@ -193,35 +195,30 @@ export default function ReportsPage() {
             <StatCard label="Absence count" value={monthlyReport.summary.absence_count} tone="danger" />
           </div>
 
-          <TableShell>
-            <TableHead>
-              <Th>Employee</Th>
-              <Th>Department</Th>
-              <Th>Working days</Th>
-              <Th>Attendance %</Th>
-              <Th>Overtime (hrs)</Th>
-              <Th>Absences</Th>
-              <Th>Late</Th>
-              <Th>On leave</Th>
-            </TableHead>
-            <TableBody>
-              {(monthlyReport.employees ?? []).map((e) => (
-                <tr key={e.employee_code}>
-                  <Td>
+          <DataTable
+            data={monthlyReport.employees ?? []}
+            rowKey={(e) => e.employee_code}
+            pageSize={10}
+            columns={[
+              {
+                key: 'employee',
+                header: 'Employee',
+                cell: (e) => (
+                  <>
                     {e.employee_name}
                     <span className="ml-2 text-xs text-slate-500">{e.employee_code}</span>
-                  </Td>
-                  <Td>{e.department ?? '—'}</Td>
-                  <Td>{e.total_working_days}</Td>
-                  <Td>{e.attendance_percent}%</Td>
-                  <Td>{e.overtime_hours}</Td>
-                  <Td>{e.absence_count}</Td>
-                  <Td>{e.late_count}</Td>
-                  <Td>{e.on_leave_count}</Td>
-                </tr>
-              ))}
-            </TableBody>
-          </TableShell>
+                  </>
+                ),
+              },
+              { key: 'department', header: 'Department', cell: (e) => e.department ?? '—' },
+              { key: 'working_days', header: 'Working days', cell: (e) => e.total_working_days },
+              { key: 'attendance', header: 'Attendance %', cell: (e) => `${e.attendance_percent}%` },
+              { key: 'overtime', header: 'Overtime (hrs)', cell: (e) => e.overtime_hours },
+              { key: 'absences', header: 'Absences', cell: (e) => e.absence_count },
+              { key: 'late', header: 'Late', cell: (e) => e.late_count },
+              { key: 'on_leave', header: 'On leave', cell: (e) => e.on_leave_count },
+            ]}
+          />
         </>
       )}
     </div>

@@ -4,7 +4,7 @@ import { clearOrg, selectOrgId, setOrg } from '@/features/tenant/tenantSlice'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Card } from '@/shared/ui/Card'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import { Input } from '@/shared/ui/Input'
 import { Button } from '@/shared/ui/Button'
 import { Label } from '@/shared/ui/Label'
@@ -144,62 +144,41 @@ export default function SecurityTenancyPage() {
       )}
 
       <h2 className="mb-2 text-sm font-semibold text-slate-200">Organizations</h2>
-      <TableShell className="mb-8">
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Code</Th>
-          <Th>Branches</Th>
-          <Th>Departments</Th>
-          <Th>Employees</Th>
-        </TableHead>
-        <TableBody>
-          {(organizations ?? []).map((o) => (
-            <tr key={o.id}>
-              <Td>{o.name}</Td>
-              <Td>{o.code}</Td>
-              <Td>{o.branches_count ?? '—'}</Td>
-              <Td>{o.departments_count ?? '—'}</Td>
-              <Td>{o.employees_count ?? '—'}</Td>
-            </tr>
-          ))}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        className="mb-8"
+        data={organizations ?? []}
+        rowKey={(o) => o.id}
+        columns={[
+          { key: 'name', header: 'Name', cell: (o) => o.name },
+          { key: 'code', header: 'Code', cell: (o) => o.code },
+          { key: 'branches', header: 'Branches', cell: (o) => o.branches_count ?? '—' },
+          { key: 'departments', header: 'Departments', cell: (o) => o.departments_count ?? '—' },
+          { key: 'employees', header: 'Employees', cell: (o) => o.employees_count ?? '—' },
+        ]}
+      />
 
       <h2 className="mb-2 text-sm font-semibold text-slate-200">Branches</h2>
-      <TableShell className="mb-8">
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Code</Th>
-          <Th>Org ID</Th>
-        </TableHead>
-        <TableBody>
-          {(branches ?? []).map((b) => (
-            <tr key={b.id}>
-              <Td>{b.name}</Td>
-              <Td>{b.code}</Td>
-              <Td>{b.organization_id}</Td>
-            </tr>
-          ))}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        className="mb-8"
+        data={branches ?? []}
+        rowKey={(b) => b.id}
+        columns={[
+          { key: 'name', header: 'Name', cell: (b) => b.name },
+          { key: 'code', header: 'Code', cell: (b) => b.code },
+          { key: 'org', header: 'Org ID', cell: (b) => b.organization_id },
+        ]}
+      />
 
       <h2 className="mb-2 text-sm font-semibold text-slate-200">Departments</h2>
-      <TableShell>
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Code</Th>
-          <Th>Branch</Th>
-        </TableHead>
-        <TableBody>
-          {(departments ?? []).map((d) => (
-            <tr key={d.id}>
-              <Td>{d.name}</Td>
-              <Td>{d.code}</Td>
-              <Td>{d.branch?.name ?? '—'}</Td>
-            </tr>
-          ))}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={departments ?? []}
+        rowKey={(d) => d.id}
+        columns={[
+          { key: 'name', header: 'Name', cell: (d) => d.name },
+          { key: 'code', header: 'Code', cell: (d) => d.code },
+          { key: 'branch', header: 'Branch', cell: (d) => d.branch?.name ?? '—' },
+        ]}
+      />
     </div>
   )
 }

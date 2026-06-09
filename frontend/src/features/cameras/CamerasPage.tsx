@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input, Select } from '@/shared/ui/Input'
+import { Input } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
+import { SidePanel } from '@/shared/ui/SidePanel'
 import { StatCard } from '@/shared/ui/StatCard'
-import { TableBody, TableHead, TableShell, Td, Th } from '@/shared/ui/DataTable'
+import { DataTable } from '@/shared/ui/DataTable'
 import type { Camera } from '@/shared/types'
 import {
   useCameras,
@@ -142,11 +144,28 @@ export default function CamerasPage() {
       />
 
       {showForm && (
-        <Card className="mb-6">
-          <h2 className="mb-4 text-lg font-medium">
-            {editingId ? 'Edit camera' : 'Register camera'}
-          </h2>
-          <form className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" onSubmit={saveCamera}>
+        <SidePanel
+          title={editingId ? 'Edit camera' : 'Register camera'}
+          description={
+            editingId ? 'Update camera configuration' : 'Add a new camera and configure its stream'
+          }
+          onClose={resetForm}
+          footer={
+            <>
+              <Button
+                type="submit"
+                form="camera-form"
+                isLoading={createCamera.isPending || updateCamera.isPending}
+              >
+                {editingId ? 'Update camera' : 'Register camera'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={resetForm}>
+                Cancel
+              </Button>
+            </>
+          }
+        >
+          <form id="camera-form" className="grid gap-4 sm:grid-cols-2" onSubmit={saveCamera}>
             <Label>
               Camera name *
               <Input
@@ -158,22 +177,22 @@ export default function CamerasPage() {
             </Label>
             <Label>
               Camera type *
-              <Select
+              <Combobox
                 value={form.camera_type}
-                onChange={(e) => setForm({ ...form, camera_type: e.target.value })}
+                onChange={(value) => setForm({ ...form, camera_type: value })}
               >
                 {Object.entries(cameraTypes).map(([k, label]) => (
                   <option key={k} value={k}>
                     {label}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Location *
-              <Select
+              <Combobox
                 value={form.location_id}
-                onChange={(e) => setForm({ ...form, location_id: e.target.value })}
+                onChange={(value) => setForm({ ...form, location_id: value })}
                 required
               >
                 <option value="">Select location</option>
@@ -182,13 +201,13 @@ export default function CamerasPage() {
                     {l.name}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Zone
-              <Select
+              <Combobox
                 value={form.zone}
-                onChange={(e) => setForm({ ...form, zone: e.target.value })}
+                onChange={(value) => setForm({ ...form, zone: value })}
               >
                 <option value="">—</option>
                 {Object.entries(zones).map(([k, label]) => (
@@ -196,7 +215,7 @@ export default function CamerasPage() {
                     {label}
                   </option>
                 ))}
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Floor
@@ -206,7 +225,7 @@ export default function CamerasPage() {
                 placeholder="Ground, L1, …"
               />
             </Label>
-            <Label className="sm:col-span-2 lg:col-span-3">
+            <Label className="sm:col-span-2">
               RTSP URL
               <Input
                 placeholder="rtsp://user:pass@192.168.1.100:554/stream"
@@ -242,48 +261,45 @@ export default function CamerasPage() {
             </Label>
             <Label>
               Direction
-              <Select
+              <Combobox
                 value={form.direction}
-                onChange={(e) => setForm({ ...form, direction: e.target.value })}
+                onChange={(value) => setForm({ ...form, direction: value })}
               >
                 <option value="in">Entry (check-in)</option>
                 <option value="out">Exit (check-out)</option>
                 <option value="both">Both</option>
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Status *
-              <Select
+              <Combobox
                 value={form.status}
-                onChange={(e) =>
-                  setForm({ ...form, status: e.target.value as Camera['status'] })
+                onChange={(value) =>
+                  setForm({ ...form, status: value as Camera['status'] })
                 }
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
                 <option value="maintenance">Maintenance</option>
-              </Select>
+              </Combobox>
             </Label>
             <Label>
               Deployment
-              <Select
+              <Combobox
                 value={form.deployment_mode}
-                onChange={(e) =>
+                onChange={(value) =>
                   setForm({
                     ...form,
-                    deployment_mode: e.target.value as Camera['deployment_mode'],
+                    deployment_mode: value as Camera['deployment_mode'],
                   })
                 }
               >
                 <option value="cloud">Cloud (central AI)</option>
                 <option value="edge">Edge (on-device AI)</option>
-              </Select>
+              </Combobox>
             </Label>
-            <div className="flex items-end sm:col-span-2 lg:col-span-3">
-              <Button type="submit">{editingId ? 'Update camera' : 'Register camera'}</Button>
-            </div>
           </form>
-        </Card>
+        </SidePanel>
       )}
 
       {captureResult && (
@@ -315,118 +331,98 @@ export default function CamerasPage() {
         />
       </div>
 
-      <TableShell>
-        <TableHead>
-          <Th>Name</Th>
-          <Th>Type</Th>
-          <Th>Location / Zone</Th>
-          <Th>Resolution</Th>
-          <Th>Status</Th>
-          <Th>Online</Th>
-          <Th>FPS</Th>
-          <Th>Latency</Th>
-          <Th>Bandwidth</Th>
-          <Th>CPU</Th>
-          <Th>GPU</Th>
-          <Th>Dropped</Th>
-          <Th>Events</Th>
-          <Th>Actions</Th>
-        </TableHead>
-        <TableBody>
-          {isPending ? (
-            <tr>
-              <Td colSpan={14} className="text-slate-400">
-                Loading…
-              </Td>
-            </tr>
-          ) : isError ? (
-            <tr>
-              <Td colSpan={14} className="text-red-400">
-                Failed to load cameras
-              </Td>
-            </tr>
-          ) : cameras.length === 0 ? (
-            <tr>
-              <Td colSpan={14} className="text-slate-400">
-                No cameras registered yet
-              </Td>
-            </tr>
-          ) : (
-            cameras.map((c) => {
-              const h = c.health
-              const online = h?.online ?? c.online
-
-              return (
-                <tr key={c.id}>
-                  <Td>{c.name}</Td>
-                  <Td className="uppercase text-xs">{c.camera_type ?? 'rtsp'}</Td>
-                  <Td>
-                    <div className="text-sm">{c.location?.name ?? '—'}</div>
-                    {(c.zone || c.floor) && (
-                      <div className="text-xs text-slate-400">
-                        {[c.zone, c.floor].filter(Boolean).join(' · ')}
-                      </div>
-                    )}
-                  </Td>
-                  <Td>{c.resolution ?? (c.target_fps ? `${c.target_fps} fps target` : '—')}</Td>
-                  <Td>
-                    <Badge
-                      tone={
-                        c.status === 'active'
-                          ? 'ok'
-                          : c.status === 'maintenance'
-                            ? 'warn'
-                            : 'neutral'
-                      }
-                    >
-                      {STATUS_LABELS[c.status]}
-                    </Badge>
-                  </Td>
-                  <Td>
-                    <Badge tone={online ? 'ok' : 'warn'}>{online ? 'Online' : 'Offline'}</Badge>
-                  </Td>
-                  <Td>{h?.fps != null ? h.fps.toFixed(1) : c.frame_rate_fps ?? '—'}</Td>
-                  <Td>{h?.latency_ms != null ? `${h.latency_ms}ms` : '—'}</Td>
-                  <Td>{h?.bandwidth_kbps != null ? `${h.bandwidth_kbps}` : '—'}</Td>
-                  <Td>
-                    {h?.cpu_usage_percent != null ? `${h.cpu_usage_percent}%` : '—'}
-                  </Td>
-                  <Td>
-                    {h?.gpu_usage_percent != null ? `${h.gpu_usage_percent}%` : '—'}
-                  </Td>
-                  <Td>{h?.dropped_frames ?? 0}</Td>
-                  <Td>{h?.recognition_events_today ?? c.recognition_count_today ?? 0}</Td>
-                  <Td>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" onClick={() => startEdit(c)}>
-                        Edit
-                      </Button>
-                      {c.stream_url && (
-                        <Button
-                          variant="ghost"
-                          disabled={capturing === c.id}
-                          onClick={() => captureFromStream(c.id)}
-                        >
-                          {capturing === c.id ? '…' : 'Test'}
-                        </Button>
-                      )}
-                      <Button
-                        variant="danger"
-                        disabled={deleteCamera.isPending}
-                        onClick={() => {
-                          if (window.confirm(`Remove camera "${c.name}"?`)) deleteCamera.mutate(c.id)
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </Td>
-                </tr>
-              )
-            })
-          )}
-        </TableBody>
-      </TableShell>
+      <DataTable
+        data={cameras}
+        rowKey={(c) => c.id}
+        pageSize={10}
+        loading={isPending}
+        error={isError ? 'Failed to load cameras' : undefined}
+        empty="No cameras registered yet"
+        columns={[
+          { key: 'name', header: 'Name', cell: (c) => c.name },
+          { key: 'type', header: 'Type', className: 'uppercase text-xs', cell: (c) => c.camera_type ?? 'rtsp' },
+          {
+            key: 'location',
+            header: 'Location / Zone',
+            cell: (c) => (
+              <>
+                <div className="text-sm">{c.location?.name ?? '—'}</div>
+                {(c.zone || c.floor) && (
+                  <div className="text-xs text-slate-400">
+                    {[c.zone, c.floor].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+              </>
+            ),
+          },
+          {
+            key: 'resolution',
+            header: 'Resolution',
+            cell: (c) => c.resolution ?? (c.target_fps ? `${c.target_fps} fps target` : '—'),
+          },
+          {
+            key: 'status',
+            header: 'Status',
+            cell: (c) => (
+              <Badge
+                tone={
+                  c.status === 'active'
+                    ? 'ok'
+                    : c.status === 'maintenance'
+                      ? 'warn'
+                      : 'neutral'
+                }
+              >
+                {STATUS_LABELS[c.status]}
+              </Badge>
+            ),
+          },
+          {
+            key: 'online',
+            header: 'Online',
+            cell: (c) => {
+              const online = c.health?.online ?? c.online
+              return <Badge tone={online ? 'ok' : 'warn'}>{online ? 'Online' : 'Offline'}</Badge>
+            },
+          },
+          { key: 'fps', header: 'FPS', cell: (c) => (c.health?.fps != null ? c.health.fps.toFixed(1) : c.frame_rate_fps ?? '—') },
+          { key: 'latency', header: 'Latency', cell: (c) => (c.health?.latency_ms != null ? `${c.health.latency_ms}ms` : '—') },
+          { key: 'bandwidth', header: 'Bandwidth', cell: (c) => (c.health?.bandwidth_kbps != null ? `${c.health.bandwidth_kbps}` : '—') },
+          { key: 'cpu', header: 'CPU', cell: (c) => (c.health?.cpu_usage_percent != null ? `${c.health.cpu_usage_percent}%` : '—') },
+          { key: 'gpu', header: 'GPU', cell: (c) => (c.health?.gpu_usage_percent != null ? `${c.health.gpu_usage_percent}%` : '—') },
+          { key: 'dropped', header: 'Dropped', cell: (c) => c.health?.dropped_frames ?? 0 },
+          { key: 'events', header: 'Events', cell: (c) => c.health?.recognition_events_today ?? c.recognition_count_today ?? 0 },
+          {
+            key: 'actions',
+            header: 'Actions',
+            cell: (c) => (
+              <div className="flex gap-1">
+                <Button variant="ghost" onClick={() => startEdit(c)}>
+                  Edit
+                </Button>
+                {c.stream_url && (
+                  <Button
+                    variant="ghost"
+                    disabled={capturing === c.id}
+                    onClick={() => captureFromStream(c.id)}
+                  >
+                    {capturing === c.id ? '…' : 'Test'}
+                  </Button>
+                )}
+                <Button
+                  variant="danger"
+                  disabled={deleteCamera.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Remove camera "${c.name}"?`)) deleteCamera.mutate(c.id)
+                  }}
+                >
+                  Delete
+                </Button>
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

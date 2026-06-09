@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api } from '@/shared/api/client'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
+import { Combobox } from '@/shared/ui/Combobox'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { Badge } from '@/shared/ui/Badge'
@@ -278,15 +279,15 @@ export function VisitorDetailPanel({
         <Card className="mb-4">
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-slate-300">Documents</h3>
-            <select
+            <Combobox
               value={docType}
-              onChange={(e) => setDocType(e.target.value)}
+              onChange={(value) => setDocType(value)}
               className="rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs"
             >
               {DOC_TYPES.map((d) => (
                 <option key={d.value} value={d.value}>{d.label}</option>
               ))}
-            </select>
+            </Combobox>
             <Button variant="ghost" onClick={() => docRef.current?.click()}>Upload</Button>
             <input
               ref={docRef}

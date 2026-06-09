@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useWebcam } from '@/shared/hooks/useWebcam'
 import { getToken } from '@/shared/lib/session'
 import { Button } from '@/shared/ui/Button'
-import { Select } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { detectFaces, identifyFace } from '@/features/recognition/api/recognitionApi'
 import { useEngineStreams } from '@/features/recognition/api/queries'
 import type { IdentifyResult } from '@/features/recognition/types'
@@ -42,13 +42,13 @@ const UNKNOWN_HINTS: Record<string, string> = {
 }
 
 const STATUS_STYLE: Record<MonitorStatus, string> = {
-  idle: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-  scanning: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-  face: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200',
-  recognized: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-  duplicate: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
-  unknown: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-  spoof: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+  idle: 'bg-slate-500/15 text-slate-400',
+  scanning: 'bg-blue-500/15 text-blue-400',
+  face: 'bg-indigo-500/15 text-indigo-300',
+  recognized: 'bg-emerald-500/15 text-emerald-400',
+  duplicate: 'bg-amber-500/15 text-amber-400',
+  unknown: 'bg-yellow-500/15 text-yellow-400',
+  spoof: 'bg-red-500/15 text-red-400',
 }
 
 const STATUS_LABEL: Record<MonitorStatus, string> = {
@@ -254,18 +254,18 @@ export default function WebcamMonitor() {
   const showFullscreenBtn = isWebcam ? active : !!streamImg
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+    <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Webcam monitor</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <h2 className="text-base font-semibold text-slate-100">Webcam monitor</h2>
+          <p className="text-xs text-slate-400">
             Local camera spot-check, or a live view of a registered stream.
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Select
+          <Combobox
             value={isWebcam ? 'webcam' : String(source)}
-            onChange={(e) => changeSource(e.target.value)}
+            onChange={(value) => changeSource(value)}
           >
             <option value="webcam">Local webcam</option>
             {streams.map((s) => (
@@ -273,7 +273,7 @@ export default function WebcamMonitor() {
                 Camera #{s.camera_id} ({s.status})
               </option>
             ))}
-          </Select>
+          </Combobox>
 
           {isWebcam ? (
             <>
@@ -303,7 +303,7 @@ export default function WebcamMonitor() {
               <video ref={videoRef} className={mediaClass} playsInline muted autoPlay />
               <canvas ref={canvasRef} hidden />
               {!active && (
-                <div className="absolute inset-0 grid place-items-center text-sm text-gray-400">
+                <div className="absolute inset-0 grid place-items-center text-sm text-slate-400">
                   Camera off
                 </div>
               )}
@@ -311,7 +311,7 @@ export default function WebcamMonitor() {
           ) : streamImg ? (
             <img src={streamImg} alt={`Camera ${source}`} className={mediaClass} />
           ) : (
-            <div className="grid min-h-[240px] place-items-center p-6 text-center text-sm text-gray-400">
+            <div className="grid min-h-[240px] place-items-center p-6 text-center text-sm text-slate-400">
               {streamErr ?? 'Connecting…'}
             </div>
           )}
@@ -390,48 +390,48 @@ export default function WebcamMonitor() {
 
         <div className="flex flex-col justify-center gap-2 text-sm">
           {!isWebcam ? (
-            <div className="text-gray-500 dark:text-gray-400">
-              <p className="text-gray-700 dark:text-gray-200">Live view · Camera #{source}</p>
+            <div className="text-slate-400">
+              <p className="text-slate-200">Live view · Camera #{source}</p>
               <p className="mt-2 text-xs">
                 Recognition and attendance for registered streams are handled by the engine
-                pipeline (use “Start Engine” and start this stream below). This panel is a
+                pipeline (use “Start engine” and start this stream below). This panel is a
                 live preview.
               </p>
-              {streamErr && <p className="mt-2 text-xs text-yellow-600 dark:text-yellow-400">{streamErr}</p>}
+              {streamErr && <p className="mt-2 text-xs text-amber-400">{streamErr}</p>}
             </div>
           ) : camError ? (
-            <p className="text-red-500">{camError}</p>
+            <p className="text-red-400">{camError}</p>
           ) : last?.matched && last.employee ? (
             <>
-              <p className="text-lg font-semibold text-gray-900 dark:text-white">
+              <p className="text-lg font-semibold text-slate-100">
                 {last.employee.first_name} {last.employee.last_name}
               </p>
               {last.employee.employee_code && (
-                <p className="text-gray-500">{last.employee.employee_code}</p>
+                <p className="text-slate-400">{last.employee.employee_code}</p>
               )}
               {last.confidence != null && (
-                <p className="text-gray-500">Confidence: {(last.confidence * 100).toFixed(1)}%</p>
+                <p className="text-slate-400">Confidence: {(last.confidence * 100).toFixed(1)}%</p>
               )}
               {last.attendance?.action && (
-                <p className="text-gray-500">
-                  Attendance: <span className="font-medium">{last.attendance.action}</span>
+                <p className="text-slate-400">
+                  Attendance: <span className="font-medium text-slate-200">{last.attendance.action}</span>
                 </p>
               )}
             </>
           ) : status === 'spoof' ? (
-            <p className="text-red-500">Spoof / liveness check failed.</p>
+            <p className="text-red-400">Spoof / liveness check failed.</p>
           ) : status === 'unknown' ? (
-            <div className="text-yellow-600 dark:text-yellow-400">
+            <div className="text-amber-400">
               <p>{UNKNOWN_HINTS[last?.reason ?? ''] ?? UNKNOWN_HINTS.default}</p>
               {last?.confidence != null && (
-                <p className="mt-1 text-xs text-gray-400">
+                <p className="mt-1 text-xs text-slate-500">
                   best match {(last.confidence * 100).toFixed(1)}%
                   {last.reason ? ` · ${last.reason}` : ''}
                 </p>
               )}
             </div>
           ) : (
-            <p className="text-gray-400">
+            <p className="text-slate-400">
               {running ? 'Look at the camera to identify.' : 'Start the camera to monitor recognition.'}
             </p>
           )}

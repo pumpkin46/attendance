@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Select } from '@/shared/ui/Input'
+import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { useAuth } from '@/features/auth/AuthProvider'
@@ -131,14 +131,14 @@ export default function PrivacyPage() {
             <div className="flex flex-wrap items-end gap-3">
               <Label className="min-w-[260px] flex-1">
                 Employee
-                <Select value={eraseId} onChange={(e) => setEraseId(e.target.value)}>
+                <Combobox value={eraseId} onChange={(value) => setEraseId(value)}>
                   <option value="">Select employee</option>
                   {employees.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.employee_code} — {e.first_name} {e.last_name}
                     </option>
                   ))}
-                </Select>
+                </Combobox>
               </Label>
               <Button variant="danger" disabled={!eraseId || erase.isPending} onClick={confirmErase}>
                 Erase data

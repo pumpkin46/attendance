@@ -1,25 +1,36 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
-import { Input } from '@/shared/ui/Input'
-import { Label } from '@/shared/ui/Label'
+import { Checkbox } from '@/shared/ui/Checkbox'
+import { ImageDropzone } from '@/shared/ui/ImageDropzone'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { identifyFace } from '@/features/recognition/api/recognitionApi'
 import type { IdentifyResult } from '@/features/recognition/types'
 
 export default function RecognitionTestPage() {
   const [preview, setPreview] = useState<string | null>(null)
-  const [cameraId, setCameraId] = useState('')
+  const [fileName, setFileName] = useState('')
   const [requireLiveness, setRequireLiveness] = useState(true)
   const [result, setResult] = useState<IdentifyResult | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const onFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file (JPEG or PNG).')
+      return
+    }
     const reader = new FileReader()
     reader.onload = () => setPreview(reader.result as string)
     reader.readAsDataURL(file)
+    setFileName(file.name)
+    setResult(null)
+    setError('')
+  }
+
+  const clearImage = () => {
+    setPreview(null)
+    setFileName('')
     setResult(null)
     setError('')
   }
@@ -33,7 +44,6 @@ export default function RecognitionTestPage() {
     try {
       const data = await identifyFace({
         image: preview,
-        camera_id: cameraId ? Number(cameraId) : undefined,
         require_liveness: requireLiveness,
         source: 'upload',
       })
@@ -76,39 +86,22 @@ export default function RecognitionTestPage() {
       />
 
       <Card className="mb-6">
-        <form className="flex flex-col gap-4" onSubmit={submit}>
-          <Label>
-            Camera ID (optional)
-            <Input
-              type="number"
-              placeholder="e.g. 1"
-              value={cameraId}
-              onChange={(e) => setCameraId(e.target.value)}
-            />
-          </Label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
-              checked={requireLiveness}
-              onChange={(e) => setRequireLiveness(e.target.checked)}
-            />
-            Require liveness / anti-spoof (recommended for production)
-          </label>
-          <Label>
-            Camera image
-            <Input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
-              required
-            />
-          </Label>
-          {preview && (
-            <img src={preview} alt="Preview" className="max-h-64 rounded-lg border border-slate-700" />
-          )}
-          <Button type="submit" disabled={loading}>
+        <form className="flex flex-col gap-5" onSubmit={submit}>
+          <Checkbox
+            checked={requireLiveness}
+            onChange={(e) => setRequireLiveness(e.target.checked)}
+            label="Require liveness / anti-spoof (recommended for production)"
+          />
+
+          <ImageDropzone
+            label="Camera image"
+            preview={preview}
+            fileName={fileName}
+            onFile={onFile}
+            onClear={clearImage}
+          />
+
+          <Button type="submit" disabled={loading || !preview}>
             {loading ? 'Processing…' : 'Run recognition + attendance'}
           </Button>
         </form>
