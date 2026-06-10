@@ -4,6 +4,10 @@ export interface User {
   email: string
   roles?: Role[]
   organization?: { id: number; name: string }
+  auth_provider?: string
+  email_verified_at?: string | null
+  is_active?: boolean
+  created_at?: string | null
 }
 
 export interface Role {

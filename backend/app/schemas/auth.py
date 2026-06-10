@@ -1,11 +1,41 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    email: str | None = Field(default=None, max_length=255)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Name cannot be empty")
+        return stripped
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if "@" not in normalized or "." not in normalized.split("@")[-1]:
+            raise ValueError("Invalid email address")
+        return normalized
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=255)
 
 
 class PermissionOut(BaseModel):

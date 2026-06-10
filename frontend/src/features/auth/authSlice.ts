@@ -60,6 +60,23 @@ export const loginUser = createAsyncThunk(
   }
 )
 
+/** Update the signed-in user's profile (name/email); returns the fresh user. */
+export const updateProfile = createAsyncThunk<User, { name?: string; email?: string }>(
+  'auth/updateProfile',
+  async (changes) => {
+    const { data } = await api.patch<User>('/auth/me', changes)
+    return data
+  }
+)
+
+/** Change the signed-in user's password. No state change on success. */
+export const changePassword = createAsyncThunk<
+  void,
+  { current_password: string; new_password: string }
+>('auth/changePassword', async (body) => {
+  await api.post('/auth/me/password', body)
+})
+
 /** Best-effort server logout; always clears the local token. */
 export const logoutUser = createAsyncThunk('auth/logout', async () => {
   try {
@@ -99,6 +116,9 @@ const authSlice = createSlice({
       .addCase(loginUser.rejected, (state) => {
         state.user = null
         state.status = 'anonymous'
+      })
+      .addCase(updateProfile.fulfilled, (state, action: PayloadAction<User>) => {
+        state.user = action.payload
       })
       .addCase(logoutUser.fulfilled, (state) => {
         state.user = null

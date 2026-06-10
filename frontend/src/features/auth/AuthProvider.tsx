@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
+  changePassword,
   fetchCurrentUser,
   loginUser,
   logoutUser,
   selectAuthLoading,
   selectUser,
+  updateProfile,
 } from '@/features/auth/authSlice'
 import { getToken } from '@/shared/lib/session'
 
@@ -48,6 +50,20 @@ export function useAuth() {
     await dispatch(logoutUser())
   }, [dispatch])
 
+  const saveProfile = useCallback(
+    async (changes: { name?: string; email?: string }) => {
+      await dispatch(updateProfile(changes)).unwrap()
+    },
+    [dispatch]
+  )
+
+  const changeUserPassword = useCallback(
+    async (current_password: string, new_password: string) => {
+      await dispatch(changePassword({ current_password, new_password })).unwrap()
+    },
+    [dispatch]
+  )
+
   const hasPermission = useCallback(
     (name: string) => {
       if (user?.roles?.some((r) => r.name === 'super_admin')) return true
@@ -62,7 +78,16 @@ export function useAuth() {
   )
 
   return useMemo(
-    () => ({ user, loading, login, logout, hasPermission, isSuperAdmin }),
-    [user, loading, login, logout, hasPermission, isSuperAdmin]
+    () => ({
+      user,
+      loading,
+      login,
+      logout,
+      hasPermission,
+      isSuperAdmin,
+      saveProfile,
+      changeUserPassword,
+    }),
+    [user, loading, login, logout, hasPermission, isSuperAdmin, saveProfile, changeUserPassword]
   )
 }
