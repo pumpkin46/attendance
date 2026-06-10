@@ -26,18 +26,30 @@
 param(
   [switch]$Dev,
   [string]$BindHost = "127.0.0.1",
-  [int]$Port = 8000
+  [int]$Port = 8000,
+  [int]$Workers = 1
 )
 
 $ErrorActionPreference = "Stop"
 $python = Join-Path $PSScriptRoot "venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { $python = "python" }  # fall back to PATH
 
+# --workers and --reload are mutually exclusive in uvicorn; -Dev wins.
+if ($Dev -and $Workers -gt 1) {
+  throw "-Dev (auto-reload) cannot be combined with -Workers > 1. Pick one."
+}
+
 $uvicornArgs = @("-m", "uvicorn", "main:app", "--host", $BindHost, "--port", "$Port")
 if ($Dev) {
   $dataDir = Join-Path $PSScriptRoot "data"
   $uvicornArgs += @("--reload", "--reload-exclude", $dataDir)
   Write-Host "Starting backend (dev, auto-reload; data/ excluded) on ${BindHost}:${Port}" -ForegroundColor Cyan
+} elseif ($Workers -gt 1) {
+  # Multiple workers scale concurrency past one event loop's CPU ceiling.
+  # Safe here because shared state lives in Redis and periodic jobs run under
+  # Celery Beat (not per-worker in-process loops).
+  $uvicornArgs += @("--workers", "$Workers")
+  Write-Host "Starting backend (stable, $Workers workers) on ${BindHost}:${Port}" -ForegroundColor Cyan
 } else {
   Write-Host "Starting backend (stable, no reload) on ${BindHost}:${Port}" -ForegroundColor Cyan
 }

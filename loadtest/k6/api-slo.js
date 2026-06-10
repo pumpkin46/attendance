@@ -36,17 +36,13 @@ export const options = {
   },
 }
 
-export function setup() {
-  return { token: login() }
-}
-
-export default function (data) {
-  const headers = authHeaders(data.token)
+// The read endpoints under test. Built as a function so both setup() (warmup)
+// and the iteration body share one source of truth.
+function readEndpoints() {
   const to = new Date()
   const from = new Date()
   from.setDate(from.getDate() - 7)
-
-  const reads = [
+  return [
     { name: 'employees', path: '/api/v1/employees?per_page=50' },
     { name: 'audit', path: '/api/v1/audit-logs?per_page=100' },
     { name: 'cameras', path: '/api/v1/cameras?per_page=100' },
@@ -57,6 +53,24 @@ export default function (data) {
       path: `/api/v1/attendance?date_from=${ymd(from)}&date_to=${ymd(to)}&per_page=100`,
     },
   ]
+}
+
+export function setup() {
+  const token = login()
+  // Warm up each endpoint once before measurement: pays the one-time costs
+  // (connection-pool fill, first query-plan compile, selectin priming) so the
+  // measured p95 reflects steady state, not cold start. These requests are
+  // intentionally UNTAGGED, so they don't land in the {endpoint:...} percentiles.
+  const headers = authHeaders(token)
+  for (const r of readEndpoints()) {
+    http.get(`${BASE_URL}${r.path}`, { headers })
+  }
+  return { token }
+}
+
+export default function (data) {
+  const headers = authHeaders(data.token)
+  const reads = readEndpoints()
 
   // Each iteration exercises one random read so all endpoints get traffic.
   const pick = reads[Math.floor(Math.random() * reads.length)]

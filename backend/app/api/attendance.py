@@ -5,9 +5,11 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import lazyload
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.errors import ValidationError
 from app.core.pagination import PaginatedResponse, PaginationParams, paginate, PaginationDep
 from app.models.attendance import AttendanceRecord
 from app.models.employee import Employee
@@ -47,17 +49,42 @@ async def list_attendance(
     org_id: TenantOrgId,
     pagination: PaginationDep,
     work_date: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
     employee_id: int | None = Query(None),
     status: str | None = Query(None),
 ):
-    stmt = select(AttendanceRecord).order_by(AttendanceRecord.work_date.desc())
+    def _parse(label: str, value: str) -> date:
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            raise ValidationError(f"{label} must be an ISO date (YYYY-MM-DD)")
+    # AttendanceRecordOut is flat (scalar FK columns only), but the model marks
+    # employee/location/shift as lazy="selectin" — which would fire several extra
+    # queries per page (and employee cascades into its own selectins). Suppress
+    # them; the serializer never touches these relationships.
+    stmt = (
+        select(AttendanceRecord)
+        .options(
+            lazyload(AttendanceRecord.employee),
+            lazyload(AttendanceRecord.location),
+            lazyload(AttendanceRecord.shift),
+        )
+        .order_by(AttendanceRecord.work_date.desc())
+    )
 
     if org_id:
         emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
         stmt = stmt.where(AttendanceRecord.employee_id.in_(emp_ids))
 
     if work_date:
-        stmt = stmt.where(AttendanceRecord.work_date == work_date)
+        stmt = stmt.where(AttendanceRecord.work_date == _parse("work_date", work_date))
+    # Date-range filter — keeps the scan/count bounded to the requested window
+    # instead of the whole table (the dashboard/list both query recent days).
+    if date_from:
+        stmt = stmt.where(AttendanceRecord.work_date >= _parse("date_from", date_from))
+    if date_to:
+        stmt = stmt.where(AttendanceRecord.work_date <= _parse("date_to", date_to))
     if employee_id:
         stmt = stmt.where(AttendanceRecord.employee_id == employee_id)
     if status:

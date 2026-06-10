@@ -3,8 +3,11 @@
 //       - http_req_duration{endpoint:identify} : end-to-end request time
 //       - server_processing_ms                  : the engine's own `processing_ms`
 //
-// Requires a face image:
-//   k6 run -e PASSWORD=... -e IMAGE_PATH=./loadtest/assets/face.jpg loadtest/k6/recognition.js
+// Uses the bundled face image by default; override with -e IMAGE_PATH=...
+//   k6 run loadtest/k6/recognition.js
+//   k6 run -e IMAGE_PATH=/abs/path/to/face.jpg loadtest/k6/recognition.js
+// Relative IMAGE_PATH values resolve from this script's directory (loadtest/k6/),
+// not your shell's CWD — that's a k6 open() rule, not a typo.
 //
 // NOTE: /recognition/identify is rate-limited (60/min per key by default). For a real
 // throughput test set RATE_LIMIT_ENABLED=false on the server, or keep VUS low.
@@ -14,11 +17,16 @@ import { Trend } from 'k6/metrics'
 import { b64encode } from 'k6/encoding'
 import { BASE_URL, login, authHeaders } from './lib/common.js'
 
-const IMAGE_PATH = __ENV.IMAGE_PATH || ''
-// `open()` must run in init context; guard so an empty path doesn't throw here.
-const IMAGE_B64 = IMAGE_PATH ? b64encode(open(IMAGE_PATH, 'b')) : ''
+// Defaults to the bundled asset, resolved relative to this script (loadtest/k6/).
+const IMAGE_PATH = __ENV.IMAGE_PATH || '../assets/face.jpg'
+// `open()` must run in init context.
+const IMAGE_B64 = b64encode(open(IMAGE_PATH, 'b'))
 
-const VUS = Number(__ENV.VUS || 5)
+// Default VUS=1: recognition is CPU-bound inference, so on a CPU-only host with
+// few cores, concurrent requests just queue and the latency tail explodes —
+// you'd measure oversubscription, not the engine. Raise VUS only on a GPU host
+// (or a box with cores to spare). See "Recognition concurrency" in the README.
+const VUS = Number(__ENV.VUS || 1)
 const DURATION = __ENV.DURATION || '30s'
 
 const processingMs = new Trend('server_processing_ms', true)
@@ -36,9 +44,6 @@ export const options = {
 }
 
 export function setup() {
-  if (!IMAGE_B64) {
-    throw new Error('Set IMAGE_PATH to a JPEG/PNG containing a face — see loadtest/README.md')
-  }
   return { token: login() }
 }
 

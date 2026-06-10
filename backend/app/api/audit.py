@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.orm import lazyload
 
 from app.core.dependencies import DbSession, TenantOrgId, require_permission
 from app.core.pagination import PaginatedResponse, paginate, PaginationDep
@@ -37,7 +38,8 @@ async def list_audit_logs(
     action: str | None = Query(None),
     entity_type: str | None = Query(None),
 ):
-    stmt = select(AuditLog).order_by(AuditLog.id.desc())
+    # AuditLogOut is flat (user_id only); skip the lazy="selectin" user load.
+    stmt = select(AuditLog).options(lazyload(AuditLog.user)).order_by(AuditLog.id.desc())
 
     if action:
         stmt = stmt.where(AuditLog.action == action)

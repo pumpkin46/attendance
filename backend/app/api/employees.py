@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request, status
 from sqlalchemy import select
+from sqlalchemy.orm import lazyload
 
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
 from app.core.errors import NotFoundError, ValidationError
@@ -21,7 +22,18 @@ async def list_employees(
     org_id: TenantOrgId,
     pag: PaginationDep,
 ):
-    stmt = select(Employee).order_by(Employee.last_name, Employee.first_name)
+    # EmployeeOut is flat (FK ids only); skip the lazy="selectin" relationship
+    # loads (organization/location/branch/department_rel) the response never reads.
+    stmt = (
+        select(Employee)
+        .options(
+            lazyload(Employee.organization),
+            lazyload(Employee.location),
+            lazyload(Employee.branch),
+            lazyload(Employee.department_rel),
+        )
+        .order_by(Employee.last_name, Employee.first_name)
+    )
     stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
     return await paginate(db, stmt, pag.page, pag.per_page, EmployeeOut)
 
