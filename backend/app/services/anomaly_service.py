@@ -11,12 +11,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import NotFoundError
-from app.models.attendance import AttendanceAnomaly, AttendanceRecord
+from app.models.attendance import AnomalyStatus, AttendanceAnomaly, AttendanceRecord
 from app.models.employee import Employee
 from app.schemas.attendance import AnomalySummary, AnomalyUpdateRequest
 from app.services.anomaly_detector import analyze_records
@@ -115,28 +115,40 @@ async def run_anomaly_detection(
 
 
 async def summary(db: AsyncSession, org_id: int | None) -> AnomalySummary:
-    base = select(AttendanceAnomaly)
+    """Open-anomaly counts grouped in SQL (the triage view ignores closed ones)."""
     emp_ids = _org_employee_ids(org_id)
-    if emp_ids is not None:
-        base = base.where(AttendanceAnomaly.employee_id.in_(emp_ids))
-    anomalies = list((await db.execute(base)).scalars().all())
 
-    by_severity: dict[str, int] = {}
-    by_type: dict[str, int] = {}
-    open_count = ack_count = 0
-    for a in anomalies:
-        by_severity[a.severity] = by_severity.get(a.severity, 0) + 1
-        by_type[a.anomaly_type] = by_type.get(a.anomaly_type, 0) + 1
-        if a.status == "open":
-            open_count += 1
-        elif a.status == "acknowledged":
-            ack_count += 1
+    def _scoped(stmt: Select) -> Select:
+        if emp_ids is not None:
+            return stmt.where(AttendanceAnomaly.employee_id.in_(emp_ids))
+        return stmt
+
+    open_only = AttendanceAnomaly.status == AnomalyStatus.open
+
+    severity_rows = await db.execute(
+        _scoped(
+            select(AttendanceAnomaly.severity, func.count())
+            .where(open_only)
+            .group_by(AttendanceAnomaly.severity)
+        )
+    )
+    by_severity = {getattr(sev, "value", sev): count for sev, count in severity_rows}
+
+    type_rows = await db.execute(
+        _scoped(
+            select(AttendanceAnomaly.anomaly_type, func.count())
+            .where(open_only)
+            .group_by(AttendanceAnomaly.anomaly_type)
+        )
+    )
+    by_type = dict(type_rows.all())
 
     return AnomalySummary(
-        total=len(anomalies),
-        open=open_count,
-        acknowledged=ack_count,
-        by_severity=by_severity,
+        open_total=sum(by_severity.values()),
+        critical=by_severity.get("critical", 0),
+        high=by_severity.get("high", 0),
+        medium=by_severity.get("medium", 0),
+        low=by_severity.get("low", 0),
         by_type=by_type,
     )
 
@@ -165,13 +177,26 @@ def anomalies_query(
 
 
 async def update_anomaly(
-    db: AsyncSession, anomaly_id: int, body: AnomalyUpdateRequest, user_id: int
+    db: AsyncSession,
+    anomaly_id: int,
+    body: AnomalyUpdateRequest,
+    user_id: int,
+    org_id: int | None,
 ) -> tuple[AttendanceAnomaly, int | None]:
     """Apply a status transition; returns (anomaly, owning org_id) for emit."""
     anomaly = (
         await db.execute(select(AttendanceAnomaly).where(AttendanceAnomaly.id == anomaly_id))
     ).scalar_one_or_none()
     if not anomaly:
+        raise NotFoundError("Anomaly not found")
+
+    owner_org = (
+        await db.execute(
+            select(Employee.organization_id).where(Employee.id == anomaly.employee_id)
+        )
+    ).scalar_one_or_none()
+    if org_id is not None and owner_org != org_id:
+        # Cross-tenant probe: answer as if the anomaly does not exist.
         raise NotFoundError("Anomaly not found")
 
     now = datetime.now(timezone.utc)
@@ -187,10 +212,4 @@ async def update_anomaly(
 
     await db.flush()
     await db.refresh(anomaly)
-
-    org_id = (
-        await db.execute(
-            select(Employee.organization_id).where(Employee.id == anomaly.employee_id)
-        )
-    ).scalar_one_or_none()
-    return anomaly, org_id
+    return anomaly, owner_org

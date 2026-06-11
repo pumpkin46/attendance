@@ -34,7 +34,6 @@ from app.models.visitor import (
 )
 from app.models.building import BuildingConnector, BuildingEvent
 from app.models.security import SecurityAlert
-from app.models.notification import Notification
 from app.models.audit import AuditLog
 from app.models.token import PersonalAccessToken
 from app.models.live_event import LiveEvent
@@ -92,7 +91,6 @@ __all__ = [
     "BuildingConnector",
     "BuildingEvent",
     "SecurityAlert",
-    "Notification",
     "AuditLog",
     "PersonalAccessToken",
     "LiveEvent",

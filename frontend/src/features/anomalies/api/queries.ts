@@ -5,24 +5,34 @@ import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { AnomalySummary, AttendanceAnomaly, Paginated } from '@/shared/types'
 import type { AnomalyDecision, DetectionResult } from '@/features/anomalies/types'
 
+export interface AnomalyListParams {
+  status?: string
+  severity?: string
+  anomaly_type?: string
+  page?: number
+  per_page?: number
+}
+
 export const anomalyKeys = {
   all: ['anomalies'] as const,
   summary: ['anomalies', 'summary'] as const,
-  list: (status: string, severity: string) => ['anomalies', 'list', status, severity] as const,
+  list: (params: AnomalyListParams) => ['anomalies', 'list', params] as const,
 }
 
 export function useAnomalySummary() {
   return useApiQuery<AnomalySummary>(anomalyKeys.summary, '/anomalies/summary')
 }
 
-export function useAnomalies(status: string, severity: string) {
+export function useAnomalies(params: AnomalyListParams) {
   return useApiQuery<Paginated<AttendanceAnomaly>>(
-    anomalyKeys.list(status, severity),
+    anomalyKeys.list(params),
     '/anomalies',
-    { status: status || undefined, severity: severity || undefined, per_page: 50 }
+    params as Record<string, unknown>,
+    { keepPreviousData: true }
   )
 }
 
+/** Detection runs and status decisions move counts between the summary and every list filter, so the whole scope refetches. */
 export function useInvalidateAnomalies() {
   const qc = useQueryClient()
   return () => qc.invalidateQueries({ queryKey: anomalyKeys.all })
@@ -43,8 +53,10 @@ export function useRunDetection() {
 export function useUpdateAnomalyStatus() {
   const invalidate = useInvalidateAnomalies()
   return useMutation({
-    mutationFn: ({ id, status }: { id: number; status: AnomalyDecision }) =>
-      api.patch(`/anomalies/${id}`, { status }),
+    mutationFn: async ({ id, status }: { id: number; status: AnomalyDecision }) => {
+      const { data } = await api.patch<AttendanceAnomaly>(`/anomalies/${id}`, { status })
+      return data
+    },
     onSuccess: invalidate,
     onError: (err) => toast.error(getApiErrorMessage(err)),
   })

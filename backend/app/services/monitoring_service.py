@@ -33,7 +33,11 @@ def _camera_is_online(camera: Camera, heartbeat_threshold: datetime) -> bool:
 
 
 def _format_camera(camera: Camera, online: bool, recognition_today: int) -> dict:
-    fps = float(camera.frame_rate_fps) if camera.frame_rate_fps is not None else None
+    # Telemetry columns hold the camera's *last reported* readings. Once a
+    # camera is offline those readings are stale, so health reports them only
+    # while online — otherwise the dashboard shows "13 fps" on a dead camera
+    # and averages it into the fleet stats.
+    fps = float(camera.frame_rate_fps) if online and camera.frame_rate_fps is not None else None
     direction = camera.direction.value if hasattr(camera.direction, "value") else camera.direction
     deployment = (
         camera.deployment_mode.value
@@ -73,14 +77,19 @@ def _format_camera(camera: Camera, online: bool, recognition_today: int) -> dict
         "health": {
             "online": online,
             "fps": fps,
-            "latency_ms": camera.latency_ms,
-            "bandwidth_kbps": camera.bandwidth_kbps,
+            "latency_ms": camera.latency_ms if online else None,
+            "bandwidth_kbps": camera.bandwidth_kbps if online else None,
             "cpu_usage_percent": (
-                float(camera.cpu_usage_percent) if camera.cpu_usage_percent is not None else None
+                float(camera.cpu_usage_percent)
+                if online and camera.cpu_usage_percent is not None
+                else None
             ),
             "gpu_usage_percent": (
-                float(camera.gpu_usage_percent) if camera.gpu_usage_percent is not None else None
+                float(camera.gpu_usage_percent)
+                if online and camera.gpu_usage_percent is not None
+                else None
             ),
+            # Cumulative counter, not a live reading — meaningful either way.
             "dropped_frames": int(camera.dropped_frames or 0),
             "recognition_events_today": recognition_today,
             "updated_at": camera.health_updated_at.isoformat()
@@ -175,8 +184,11 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
 
     present = sum(1 for r in records if r.status in ("present", "late"))
     late = sum(1 for r in records if r.status == "late")
-    checked_in = sum(1 for r in records if r.check_in_at is not None)
-    absent = max(0, active_employees - checked_in)
+    on_leave = sum(1 for r in records if r.status == "on_leave")
+    # Mirrors /attendance/today: anyone neither present/late nor on leave today
+    # counts as absent. (Counting by check_in_at instead would mark on-leave
+    # employees absent and disagree with the attendance page.)
+    absent = max(0, active_employees - present - on_leave)
 
     unknown_stmt = select(func.count()).select_from(RecognitionEvent).where(
         RecognitionEvent.result == RecognitionResult.unknown,
@@ -186,9 +198,11 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
         unknown_stmt = unknown_stmt.where(RecognitionEvent.organization_id == org_id)
     unknown_today = (await db.execute(unknown_stmt)).scalar() or 0
 
+    # Checked-in only, matching the visitor dashboard's "on site" count and the
+    # On-site tab this KPI links to. Scheduled (not yet arrived) visitors are
+    # not "active".
     visitor_stmt = select(func.count()).select_from(Visitor).where(
-        Visitor.status.in_([VisitorStatus.scheduled, VisitorStatus.checked_in]),
-        Visitor.visit_end_at >= now,
+        Visitor.status == VisitorStatus.checked_in
     )
     visitor_stmt = apply_tenant_filter(visitor_stmt, org_id, Visitor.organization_id)
     active_visitors = (await db.execute(visitor_stmt)).scalar() or 0

@@ -29,7 +29,6 @@ from app.api.uploads import router as uploads_router
 from app.api.building import router as building_router
 from app.api.security_monitoring import router as security_monitoring_router
 from app.api.reports import router as reports_router
-from app.api.notifications import router as notifications_router
 from app.api.audit import router as audit_router
 from app.api.privacy import router as privacy_router
 from app.api.health import build_health_response, router as health_router
@@ -106,7 +105,6 @@ app.include_router(uploads_router)
 app.include_router(building_router)
 app.include_router(security_monitoring_router)
 app.include_router(reports_router)
-app.include_router(notifications_router)
 app.include_router(audit_router)
 app.include_router(privacy_router)
 app.include_router(health_router)

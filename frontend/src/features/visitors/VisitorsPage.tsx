@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Button } from '@/shared/ui/Button'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Tabs, type TabItem } from '@/shared/ui/Tabs'
@@ -12,8 +13,16 @@ import { VisitorDashboardTab } from '@/features/visitors/components/VisitorDashb
 import { VisitorRegisterPanel } from '@/features/visitors/components/VisitorRegisterPanel'
 import type { VisitorTab } from '@/features/visitors/types'
 
+const TAB_IDS: VisitorTab[] = ['dashboard', 'approvals', 'visitors', 'active', 'blacklist']
+
 export default function VisitorsPage() {
-  const [tab, setTab] = useState<VisitorTab>('dashboard')
+  // The active tab lives in the URL so the dashboard can deep-link to it
+  // (e.g. /visitors?tab=active) and tabs stay shareable.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawTab = searchParams.get('tab') as VisitorTab | null
+  const tab: VisitorTab = rawTab && TAB_IDS.includes(rawTab) ? rawTab : 'dashboard'
+  const setTab = (t: VisitorTab) =>
+    setSearchParams(t === 'dashboard' ? {} : { tab: t }, { replace: true })
   const [detailVisitorId, setDetailVisitorId] = useState<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [showRegister, setShowRegister] = useState(false)

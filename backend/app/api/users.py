@@ -231,6 +231,10 @@ async def update_user(
             new_values=changes,
             **_client_meta(request),
         )
+        # log_action's flush ran the UPDATE, expiring server-generated columns
+        # (updated_at via onupdate); refresh here so Pydantic's attribute reads
+        # don't trigger lazy IO outside the greenlet context.
+        await db.refresh(target)
 
     return UserOut.model_validate(target, from_attributes=True)
 

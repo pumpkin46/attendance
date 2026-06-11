@@ -52,12 +52,11 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
 
   if (type === 'connected') return
 
-  // Recognition + access incidents feed notifications, the recognition views, and
-  // the security-monitoring dashboard. The monitoring page is intentionally NOT
+  // Recognition + access incidents feed the recognition views and the
+  // security-monitoring dashboard. The monitoring page is intentionally NOT
   // invalidated here — it streams live via its own WebSocket (useMonitoringFeed),
   // so event-driven refetching would just duplicate that push.
-  if (type.startsWith('recognition.') || type === 'notification.created') {
-    invalidate(['notifications'])
+  if (type.startsWith('recognition.')) {
     invalidate(['recognition'])
     invalidate(['security-monitoring'])
     if (type === 'recognition.unknown') {
@@ -72,7 +71,6 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
   }
 
   if (type.startsWith('access.')) {
-    invalidate(['notifications'])
     invalidate(['security-monitoring'])
     return
   }

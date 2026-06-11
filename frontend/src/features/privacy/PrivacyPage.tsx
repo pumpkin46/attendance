@@ -7,6 +7,7 @@ import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Spinner } from '@/shared/ui/Loading'
 import { cn } from '@/shared/lib/cn'
+import { downloadBlob } from '@/shared/lib/download'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useActiveEmployees } from '@/features/employees/api/queries'
 import { useEraseEmployeeData, useMyData, usePrivacyPolicy } from '@/features/privacy/api/queries'
@@ -112,12 +113,7 @@ export default function PrivacyPage() {
   const downloadMyData = () => {
     if (!myData) return
     const blob = new Blob([JSON.stringify(myData, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `my-data-${myData.user.id}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(blob, `my-data-${myData.user.id}.json`)
   }
 
   const confirmErase = async () => {
@@ -152,10 +148,9 @@ export default function PrivacyPage() {
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
                   Retention period
                 </p>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <MiniStat label="Audit logs" value={`${policy.retention_audit_logs_days}d`} />
                   <MiniStat label="Recognition" value={`${policy.retention_recognition_events_days}d`} />
-                  <MiniStat label="Notifications" value={`${policy.retention_notifications_days}d`} />
                 </div>
               </div>
 
@@ -217,9 +212,8 @@ export default function PrivacyPage() {
                   <div className="truncate text-xs text-slate-400">{myData.user.email ?? '—'}</div>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <MiniStat label="Attendance" value={myData.attendance_records.length} />
-                <MiniStat label="Notifications" value={myData.notifications_count} />
                 <MiniStat label="Audit logs" value={myData.audit_logs_count} />
               </div>
               <Button onClick={downloadMyData} leftIcon={DownloadIcon}>

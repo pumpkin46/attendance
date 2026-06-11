@@ -74,8 +74,11 @@ async def update_anomaly(
     anomaly_id: int,
     body: AnomalyUpdateRequest,
     db: DbSession,
+    org_id_tenant: TenantOrgId,
     user: require_permission("attendance.manage"),
 ):
-    anomaly, org_id = await anomaly_service.update_anomaly(db, anomaly_id, body, user.id)
+    anomaly, org_id = await anomaly_service.update_anomaly(
+        db, anomaly_id, body, user.id, org_id_tenant
+    )
     await emit(org_id, "anomalies.changed", {"anomaly_id": anomaly.id})
     return AnomalyOut.model_validate(anomaly, from_attributes=True)

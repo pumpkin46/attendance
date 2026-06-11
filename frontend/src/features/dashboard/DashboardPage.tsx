@@ -1,14 +1,19 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { Badge } from '@/shared/ui/Badge'
 import { Card } from '@/shared/ui/Card'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { cn } from '@/shared/lib/cn'
+import { prefetchRoute } from '@/app/routes'
 import { useFallbackPoll } from '@/features/realtime/useFallbackPoll'
 import {
   useMonitoringDashboard,
   useMonitoringFeed,
   useMonitoringLiveFeed,
 } from '@/features/dashboard/api/queries'
+import { LiveEventDetailPanel } from '@/features/dashboard/components/LiveEventDetail'
+import { eventTone } from '@/features/dashboard/lib'
+import type { LiveEvent } from '@/features/dashboard/types'
 
 type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'neutral'
 
@@ -81,15 +86,23 @@ function Kpi({
   sub,
   tone = 'neutral',
   icon,
+  to,
 }: {
   label: string
   value: ReactNode
   sub?: string
   tone?: Tone
   icon: ReactNode
+  /** Drill-down destination — makes the whole card a link. */
+  to?: string
 }) {
-  return (
-    <Card className="flex items-center gap-3">
+  const card = (
+    <Card
+      className={cn(
+        'flex h-full items-center gap-3',
+        to && 'transition-colors hover:border-slate-500 hover:bg-slate-800/60'
+      )}
+    >
       <span className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-lg', toneChip[tone])}>{icon}</span>
       <div className="min-w-0">
         <div className="truncate text-xs font-medium uppercase tracking-wide text-slate-400">{label}</div>
@@ -98,14 +111,41 @@ function Kpi({
       </div>
     </Card>
   )
+  if (!to) return card
+  return (
+    <Link
+      to={to}
+      aria-label={`View ${label} details`}
+      onMouseEnter={() => prefetchRoute(to.split('?')[0])}
+      className="block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+    >
+      {card}
+    </Link>
+  )
 }
 
-function MiniStat({ label, value, tone }: { label: string; value: ReactNode; tone?: Tone }) {
-  return (
-    <div className="rounded-lg bg-slate-800/40 px-3 py-2.5">
+function MiniStat({ label, value, tone, to }: { label: string; value: ReactNode; tone?: Tone; to?: string }) {
+  const body = (
+    <div
+      className={cn(
+        'rounded-lg bg-slate-800/40 px-3 py-2.5',
+        to && 'transition-colors hover:bg-slate-700/60'
+      )}
+    >
       <div className="text-xs text-slate-400">{label}</div>
       <div className={cn('mt-0.5 text-lg font-semibold', tone ? toneText[tone] : 'text-slate-100')}>{value}</div>
     </div>
+  )
+  if (!to) return body
+  return (
+    <Link
+      to={to}
+      aria-label={`View ${label} cameras`}
+      onMouseEnter={() => prefetchRoute(to.split('?')[0])}
+      className="block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+    >
+      {body}
+    </Link>
   )
 }
 
@@ -129,15 +169,18 @@ export default function DashboardPage() {
   const { data: liveFeed } = useMonitoringLiveFeed(poll)
   const events = liveFeed?.events ?? []
 
-  const eventTone = (type: string): Tone => {
-    if (type.includes('unknown')) return 'danger'
-    if (type.includes('offline')) return 'warn'
-    if (type.includes('check_in') || type.includes('access_granted')) return 'ok'
-    return 'neutral'
+  // Selected event stays set while the panel animates closed (SidePanel
+  // contract), so the content doesn't blank out mid-slide.
+  const [selectedEvent, setSelectedEvent] = useState<LiveEvent | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const openEvent = (e: LiveEvent) => {
+    setSelectedEvent(e)
+    setDetailOpen(true)
   }
 
   const cameras = dashboard?.cameras ?? []
   const health = dashboard?.camera_health
+  const today = new Date().toISOString().slice(0, 10)
 
   return (
     <div>
@@ -152,12 +195,19 @@ export default function DashboardPage() {
           value={`${dashboard?.active_cameras ?? '—'}/${dashboard?.total_cameras ?? '—'}`}
           icon={CameraIcon}
           tone="accent"
+          to="/cameras?filter=online"
         />
-        <Kpi label="Present" value={dashboard?.employees_present ?? '—'} tone="ok" icon={PresentIcon} />
-        <Kpi label="Absent" value={dashboard?.employees_absent ?? '—'} tone="danger" icon={AbsentIcon} />
-        <Kpi label="Late" value={dashboard?.employees_late ?? '—'} tone="warn" icon={ClockIcon} />
-        <Kpi label="Unknown today" value={dashboard?.unknown_persons_today ?? '—'} tone="danger" icon={AlertIcon} />
-        <Kpi label="Active visitors" value={dashboard?.active_visitors ?? '—'} icon={VisitorIcon} />
+        <Kpi label="Present" value={dashboard?.employees_present ?? '—'} tone="ok" icon={PresentIcon} to="/attendance?status=present" />
+        <Kpi label="Absent" value={dashboard?.employees_absent ?? '—'} tone="danger" icon={AbsentIcon} to="/attendance?status=absent" />
+        <Kpi label="Late" value={dashboard?.employees_late ?? '—'} tone="warn" icon={ClockIcon} to="/attendance?status=late" />
+        <Kpi
+          label="Unknown today"
+          value={dashboard?.unknown_persons_today ?? '—'}
+          tone="danger"
+          icon={AlertIcon}
+          to={`/unknown-faces?from=${today}&to=${today}`}
+        />
+        <Kpi label="Active visitors" value={dashboard?.active_visitors ?? '—'} icon={VisitorIcon} to="/visitors?tab=active" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -165,14 +215,28 @@ export default function DashboardPage() {
         <Card className="lg:col-span-1">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-semibold text-slate-100">Camera health</h2>
-            <Badge tone={(health?.offline ?? 0) > 0 ? 'warn' : 'ok'}>
-              {health?.online ?? 0}/{(health?.online ?? 0) + (health?.offline ?? 0)} online
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge tone={(health?.offline ?? 0) > 0 ? 'warn' : 'ok'}>
+                {health?.online ?? 0}/{(health?.online ?? 0) + (health?.offline ?? 0)} online
+              </Badge>
+              <Link
+                to="/cameras"
+                onMouseEnter={() => prefetchRoute('/cameras')}
+                className="text-xs font-medium text-blue-400 hover:text-blue-300"
+              >
+                View all
+              </Link>
+            </div>
           </div>
 
           <div className="mb-4 grid grid-cols-2 gap-2">
-            <MiniStat label="Online" value={health?.online ?? 0} tone="ok" />
-            <MiniStat label="Offline" value={health?.offline ?? 0} tone={(health?.offline ?? 0) > 0 ? 'warn' : undefined} />
+            <MiniStat label="Online" value={health?.online ?? 0} tone="ok" to="/cameras?filter=online" />
+            <MiniStat
+              label="Offline"
+              value={health?.offline ?? 0}
+              tone={(health?.offline ?? 0) > 0 ? 'warn' : undefined}
+              to="/cameras?filter=offline"
+            />
             <MiniStat label="Avg FPS" value={health?.avg_fps?.toFixed(1) ?? '—'} />
             <MiniStat
               label="Avg latency"
@@ -231,21 +295,28 @@ export default function DashboardPage() {
               events.map((e) => {
                 const tone = eventTone(e.event_type)
                 return (
-                  <li key={e.id} className="flex items-start gap-3 py-3">
-                    <span className={cn('mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full', toneChip[tone])}>
-                      {eventGlyph[tone]}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm text-slate-200">{e.message}</p>
-                        <span className="shrink-0 text-xs text-slate-500" title={new Date(e.occurred_at).toLocaleString()}>
-                          {timeAgo(e.occurred_at)}
-                        </span>
+                  <li key={e.id}>
+                    <button
+                      type="button"
+                      onClick={() => openEvent(e)}
+                      aria-label={`View details: ${e.message}`}
+                      className="flex w-full items-start gap-3 rounded-lg px-1 py-3 text-left transition-colors hover:bg-slate-800/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      <span className={cn('mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full', toneChip[tone])}>
+                        {eventGlyph[tone]}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm text-slate-200">{e.message}</p>
+                          <span className="shrink-0 text-xs text-slate-500" title={new Date(e.occurred_at).toLocaleString()}>
+                            {timeAgo(e.occurred_at)}
+                          </span>
+                        </div>
+                        <Badge tone={tone} className="mt-1.5 capitalize">
+                          {e.event_type.replace(/_/g, ' ')}
+                        </Badge>
                       </div>
-                      <Badge tone={tone === 'accent' ? 'neutral' : tone} className="mt-1.5 capitalize">
-                        {e.event_type.replace(/_/g, ' ')}
-                      </Badge>
-                    </div>
+                    </button>
                   </li>
                 )
               })
@@ -253,6 +324,13 @@ export default function DashboardPage() {
           </ul>
         </Card>
       </div>
+
+      <LiveEventDetailPanel
+        event={selectedEvent}
+        cameras={cameras}
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+      />
     </div>
   )
 }

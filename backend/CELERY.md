@@ -39,7 +39,7 @@ Used for **periodic background jobs** (Celery Beat). Tasks live in
 |------|--------------------|--------------|
 | `maintenance.expire_visitors` | every 60s | Expire visitors past their visit/face window; revoke temp access |
 | `maintenance.detect_anomalies` | hourly | Run attendance anomaly detection across all tenants |
-| `maintenance.purge_retention` | daily | Delete audit logs / recognition events / notifications past GDPR retention |
+| `maintenance.purge_retention` | daily | Delete audit logs / recognition events past GDPR retention |
 
 When `CELERY_ENABLED=true`, the in-process visitor-expiry loop is **not** started
 (Beat owns it instead), avoiding double execution.

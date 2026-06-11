@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -7,6 +8,7 @@ import { Input } from '@/shared/ui/Input'
 import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
+import { Pagination } from '@/shared/ui/Pagination'
 import { SidePanel } from '@/shared/ui/SidePanel'
 import { StatCard } from '@/shared/ui/StatCard'
 import { Skeleton } from '@/shared/ui/Skeleton'
@@ -175,6 +177,11 @@ const FILTERS = [
 ] as const
 type FilterKey = (typeof FILTERS)[number]['key']
 
+// The camera list is small and capped server-side (max_cameras), so the full
+// set is always loaded in one request; the grid paginates client-side to keep
+// the stat cards and online/offline chips counting the whole fleet.
+const CAMERAS_PER_PAGE = 12
+
 export default function CamerasPage() {
   const { data: camerasData, isPending, isError } = useCameras()
   const { data: config } = useCameraConfig()
@@ -189,7 +196,13 @@ export default function CamerasPage() {
   const [capturing, setCapturing] = useState<number | null>(null)
   const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null)
   const [form, setForm] = useState(emptyForm)
-  const [filter, setFilter] = useState<FilterKey>('all')
+  const [page, setPage] = useState(1)
+
+  // The online/offline filter lives in the URL so the dashboard can deep-link
+  // to it (e.g. /cameras?filter=online) and views stay shareable.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawFilter = searchParams.get('filter')
+  const filter: FilterKey = rawFilter === 'online' || rawFilter === 'offline' ? rawFilter : 'all'
 
   const cameras = useMemo(() => camerasData?.data ?? [], [camerasData])
   const locations = locationsData ?? []
@@ -203,6 +216,23 @@ export default function CamerasPage() {
     if (filter === 'offline') return cameras.filter((c) => !isOnline(c))
     return cameras
   }, [cameras, filter])
+
+  // Clamp so deletes or filter changes never strand the view on an empty page.
+  // Render-phase sync (not an effect): persist the clamped value, otherwise a
+  // stale higher `page` silently jumps the grid forward again the moment
+  // pageCount grows back.
+  const pageCount = Math.max(1, Math.ceil(filtered.length / CAMERAS_PER_PAGE))
+  if (page > pageCount) setPage(pageCount)
+  const safePage = Math.min(page, pageCount)
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * CAMERAS_PER_PAGE, safePage * CAMERAS_PER_PAGE),
+    [filtered, safePage]
+  )
+
+  const changeFilter = (key: FilterKey) => {
+    setSearchParams(key === 'all' ? {} : { filter: key }, { replace: true })
+    setPage(1)
+  }
 
   const startEdit = (camera: Camera) => {
     setEditingId(camera.id)
@@ -494,7 +524,7 @@ export default function CamerasPage() {
               <button
                 key={f.key}
                 type="button"
-                onClick={() => setFilter(f.key)}
+                onClick={() => changeFilter(f.key)}
                 className={cn(
                   'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                   filter === f.key ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
@@ -544,19 +574,31 @@ export default function CamerasPage() {
       ) : filtered.length === 0 ? (
         <Card className="py-10 text-center text-sm text-slate-500">No {filter} cameras</Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((c) => (
-            <CameraTile
-              key={c.id}
-              camera={c}
-              capturing={capturing === c.id}
-              deleting={deleteCamera.isPending}
-              onEdit={() => startEdit(c)}
-              onTest={() => captureFromStream(c.id)}
-              onDelete={() => removeCamera(c)}
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {paged.map((c) => (
+              <CameraTile
+                key={c.id}
+                camera={c}
+                capturing={capturing === c.id}
+                deleting={deleteCamera.isPending}
+                onEdit={() => startEdit(c)}
+                onTest={() => captureFromStream(c.id)}
+                onDelete={() => removeCamera(c)}
+              />
+            ))}
+          </div>
+          {pageCount > 1 && (
+            <Pagination
+              className="mt-4"
+              page={safePage}
+              pageCount={pageCount}
+              onPageChange={setPage}
+              totalItems={filtered.length}
+              pageSize={CAMERAS_PER_PAGE}
             />
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   )

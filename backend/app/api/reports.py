@@ -1,20 +1,25 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Query, Response
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import select
 
 from app.core.dependencies import DbSession, TenantOrgId, require_permission
+from app.core.errors import ValidationError
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
+from app.models.organization import Organization
 from app.schemas.report import (
     AttendanceSummaryReport,
     DailyReport,
     MonthlyReport,
     OvertimeReport,
     UnknownPersonEvent,
+    UnknownPersonsSummary,
 )
-from app.services import report_service
+from app.services import report_export, report_service
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
@@ -76,11 +81,30 @@ async def unknown_persons_report(
     pagination: PaginationDep,
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    camera_id: int | None = Query(None),
+    alerts_only: bool = Query(False),
 ):
-    stmt = report_service.unknown_persons_query(org_id, date_from, date_to)
+    stmt = report_service.unknown_persons_query(org_id, date_from, date_to, camera_id, alerts_only)
     page = await paginate(db, stmt, pagination.page, pagination.per_page)
     page.data = [report_service.format_unknown_person_event(e) for e in page.data]
     return page
+
+
+@router.get("/unknown-persons/summary", response_model=UnknownPersonsSummary)
+async def unknown_persons_summary(
+    db: DbSession,
+    org_id: TenantOrgId,
+    _: require_permission("reports.view"),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+):
+    """Range-wide totals for the Unknown Faces stat cards and camera filter."""
+    return await report_service.unknown_persons_summary(db, org_id, date_from, date_to)
+
+
+# Hard ceiling on the attendance-export window: the renderers are CPU-bound
+# and the query is unbounded by row count, so cap by time span instead.
+MAX_EXPORT_RANGE_DAYS = 366
 
 
 @router.get("/export")
@@ -88,16 +112,72 @@ async def export_report(
     db: DbSession,
     org_id: TenantOrgId,
     _: require_permission("reports.export"),
+    export_format: Literal["csv", "xlsx", "pdf"] = Query("csv", alias="format"),
+    report_type: Literal["daily", "monthly", "attendance"] | None = Query(None),
     report_date: date = Query(None, alias="date"),
-    start_date: date = Query(None, alias="start"),
-    end_date: date = Query(None, alias="end"),
+    year: int | None = Query(None),
+    month: int | None = Query(None, ge=1, le=12),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    legacy_start: date | None = Query(
+        None, alias="start", deprecated=True, description="Deprecated alias for date_from"
+    ),
+    legacy_end: date | None = Query(
+        None, alias="end", deprecated=True, description="Deprecated alias for date_to"
+    ),
+    tz_offset: int = Query(0, ge=-840, le=840, description="JS Date.getTimezoneOffset() of the viewer"),
 ):
-    target_start = start_date or report_date or date.today()
-    target_end = end_date or report_date or date.today()
-    csv_text = await report_service.attendance_export_csv(db, org_id, target_start, target_end)
-    filename = f"attendance_{target_start}_{target_end}.csv"
-    return StreamingResponse(
-        iter([csv_text]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    """Download the daily/monthly/attendance report as a styled CSV, Excel, or PDF file."""
+    # Legacy contract: `?start=&end=` produced an attendance-records CSV over
+    # the range. Map the old params onto the attendance report type so old
+    # callers keep getting range data rather than silently receiving today's
+    # daily report.
+    date_from = date_from or legacy_start
+    date_to = date_to or legacy_end
+    if report_type is None:
+        report_type = "attendance" if (date_from or date_to) else "daily"
+
+    org_name = None
+    if org_id is not None:
+        org_name = (
+            await db.execute(select(Organization.name).where(Organization.id == org_id))
+        ).scalar_one_or_none()
+    ctx = report_export.ExportContext(
+        org_name=org_name,
+        generated_at=datetime.now(timezone.utc),
+        tz_offset=tz_offset,
+    )
+
+    today = date.today()
+    if report_type == "daily":
+        target = report_date or today
+        report = await report_service.daily_report(db, org_id, target, None)
+        # Rendering (openpyxl/reportlab) is CPU-bound — keep it off the event loop.
+        content = await run_in_threadpool(report_export.export_daily, report, export_format, ctx)
+        basename = f"daily-attendance-{target.isoformat()}"
+    elif report_type == "attendance":
+        start = date_from or today
+        end = date_to or today
+        if start > end:
+            raise ValidationError("date_from must not be after date_to")
+        if (end - start).days > MAX_EXPORT_RANGE_DAYS:
+            raise ValidationError(f"Export range is limited to {MAX_EXPORT_RANGE_DAYS} days")
+        report = await report_service.attendance_range_report(db, org_id, start, end)
+        content = await run_in_threadpool(
+            report_export.export_attendance, report, export_format, ctx
+        )
+        basename = f"attendance-{start.isoformat()}-to-{end.isoformat()}"
+    else:
+        target_year = year if year is not None else today.year
+        target_month = month if month is not None else today.month
+        report = await report_service.monthly_report(db, org_id, target_year, target_month, None)
+        content = await run_in_threadpool(
+            report_export.export_monthly, report, export_format, ctx
+        )
+        basename = f"monthly-attendance-{target_year:04d}-{target_month:02d}"
+
+    return Response(
+        content=content,
+        media_type=report_export.MEDIA_TYPES[export_format],
+        headers={"Content-Disposition": f'attachment; filename="{basename}.{export_format}"'},
     )

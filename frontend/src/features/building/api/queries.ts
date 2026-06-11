@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { removeRowFromPaginated } from '@/shared/api/cache'
 import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
+import { useInvalidateKey } from '@/shared/hooks/useInvalidateKey'
 import type { Paginated } from '@/shared/types'
 import type {
   BuildingConfig,
@@ -19,7 +21,9 @@ export const buildingKeys = {
 }
 
 export function useBuildingConfig() {
-  return useApiQuery<BuildingConfig>(buildingKeys.config, '/building/config')
+  return useApiQuery<BuildingConfig>(buildingKeys.config, '/building/config', undefined, {
+    staleTime: STATIC_STALE_MS,
+  })
 }
 
 export function useConnectors() {
@@ -34,14 +38,11 @@ export function useBuildingEvents() {
   })
 }
 
-/** Invalidates every building-scoped query after a mutation. */
-export function useInvalidateBuilding() {
-  const qc = useQueryClient()
-  return () => qc.invalidateQueries({ queryKey: buildingKeys.all })
-}
+// Invalidate only the query the mutation actually changed — config is static
+// and never refetched here.
 
 export function useCreateConnector() {
-  const invalidate = useInvalidateBuilding()
+  const invalidate = useInvalidateKey(buildingKeys.connectors)
   return useMutation({
     mutationFn: (payload: CreateConnectorPayload) => api.post('/building/connectors', payload),
     onSuccess: () => {
@@ -52,29 +53,35 @@ export function useCreateConnector() {
 }
 
 export function useDeleteConnector() {
-  const invalidate = useInvalidateBuilding()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/building/connectors/${id}`),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       toast.success('Connector deleted')
-      invalidate()
+      // Hard delete on the backend: drop it from the cached list instead of refetching.
+      qc.setQueryData<Paginated<Connector>>(
+        buildingKeys.connectors,
+        removeRowFromPaginated<Connector>(id)
+      )
     },
   })
 }
 
 export function useTestConnector() {
-  const invalidate = useInvalidateBuilding()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.post(`/building/connectors/${id}/test`),
     onSuccess: () => {
       toast.success('Connector test sent')
-      invalidate()
+      // A test updates the connector's last-status and logs an event.
+      qc.invalidateQueries({ queryKey: buildingKeys.connectors })
+      qc.invalidateQueries({ queryKey: buildingKeys.events })
     },
   })
 }
 
 export function usePublishOccupancy() {
-  const invalidate = useInvalidateBuilding()
+  const invalidate = useInvalidateKey(buildingKeys.events)
   return useMutation({
     mutationFn: (payload: PublishOccupancyPayload) => api.post('/building/occupancy/publish', payload),
     onSuccess: () => {

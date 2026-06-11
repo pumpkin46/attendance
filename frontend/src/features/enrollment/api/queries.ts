@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { Employee, Paginated } from '@/shared/types'
 import type {
   EnrollFaceResult,
@@ -27,17 +27,23 @@ export function useEnrollableEmployees() {
 }
 
 export function useEnrollmentConfig() {
-  return useApiQuery<EnrollmentConfig>(enrollmentKeys.config, '/enrollment/config')
+  return useApiQuery<EnrollmentConfig>(enrollmentKeys.config, '/enrollment/config', undefined, {
+    staleTime: STATIC_STALE_MS,
+  })
 }
 
 export function useLivenessHealth() {
   return useApiQuery<HealthInfo>(enrollmentKeys.health, '/health', undefined, { silent: true })
 }
 
-/** Invalidates every enrollment-scoped query after a mutation. */
-export function useInvalidateEnrollment() {
+/**
+ * Enrollment mutations only ever change the employees' face status — config
+ * and liveness health are static reference data, so they are never
+ * invalidated here.
+ */
+function useInvalidateEnrollableEmployees() {
   const qc = useQueryClient()
-  return () => qc.invalidateQueries({ queryKey: enrollmentKeys.all })
+  return () => qc.invalidateQueries({ queryKey: enrollmentKeys.employees })
 }
 
 /**
@@ -65,7 +71,7 @@ export function useValidateImage() {
 }
 
 export function useEnrollFace() {
-  const invalidate = useInvalidateEnrollment()
+  const invalidate = useInvalidateEnrollableEmployees()
   return useMutation({
     mutationFn: async ({
       employeeId,
@@ -96,7 +102,7 @@ export function useEnrollFace() {
  * quick-register page; the guided structured flow uses {@link useEnrollFace}.
  */
 export function useSimpleEnroll() {
-  const invalidate = useInvalidateEnrollment()
+  const invalidate = useInvalidateEnrollableEmployees()
   return useMutation({
     mutationFn: async ({ employeeId, images }: { employeeId: string; images: string[] }) => {
       const { data } = await api.post<SimpleEnrollResult>(

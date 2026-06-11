@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { getApiErrorMessage } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
@@ -12,6 +13,7 @@ import { SidePanel } from '@/shared/ui/SidePanel'
 import { StatCard } from '@/shared/ui/StatCard'
 import { DataTable } from '@/shared/ui/DataTable'
 import { useActiveEmployees } from '@/features/employees/api/queries'
+import { ReportExportButtons } from '@/features/reports/components/ExportButtons'
 import { useAttendanceRecords, useRecordManualAttendance } from '@/features/attendance/api/queries'
 import type { AttendanceRecord } from '@/shared/types'
 import { attendanceStatusTone, formatMinutes, formatTime } from '@/shared/lib/format'
@@ -43,7 +45,13 @@ export default function AttendancePage() {
   const [formOpen, setFormOpen] = useState(false)
   const [manual, setManual] = useState(emptyManual)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+
+  // The status filter lives in the URL so the dashboard KPIs can deep-link to
+  // it (e.g. /attendance?status=late) and filtered views stay shareable.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const statusFilter = searchParams.get('status') ?? ''
+  const setStatusFilter = (value: string) =>
+    setSearchParams(value ? { status: value } : {}, { replace: true })
 
   const { data, isPending, isError, error } = useAttendanceRecords(dateFrom, dateTo)
   const records = useMemo(() => data?.data ?? [], [data])
@@ -55,11 +63,14 @@ export default function AttendancePage() {
 
   const statusOptions = useMemo(() => {
     const set = new Set(records.map((r) => r.status).filter(Boolean))
+    // A deep-linked status (e.g. /attendance?status=absent) may not exist in
+    // the loaded range — keep it selectable so the dropdown reflects the URL.
+    if (statusFilter) set.add(statusFilter)
     return [
       { value: '', label: 'All statuses' },
       ...Array.from(set, (s) => ({ value: s, label: prettify(s) })),
     ]
-  }, [records])
+  }, [records, statusFilter])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -142,9 +153,16 @@ export default function AttendancePage() {
             options={statusOptions}
           />
         </div>
-        <span className="text-xs text-slate-500">
-          {filtered.length} {filtered.length === 1 ? 'record' : 'records'}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500">
+            {filtered.length} {filtered.length === 1 ? 'record' : 'records'}
+          </span>
+          {/* Exports the full date range server-side; the search/status filters
+              above are client-side only and are not applied to the file. */}
+          <ReportExportButtons
+            params={{ report_type: 'attendance', date_from: dateFrom, date_to: dateTo }}
+          />
+        </div>
       </div>
 
       <SidePanel

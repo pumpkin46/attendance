@@ -246,12 +246,22 @@ class LeaveRequestUpdate(BaseModel):
 # ── Anomalies ─────────────────────────────────────────────────────────────────
 
 
+class AnomalyEmployee(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: int
+    first_name: str
+    last_name: str
+    employee_code: str
+
+
 class AnomalyOut(BaseModel):
     model_config = {"from_attributes": True}
 
     id: int
     attendance_record_id: int | None = None
     employee_id: int
+    employee: AnomalyEmployee | None = None
     anomaly_type: str
     severity: str = "medium"
     score: float = 0
@@ -269,10 +279,13 @@ class AnomalyOut(BaseModel):
 
 
 class AnomalySummary(BaseModel):
-    total: int
-    open: int
-    acknowledged: int
-    by_severity: dict[str, int]
+    """Triage dashboard counts: open anomalies by severity and by type."""
+
+    open_total: int
+    critical: int
+    high: int
+    medium: int
+    low: int
     by_type: dict[str, int]
 
 

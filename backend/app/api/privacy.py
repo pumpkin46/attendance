@@ -11,7 +11,6 @@ from app.core.errors import NotFoundError
 from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord
 from app.models.employee import Employee
-from app.models.notification import Notification
 from app.models.recognition import RecognitionEvent
 from app.services import face_service
 from app.services.audit_service import log_action
@@ -23,7 +22,6 @@ class PrivacyPolicyResponse(BaseModel):
     gdpr_enabled: bool
     retention_audit_logs_days: int
     retention_recognition_events_days: int
-    retention_notifications_days: int
     privacy_contact_email: str | None = None
     data_collected: list[str]
     data_purposes: list[str]
@@ -46,7 +44,6 @@ class PrivacyAttendanceRecord(BaseModel):
 class MyDataExportResponse(BaseModel):
     user: PrivacyUser
     attendance_records: list[PrivacyAttendanceRecord]
-    notifications_count: int
     audit_logs_count: int
 
 
@@ -61,7 +58,6 @@ async def get_privacy_policy():
         "gdpr_enabled": settings.gdpr_enabled,
         "retention_audit_logs_days": settings.retention_audit_logs_days,
         "retention_recognition_events_days": settings.retention_recognition_events_days,
-        "retention_notifications_days": settings.retention_notifications_days,
         "privacy_contact_email": settings.privacy_contact_email,
         "data_collected": [
             "Face embeddings (biometric)",
@@ -90,12 +86,6 @@ async def export_my_data(
     att_result = await db.execute(att_stmt)
     records = att_result.scalars().all()
 
-    notif_stmt = select(Notification).where(
-        Notification.user_id == user.id
-    ).order_by(Notification.created_at.desc()).limit(200)
-    notif_result = await db.execute(notif_stmt)
-    notifications = notif_result.scalars().all()
-
     audit_stmt = select(AuditLog).where(
         AuditLog.user_id == user.id
     ).order_by(AuditLog.id.desc()).limit(200)
@@ -118,7 +108,6 @@ async def export_my_data(
             }
             for r in records
         ],
-        "notifications_count": len(list(notifications)),
         "audit_logs_count": len(list(audit_logs)),
     }
 

@@ -1,24 +1,27 @@
-"""Attendance reporting: daily/monthly/summary/overtime + CSV export.
+"""Attendance reporting: daily/monthly/summary/overtime aggregation.
 
-All querying and aggregation lives here; the reports router only resolves query
-params and wraps results (response models, CSV streaming).
+All querying and aggregation lives here; the reports router only resolves
+query params and wraps results. File rendering (CSV/Excel/PDF) lives in
+``report_export``, which consumes the report models built here.
 """
 
 from __future__ import annotations
 
-import csv
-import io
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import Select, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import lazyload, selectinload
 
 from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord, Holiday, LeaveRequest
+from app.models.camera import Camera
 from app.models.employee import Employee
 from app.models.recognition import RecognitionEvent, RecognitionResult
 from app.schemas.report import (
+    AttendanceRangeEntry,
+    AttendanceRangeReport,
     AttendanceSummaryReport,
     DailyEmployeeEntry,
     DailyReport,
@@ -186,6 +189,56 @@ async def monthly_report(
     )
 
 
+async def attendance_range_report(
+    db: AsyncSession, org_id: int | None, start: date, end: date
+) -> AttendanceRangeReport:
+    """Raw attendance records over a range — mirrors the Attendance page list."""
+    stmt = (
+        select(AttendanceRecord)
+        .where(AttendanceRecord.work_date >= start, AttendanceRecord.work_date <= end)
+        .join(Employee, AttendanceRecord.employee_id == Employee.id)
+        # The export reads only the employee (name/code/department) — suppress
+        # the model's selectin loads for location/shift and the employee's own
+        # cascading relationships, which would hydrate objects nobody reads.
+        .options(
+            selectinload(AttendanceRecord.employee).lazyload("*"),
+            lazyload(AttendanceRecord.location),
+            lazyload(AttendanceRecord.shift),
+        )
+        .order_by(AttendanceRecord.work_date.desc(), Employee.last_name, Employee.first_name)
+    )
+    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    records = list((await db.execute(stmt)).scalars().unique().all())
+
+    entries = [
+        AttendanceRangeEntry(
+            work_date=r.work_date,
+            employee_code=r.employee.employee_code if r.employee else "",
+            employee_name=_employee_name(r.employee),
+            department=r.employee.department if r.employee else None,
+            status=r.status,
+            attendance_type=r.attendance_type,
+            check_in_at=r.check_in_at,
+            check_out_at=r.check_out_at,
+            check_in_method=r.check_in_method,
+            check_out_method=r.check_out_method,
+            worked_minutes=r.worked_minutes or 0,
+            overtime_minutes=r.overtime_minutes or 0,
+        )
+        for r in records
+    ]
+    return AttendanceRangeReport(
+        period_start=start,
+        period_end=end,
+        total_records=len(records),
+        present=sum(1 for r in records if r.status == "present"),
+        late_or_early=sum(1 for r in records if r.status in ("late", "early_leave")),
+        worked_minutes=sum(r.worked_minutes or 0 for r in records),
+        overtime_minutes=sum(r.overtime_minutes or 0 for r in records),
+        entries=entries,
+    )
+
+
 async def attendance_summary(
     db: AsyncSession, org_id: int | None, start_date: date, end_date: date
 ) -> AttendanceSummaryReport:
@@ -270,52 +323,70 @@ async def overtime_report(
     return OvertimeReport(period_start=start_date, period_end=end_date, employees=entries)
 
 
-def unknown_persons_query(
-    org_id: int | None, date_from: date | None, date_to: date | None
-) -> Select:
-    stmt = select(RecognitionEvent).where(RecognitionEvent.result == RecognitionResult.unknown)
+def _unknown_conditions(
+    org_id: int | None,
+    date_from: date | None,
+    date_to: date | None,
+    camera_id: int | None = None,
+    alerts_only: bool = False,
+) -> list:
+    conds = [RecognitionEvent.result == RecognitionResult.unknown]
     if org_id is not None:
-        stmt = stmt.where(RecognitionEvent.organization_id == org_id)
+        conds.append(RecognitionEvent.organization_id == org_id)
     if date_from is not None:
-        start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
-        stmt = stmt.where(RecognitionEvent.recognized_at >= start)
+        conds.append(
+            RecognitionEvent.recognized_at
+            >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+        )
     if date_to is not None:
-        end = datetime.combine(date_to, time.max, tzinfo=timezone.utc)
-        stmt = stmt.where(RecognitionEvent.recognized_at <= end)
-    return stmt.order_by(RecognitionEvent.recognized_at.desc())
+        conds.append(
+            RecognitionEvent.recognized_at
+            <= datetime.combine(date_to, time.max, tzinfo=timezone.utc)
+        )
+    if camera_id is not None:
+        conds.append(RecognitionEvent.camera_id == camera_id)
+    if alerts_only:
+        conds.append(RecognitionEvent.notified_at.isnot(None))
+    return conds
 
 
-async def attendance_export_csv(
-    db: AsyncSession, org_id: int | None, start: date, end: date
-) -> str:
-    att_stmt = (
-        select(AttendanceRecord)
-        .where(AttendanceRecord.work_date >= start, AttendanceRecord.work_date <= end)
-        .join(Employee, AttendanceRecord.employee_id == Employee.id)
-        .order_by(AttendanceRecord.work_date, Employee.last_name)
+def unknown_persons_query(
+    org_id: int | None,
+    date_from: date | None,
+    date_to: date | None,
+    camera_id: int | None = None,
+    alerts_only: bool = False,
+) -> Select:
+    return (
+        select(RecognitionEvent)
+        .where(*_unknown_conditions(org_id, date_from, date_to, camera_id, alerts_only))
+        .order_by(RecognitionEvent.recognized_at.desc())
     )
-    att_stmt = apply_tenant_filter(att_stmt, org_id, Employee.organization_id)
-    records = list((await db.execute(att_stmt)).scalars().all())
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow([
-        "Date", "Employee ID", "Employee Name", "Department", "Check In", "Check Out",
-        "Worked Minutes", "Overtime Minutes", "Status", "Method In", "Method Out",
-    ])
-    for r in records:
-        emp = r.employee
-        writer.writerow([
-            r.work_date.isoformat(),
-            emp.employee_code if emp else r.employee_id,
-            f"{emp.first_name} {emp.last_name}" if emp else "",
-            emp.department if emp else "",
-            r.check_in_at.isoformat() if r.check_in_at else "",
-            r.check_out_at.isoformat() if r.check_out_at else "",
-            r.worked_minutes,
-            r.overtime_minutes,
-            r.status,
-            r.check_in_method or "",
-            r.check_out_method or "",
-        ])
-    return output.getvalue()
+
+async def unknown_persons_summary(
+    db: AsyncSession, org_id: int | None, date_from: date | None, date_to: date | None
+) -> dict:
+    """Range-wide aggregates for the Unknown Faces page.
+
+    Stat cards and the camera filter need totals over the whole range — the
+    list endpoint is paginated, so per-page counts would be wrong.
+    """
+    conds = _unknown_conditions(org_id, date_from, date_to)
+    totals_stmt = select(
+        func.count(),
+        func.count(RecognitionEvent.notified_at),
+        func.count(case((RecognitionEvent.liveness_passed == False, 1))),  # noqa: E712
+    ).where(*conds)
+    total, alerts, spoof = (await db.execute(totals_stmt)).one()
+
+    cam_stmt = (
+        select(Camera.id, Camera.name)
+        .join(RecognitionEvent, RecognitionEvent.camera_id == Camera.id)
+        .where(*conds)
+        .distinct()
+        .order_by(Camera.name)
+    )
+    cameras = [{"id": cid, "name": name} for cid, name in (await db.execute(cam_stmt)).all()]
+
+    return {"total": total, "alerts": alerts, "spoof": spoof, "cameras": cameras}

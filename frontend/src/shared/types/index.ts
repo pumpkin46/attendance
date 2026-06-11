@@ -163,6 +163,10 @@ export interface AttendanceAnomaly {
   description: string
   status: 'open' | 'acknowledged' | 'resolved' | 'false_positive'
   detected_at: string
+  acknowledged_at?: string | null
+  acknowledged_by?: number | null
+  resolved_at?: string | null
+  detection_run_id?: string | null
   evidence?: Record<string, unknown>
   employee?: { id: number; first_name: string; last_name: string; employee_code: string }
 }

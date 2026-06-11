@@ -23,10 +23,9 @@ export function useLivePoseGuide({
   const [guide, setGuide] = useState<LiveGuidance | null>(null)
 
   useEffect(() => {
-    if (!enabled || !poseType) {
-      setGuide(null)
-      return
-    }
+    // No reset needed when disabled: the previous run's cleanup already nulled
+    // the guide before this effect re-ran.
+    if (!enabled || !poseType) return
     let cancelled = false
     let timer: number
 

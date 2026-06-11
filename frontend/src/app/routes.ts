@@ -34,7 +34,6 @@ const routeLoaders: Record<string, () => Promise<unknown>> = {
   '/smart-building': () => import('@/features/building/SmartBuildingPage'),
   '/security-monitoring': () => import('@/features/security/SecurityMonitoringPage'),
   '/recognition-engine': () => import('@/features/recognition/RecognitionEnginePage'),
-  '/notifications': () => import('@/features/notifications/NotificationsPage'),
   '/privacy': () => import('@/features/privacy/PrivacyPage'),
   '/user-management': () => import('@/features/users/UserManagementPage'),
 }

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { removeRowFromPaginated } from '@/shared/api/cache'
 import { api } from '@/shared/api/client'
 import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { Employee, Paginated } from '@/shared/types'
@@ -11,7 +12,12 @@ export const visitorKeys = {
   active: ['visitors', 'active'] as const,
   stats: ['visitors', 'stats'] as const,
   pending: ['visitors', 'pending'] as const,
-  blacklist: ['visitors', 'blacklist'] as const,
+}
+
+// The blacklist is its own resource (/visitor-blacklist) and is unaffected by
+// visit lifecycle mutations, so it lives outside the broad `visitors` scope.
+export const blacklistKeys = {
+  list: ['visitor-blacklist', 'list'] as const,
 }
 
 export function useVisitorStats(refetchInterval?: number) {
@@ -42,7 +48,7 @@ export function usePendingApprovals() {
 }
 
 export function useBlacklist() {
-  return useApiQuery<Paginated<BlacklistEntry>>(visitorKeys.blacklist, '/visitor-blacklist', {
+  return useApiQuery<Paginated<BlacklistEntry>>(blacklistKeys.list, '/visitor-blacklist', {
     per_page: 50,
   })
 }
@@ -51,7 +57,11 @@ export function useEmployeeOptions() {
   return useApiQuery<Paginated<Employee>>(['employees', 'options'], '/employees', { per_page: 100 })
 }
 
-/** Invalidates every visitor-scoped query after a mutation. */
+/**
+ * Visit lifecycle mutations (register/check-in/check-out/cancel/enroll) move a
+ * visitor between the list, active roster, stats and pending approvals at
+ * once, so they refetch the whole visitor scope.
+ */
 export function useInvalidateVisitors() {
   const qc = useQueryClient()
   return () => qc.invalidateQueries({ queryKey: visitorKeys.all })
@@ -114,23 +124,28 @@ export function useEnrollVisitorFace() {
 }
 
 export function useAddBlacklist() {
-  const invalidate = useInvalidateVisitors()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (payload: Record<string, unknown>) => api.post('/visitor-blacklist', payload),
     onSuccess: () => {
       toast.success('Added to blacklist')
-      invalidate()
+      qc.invalidateQueries({ queryKey: blacklistKeys.list })
     },
   })
 }
 
 export function useRemoveBlacklist() {
-  const invalidate = useInvalidateVisitors()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/visitor-blacklist/${id}`),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       toast.success('Removed from blacklist')
-      invalidate()
+      // Soft delete on the backend, but the list only returns active entries:
+      // drop it from the cached list instead of refetching.
+      qc.setQueryData<Paginated<BlacklistEntry>>(
+        blacklistKeys.list,
+        removeRowFromPaginated<BlacklistEntry>(id)
+      )
     },
   })
 }

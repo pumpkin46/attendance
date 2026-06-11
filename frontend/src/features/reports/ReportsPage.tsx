@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
-import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Input } from '@/shared/ui/Input'
 import { Combobox } from '@/shared/ui/Combobox'
@@ -9,8 +8,9 @@ import { PageHeader } from '@/shared/ui/PageHeader'
 import { StatCard } from '@/shared/ui/StatCard'
 import { Tabs } from '@/shared/ui/Tabs'
 import { DataTable } from '@/shared/ui/DataTable'
-import { fetchReportExport, useDailyReport, useMonthlyReport } from '@/features/reports/api/queries'
-import type { ExportFormat, ReportTab } from '@/features/reports/types'
+import { useDailyReport, useMonthlyReport } from '@/features/reports/api/queries'
+import { ReportExportButtons } from '@/features/reports/components/ExportButtons'
+import type { ReportTab } from '@/features/reports/types'
 import { attendanceStatusTone, formatMinutes, formatTime } from '@/shared/lib/format'
 
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
@@ -18,20 +18,11 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
   label: new Date(2000, i, 1).toLocaleString(undefined, { month: 'long' }),
 }))
 
-const DownloadIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="7 10 12 15 17 10" />
-    <line x1="12" y1="15" x2="12" y2="3" />
-  </svg>
-)
-
 export default function ReportsPage() {
   const [tab, setTab] = useState<ReportTab>('daily')
   const [dailyDate, setDailyDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [monthYear, setMonthYear] = useState(() => String(new Date().getFullYear()))
   const [monthNum, setMonthNum] = useState(() => String(new Date().getMonth() + 1).padStart(2, '0'))
-  const [exporting, setExporting] = useState<ExportFormat | null>(null)
 
   const dailyQuery = useDailyReport(dailyDate, tab === 'daily')
   const monthlyQuery = useMonthlyReport(monthYear, monthNum, tab === 'monthly')
@@ -39,33 +30,6 @@ export default function ReportsPage() {
   const dailyReport = dailyQuery.data
   const monthlyReport = monthlyQuery.data
   const loading = tab === 'daily' ? dailyQuery.isFetching : monthlyQuery.isFetching
-
-  const downloadExport = async (format: ExportFormat) => {
-    setExporting(format)
-    try {
-      const params =
-        tab === 'daily'
-          ? { format, report_type: 'daily', date: dailyDate }
-          : { format, report_type: 'monthly', year: monthYear, month: monthNum }
-
-      const data = await fetchReportExport(params)
-
-      const ext = format === 'xlsx' ? 'xls' : format
-      const basename =
-        tab === 'daily'
-          ? `daily-attendance-${dailyDate}`
-          : `monthly-attendance-${monthYear}-${monthNum}`
-
-      const url = URL.createObjectURL(data)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${basename}.${ext}`
-      a.click()
-      URL.revokeObjectURL(url)
-    } finally {
-      setExporting(null)
-    }
-  }
 
   return (
     <div>
@@ -115,38 +79,15 @@ export default function ReportsPage() {
             </>
           )}
 
-          <div className="ml-auto flex flex-col gap-1.5">
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Export</span>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="ghost"
-                leftIcon={<DownloadIcon />}
-                isLoading={exporting === 'csv'}
-                disabled={!!exporting}
-                onClick={() => downloadExport('csv')}
-              >
-                CSV
-              </Button>
-              <Button
-                variant="ghost"
-                leftIcon={<DownloadIcon />}
-                isLoading={exporting === 'xlsx'}
-                disabled={!!exporting}
-                onClick={() => downloadExport('xlsx')}
-              >
-                Excel
-              </Button>
-              <Button
-                variant="ghost"
-                leftIcon={<DownloadIcon />}
-                isLoading={exporting === 'pdf'}
-                disabled={!!exporting}
-                onClick={() => downloadExport('pdf')}
-              >
-                PDF
-              </Button>
-            </div>
-          </div>
+          <ReportExportButtons
+            className="ml-auto flex flex-col gap-1.5"
+            label="Export"
+            params={
+              tab === 'daily'
+                ? { report_type: 'daily', date: dailyDate }
+                : { report_type: 'monthly', year: monthYear, month: monthNum }
+            }
+          />
         </div>
       </Card>
 

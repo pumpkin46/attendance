@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, getApiErrorMessage } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import { useFallbackPoll } from '@/features/realtime/useFallbackPoll'
 import { getToken } from '@/shared/lib/session'
 import type { Paginated, RecognitionEvent } from '@/shared/types'
@@ -17,11 +17,44 @@ import type {
   StreamsResponse,
 } from '@/features/recognition/types'
 
-export function useUnknownFaces(dateFrom: string, dateTo: string) {
+export const UNKNOWN_FACES_PER_PAGE = 24
+
+export function useUnknownFaces(
+  dateFrom: string,
+  dateTo: string,
+  page = 1,
+  cameraId = '',
+  alertsOnly = false
+) {
   return useApiQuery<Paginated<RecognitionEvent>>(
-    ['unknown-faces', 'list', { dateFrom, dateTo }],
+    ['unknown-faces', 'list', { dateFrom, dateTo, page, cameraId, alertsOnly }],
     '/reports/unknown-persons',
-    { date_from: dateFrom, date_to: dateTo, per_page: 50 }
+    {
+      date_from: dateFrom,
+      date_to: dateTo,
+      page,
+      per_page: UNKNOWN_FACES_PER_PAGE,
+      camera_id: cameraId || undefined,
+      alerts_only: alertsOnly || undefined,
+    },
+    { keepPreviousData: true }
+  )
+}
+
+export interface UnknownFacesSummary {
+  total: number
+  alerts: number
+  spoof: number
+  cameras: { id: number; name: string | null }[]
+}
+
+/** Range-wide totals for the stat cards + camera filter (the list is paginated). */
+export function useUnknownFacesSummary(dateFrom: string, dateTo: string) {
+  return useApiQuery<UnknownFacesSummary>(
+    ['unknown-faces', 'summary', { dateFrom, dateTo }],
+    '/reports/unknown-persons/summary',
+    { date_from: dateFrom, date_to: dateTo },
+    { silent: true }
   )
 }
 
@@ -98,14 +131,30 @@ export function useEngineLiveFeed() {
 }
 
 export function useEngineConfig() {
+  // Long staleTime is safe even though config is editable in-app: the save
+  // mutation invalidates the key explicitly, which always refetches.
   return useApiQuery<EngineConfigDict>(engineKeys.config, '/engine/config', undefined, {
     silent: true,
+    staleTime: STATIC_STALE_MS,
   })
 }
 
+/** Full engine-scope refresh — for callers outside this file (e.g. the config panel's save callback). */
 export function useInvalidateEngine() {
   const qc = useQueryClient()
   return () => qc.invalidateQueries({ queryKey: engineKeys.all })
+}
+
+/**
+ * Stream mutations change the stream table and the aggregate counters in
+ * engine status, but never the engine config — so config is not invalidated.
+ */
+function useInvalidateStreams() {
+  const qc = useQueryClient()
+  return () => {
+    qc.invalidateQueries({ queryKey: engineKeys.streams })
+    qc.invalidateQueries({ queryKey: engineKeys.status })
+  }
 }
 
 function useEngineError() {
@@ -121,7 +170,7 @@ export function useToggleEngine() {
 }
 
 export function useAddStream() {
-  const invalidate = useInvalidateEngine()
+  const invalidate = useInvalidateStreams()
   const onError = useEngineError()
   return useMutation({
     mutationFn: (input: AddStreamInput) =>
@@ -139,7 +188,7 @@ export function useAddStream() {
 }
 
 export function useControlStream() {
-  const invalidate = useInvalidateEngine()
+  const invalidate = useInvalidateStreams()
   const onError = useEngineError()
   return useMutation({
     mutationFn: ({ action, camera_id }: { action: 'start' | 'stop'; camera_id: number }) =>
@@ -150,7 +199,7 @@ export function useControlStream() {
 }
 
 export function useRemoveStream() {
-  const invalidate = useInvalidateEngine()
+  const invalidate = useInvalidateStreams()
   const onError = useEngineError()
   return useMutation({
     mutationFn: (camera_id: number) => api.delete(`/engine/streams/${camera_id}`),
@@ -163,13 +212,14 @@ export function useRemoveStream() {
 }
 
 export function useReloadIndex() {
-  const invalidate = useInvalidateEngine()
+  const qc = useQueryClient()
   const onError = useEngineError()
   return useMutation({
     mutationFn: () => api.post('/engine/index/reload'),
     onSuccess: () => {
       toast.success('Vector index reloaded')
-      invalidate()
+      // A reload only changes the search_index stats reported in engine status.
+      qc.invalidateQueries({ queryKey: engineKeys.status })
     },
     onError,
   })
@@ -216,13 +266,15 @@ export function useEventFeedback() {
 }
 
 export function useSaveEngineConfig() {
-  const invalidate = useInvalidateEngine()
+  const qc = useQueryClient()
   const onError = useEngineError()
   return useMutation({
     mutationFn: (patch: EngineConfigPatch) => api.patch('/engine/config', patch),
     onSuccess: () => {
       toast.success('Engine configuration updated')
-      invalidate()
+      // Status and streams refresh live over the WebSocket; only the config
+      // snapshot needs refetching.
+      qc.invalidateQueries({ queryKey: engineKeys.config })
     },
     onError,
   })

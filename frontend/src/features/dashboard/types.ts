@@ -23,4 +23,9 @@ export interface LiveEvent {
   event_type: string
   message: string
   occurred_at: string
+  /** Event-specific details, e.g. recognition_event_id / confidence / liveness_passed / reason. */
+  payload?: Record<string, unknown> | null
+  camera_id?: number | null
+  employee_id?: number | null
+  visitor_id?: number | null
 }

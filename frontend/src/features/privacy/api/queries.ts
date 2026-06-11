@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, getApiErrorMessage } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { MyData, PrivacyPolicy } from '@/features/privacy/types'
 
 export const privacyKeys = {
@@ -10,7 +10,9 @@ export const privacyKeys = {
 }
 
 export function usePrivacyPolicy() {
-  return useApiQuery<PrivacyPolicy>(privacyKeys.policy, '/privacy/policy')
+  return useApiQuery<PrivacyPolicy>(privacyKeys.policy, '/privacy/policy', undefined, {
+    staleTime: STATIC_STALE_MS,
+  })
 }
 
 export function useMyData() {

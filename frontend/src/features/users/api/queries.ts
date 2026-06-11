@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, getApiErrorMessage } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { Paginated, Permission, Role, User } from '@/shared/types'
 
 export interface RoleWithUsage extends Role {
@@ -16,6 +16,7 @@ export interface UserListParams {
 
 export const userAdminKeys = {
   all: ['user-admin'] as const,
+  usersAll: ['user-admin', 'users'] as const,
   users: (params: UserListParams) => ['user-admin', 'users', params] as const,
   roles: ['user-admin', 'roles'] as const,
   permissions: ['user-admin', 'permissions'] as const,
@@ -37,13 +38,21 @@ export function useRoles() {
 }
 
 export function usePermissions() {
-  return useApiQuery<Permission[]>(userAdminKeys.permissions, '/permissions')
+  return useApiQuery<Permission[]>(userAdminKeys.permissions, '/permissions', undefined, {
+    staleTime: STATIC_STALE_MS,
+  })
 }
 
-/** Invalidates every user-admin query after a mutation. */
-function useInvalidateUserAdmin() {
+/**
+ * User and role mutations change the user lists (which embed roles) and the
+ * roles' usage counts — the permission catalog is static and never refetched.
+ */
+function useInvalidateUsersAndRoles() {
   const qc = useQueryClient()
-  return () => qc.invalidateQueries({ queryKey: userAdminKeys.all })
+  return () => {
+    qc.invalidateQueries({ queryKey: userAdminKeys.usersAll })
+    qc.invalidateQueries({ queryKey: userAdminKeys.roles })
+  }
 }
 
 // ── Mutations ────────────────────────────────────────────────────────────────
@@ -61,7 +70,7 @@ export interface SaveUserPayload {
 }
 
 export function useSaveUser() {
-  const invalidate = useInvalidateUserAdmin()
+  const invalidate = useInvalidateUsersAndRoles()
   return useMutation({
     mutationFn: ({ id, payload }: { id?: number; payload: SaveUserPayload }) =>
       id ? api.patch<User>(`/users/${id}`, payload) : api.post<User>('/users', payload),
@@ -80,7 +89,7 @@ export interface SaveRolePayload {
 }
 
 export function useSaveRole() {
-  const invalidate = useInvalidateUserAdmin()
+  const invalidate = useInvalidateUsersAndRoles()
   return useMutation({
     mutationFn: ({ id, payload }: { id?: number; payload: SaveRolePayload }) =>
       id ? api.patch<Role>(`/roles/${id}`, payload) : api.post<Role>('/roles', payload),
@@ -93,12 +102,16 @@ export function useSaveRole() {
 }
 
 export function useDeleteRole() {
-  const invalidate = useInvalidateUserAdmin()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/roles/${id}`),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       toast.success('Role deleted')
-      invalidate()
+      // Hard delete on the backend (only allowed while unassigned, so user rows
+      // are unaffected): drop it from the cached list instead of refetching.
+      qc.setQueryData<RoleWithUsage[]>(userAdminKeys.roles, (old) =>
+        old?.filter((r) => r.id !== id)
+      )
     },
     onError,
   })

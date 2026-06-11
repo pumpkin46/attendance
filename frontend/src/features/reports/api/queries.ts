@@ -20,10 +20,16 @@ export function useMonthlyReport(year: string, month: string, enabled: boolean) 
   )
 }
 
-/** Fetch an export file (csv/xlsx/pdf) as a Blob for client-side download. */
+/**
+ * Fetch an export file (csv/xlsx/pdf) for client-side download. The filename
+ * comes from the response's Content-Disposition — the backend is the single
+ * source of truth for naming.
+ */
 export async function fetchReportExport(
   params: Record<string, string | undefined>
-): Promise<Blob> {
-  const { data } = await api.get<Blob>('/reports/export', { params, responseType: 'blob' })
-  return data
+): Promise<{ blob: Blob; filename: string | null }> {
+  const res = await api.get<Blob>('/reports/export', { params, responseType: 'blob' })
+  const disposition = res.headers['content-disposition'] as string | undefined
+  const match = disposition?.match(/filename="?([^";]+)"?/i)
+  return { blob: res.data, filename: match?.[1] ?? null }
 }

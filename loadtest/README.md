@@ -36,13 +36,13 @@ so the run is self-grading. Locust is a fine Python alternative if you prefer it
    ```bash
    cd backend
    python seed.py            # base org + admin user (once)
-   python seed_loadtest.py   # bulk volume: employees, attendance, cameras, audit, notifications, recognition
+   python seed_loadtest.py   # bulk volume: employees, attendance, cameras, audit, recognition
    ```
 
-   Defaults: 1,000 employees, 90 days of attendance, 100 cameras, 20k audit logs, 500
-   notifications (for `admin@attendance.local`), 2k recognition events. Tune via env vars
+   Defaults: 1,000 employees, 90 days of attendance, 100 cameras, 20k audit logs,
+   2k recognition events. Tune via env vars
    (`LOADTEST_EMPLOYEES`, `LOADTEST_ATTENDANCE_DAYS`, `LOADTEST_CAMERAS`, `LOADTEST_AUDIT_LOGS`,
-   `LOADTEST_NOTIFICATIONS`, `LOADTEST_RECOGNITION`). It's idempotent — rerun with
+   `LOADTEST_RECOGNITION`). It's idempotent — rerun with
    `LOADTEST_RESET=1` to rebuild. See [`backend/seed_loadtest.py`](../backend/seed_loadtest.py).
 4. For recognition: a face image. A bundled one (`assets/face.jpg`) is used by default;
    override with `IMAGE_PATH` if you want your own.

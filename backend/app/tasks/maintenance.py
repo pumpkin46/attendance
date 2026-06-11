@@ -71,7 +71,6 @@ def purge_retention_task() -> dict:
 
     async def _impl(session: AsyncSession) -> dict:
         from app.models.audit import AuditLog
-        from app.models.notification import Notification
         from app.models.recognition import RecognitionEvent
 
         now = datetime.now(timezone.utc)
@@ -86,13 +85,6 @@ def purge_retention_task() -> dict:
         counts["recognition_events"] = (
             await session.execute(
                 delete(RecognitionEvent).where(RecognitionEvent.recognized_at < rec_cutoff)
-            )
-        ).rowcount
-
-        notif_cutoff = now - timedelta(days=settings.retention_notifications_days)
-        counts["notifications"] = (
-            await session.execute(
-                delete(Notification).where(Notification.created_at < notif_cutoff)
             )
         ).rowcount
 

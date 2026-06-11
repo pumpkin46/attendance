@@ -175,6 +175,10 @@ async def update_me(body: UpdateProfileRequest, user: CurrentUser, request: Requ
             user_agent=request.headers.get("User-Agent"),
             new_values=changes,
         )
+        # log_action's flush ran the UPDATE, expiring server-generated columns
+        # (updated_at via onupdate); refresh here so Pydantic's attribute reads
+        # don't trigger lazy IO outside the greenlet context.
+        await db.refresh(user)
 
     return UserOut.model_validate(user, from_attributes=True)
 

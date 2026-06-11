@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { Paginated } from '@/shared/types'
 import type {
   AccessConfig,
@@ -25,17 +25,21 @@ export function useAccessPoints() {
 export function useAccessConfig() {
   return useApiQuery<AccessConfig>(accessKeys.config, '/access-points/config', undefined, {
     silent: true,
+    staleTime: STATIC_STALE_MS,
   })
 }
 
-/** Invalidates every access-point-scoped query after a mutation. */
-export function useInvalidateAccessPoints() {
+/**
+ * Access-point mutations only ever change the list — config (kinds/actions)
+ * is static reference data, so it is never invalidated here.
+ */
+export function useInvalidateAccessPointList() {
   const qc = useQueryClient()
-  return () => qc.invalidateQueries({ queryKey: accessKeys.all })
+  return () => qc.invalidateQueries({ queryKey: accessKeys.list })
 }
 
 export function useCreateAccessPoint() {
-  const invalidate = useInvalidateAccessPoints()
+  const invalidate = useInvalidateAccessPointList()
   return useMutation({
     mutationFn: (payload: CreateAccessPointPayload) => api.post('/access-points', payload),
     onSuccess: () => {

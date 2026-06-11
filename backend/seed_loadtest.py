@@ -8,7 +8,6 @@ tables. Seeds exactly the entities the read endpoints touch:
     attendance     → GET /api/v1/attendance?date_from..date_to
     audit logs     → GET /api/v1/audit-logs
     cameras        → GET /api/v1/cameras   (+ monitoring dashboard)
-    notifications  → GET /api/v1/notifications   (targeted at the admin user)
     recognition    → feeds the monitoring dashboard's per-camera / unknown counts
 
 Run the base seeder first (it creates the org, admin user, location, shifts);
@@ -24,17 +23,14 @@ Tune volume via env vars (defaults in brackets):
     LOADTEST_ATTENDANCE_DAYS  [90]     days of history (× employees ≈ row count)
     LOADTEST_CAMERAS          [100]    cameras (read endpoint pages 100)
     LOADTEST_AUDIT_LOGS       [20000]  audit-log rows
-    LOADTEST_NOTIFICATIONS    [500]    notifications for the admin user
     LOADTEST_RECOGNITION      [2000]   recognition events (recent + today)
     LOADTEST_RESET            [0]      if "1", delete prior load-test data first
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import random
-import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import delete, insert, select
@@ -45,7 +41,6 @@ from app.models.audit import AuditLog
 from app.models.camera import Camera, CameraDirection, CameraStatus, DeploymentMode
 from app.models.employee import Employee
 from app.models.location import Location
-from app.models.notification import Notification
 from app.models.organization import Branch, Department, Organization
 from app.models.recognition import RecognitionEvent, RecognitionResult
 from app.models.user import User
@@ -88,9 +83,6 @@ async def _reset(db, emp_ids: list[int]) -> None:
     await db.execute(
         delete(AuditLog).where(AuditLog.action.like("loadtest.%"))
     )
-    await db.execute(
-        delete(Notification).where(Notification.type == "loadtest.notification")
-    )
     if emp_ids:
         await db.execute(
             delete(RecognitionEvent).where(RecognitionEvent.employee_id.in_(emp_ids))
@@ -107,7 +99,6 @@ async def seed() -> None:
     n_days = _env_int("LOADTEST_ATTENDANCE_DAYS", 90)
     n_cameras = _env_int("LOADTEST_CAMERAS", 100)
     n_audit = _env_int("LOADTEST_AUDIT_LOGS", 20000)
-    n_notif = _env_int("LOADTEST_NOTIFICATIONS", 500)
     n_recog = _env_int("LOADTEST_RECOGNITION", 2000)
     reset = os.environ.get("LOADTEST_RESET") == "1"
 
@@ -179,7 +170,7 @@ async def seed() -> None:
         print(
             f"[loadtest] Seeding org #{org.id}: {n_employees} employees, "
             f"{n_days}d attendance, {n_cameras} cameras, {n_audit} audit logs, "
-            f"{n_notif} notifications, {n_recog} recognition events."
+            f"{n_recog} recognition events."
         )
 
         now = datetime.now(timezone.utc)
@@ -378,26 +369,6 @@ async def seed() -> None:
             )
         await _bulk_insert(db, AuditLog, audit_rows)
         print(f"[loadtest]   [ok] {n_audit} audit logs")
-
-        # ── Notifications (targeted at the admin user) ────────────────────────
-        notif_types = ["anomaly.detected", "camera.offline", "visitor.arrived", "attendance.late"]
-        notif_rows = []
-        for i in range(n_notif):
-            ntype = RNG.choice(notif_types)
-            created = now - timedelta(minutes=RNG.randint(0, n_days * 24 * 60))
-            notif_rows.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "type": "loadtest.notification",
-                    "notifiable_type": "user",
-                    "notifiable_id": admin.id,
-                    "data": json.dumps({"title": ntype, "body": f"Load-test notification #{i}"}),
-                    "read_at": None if RNG.random() < 0.4 else created,
-                    "created_at": created,
-                }
-            )
-        await _bulk_insert(db, Notification, notif_rows)
-        print(f"[loadtest]   [ok] {n_notif} notifications")
 
         # ── Recognition events (recent + today, feeds the dashboard) ──────────
         results = [

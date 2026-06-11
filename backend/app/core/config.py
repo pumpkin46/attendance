@@ -118,7 +118,6 @@ class Settings(BaseSettings):
     gdpr_enabled: bool = True
     retention_audit_logs_days: int = 365
     retention_recognition_events_days: int = 90
-    retention_notifications_days: int = 90
     privacy_contact_email: str = "privacy@attendance.local"
 
     # ── Attendance ────────────────────────────────────────────────────────

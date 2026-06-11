@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import type {
   Branch,
   CreateOrganizationPayload,
@@ -30,7 +30,7 @@ export function useSecurityMonitoringConfig() {
     securityMonitoringKeys.config,
     '/security-monitoring/config',
     undefined,
-    { silent: true }
+    { silent: true, staleTime: STATIC_STALE_MS }
   )
 }
 
@@ -53,13 +53,17 @@ export function useSecurityAlerts(poll: number | undefined) {
   )
 }
 
-function useInvalidateSecurityMonitoring() {
+/** Alert mutations change the alert list and the dashboard counters — config is static and never refetched here. */
+function useInvalidateAlerts() {
   const qc = useQueryClient()
-  return () => qc.invalidateQueries({ queryKey: securityMonitoringKeys.all })
+  return () => {
+    qc.invalidateQueries({ queryKey: securityMonitoringKeys.alerts })
+    qc.invalidateQueries({ queryKey: securityMonitoringKeys.dashboard })
+  }
 }
 
 export function useAcknowledgeAlert() {
-  const invalidate = useInvalidateSecurityMonitoring()
+  const invalidate = useInvalidateAlerts()
   return useMutation({
     mutationFn: (id: number) => api.post(`/security-monitoring/alerts/${id}/acknowledge`),
     onSuccess: invalidate,
@@ -67,7 +71,7 @@ export function useAcknowledgeAlert() {
 }
 
 export function useResolveAlert() {
-  const invalidate = useInvalidateSecurityMonitoring()
+  const invalidate = useInvalidateAlerts()
   return useMutation({
     mutationFn: (id: number) => api.post(`/security-monitoring/alerts/${id}/resolve`),
     onSuccess: invalidate,
@@ -85,6 +89,7 @@ export function useSecurityConfig(enabled: boolean) {
   return useApiQuery<SecurityConfig>(securityKeys.config, '/security/config', undefined, {
     enabled,
     silent: true,
+    staleTime: STATIC_STALE_MS,
   })
 }
 
@@ -100,14 +105,17 @@ export function useDepartments() {
   return useApiQuery<Department[]>(organizationKeys.departments, '/departments')
 }
 
-/** Invalidates every organization-scoped query after a mutation. */
-export function useInvalidateOrganizations() {
+/**
+ * Organization mutations only ever change the org list — branches and
+ * departments are separate resources, so they are never invalidated here.
+ */
+export function useInvalidateOrganizationList() {
   const qc = useQueryClient()
-  return () => qc.invalidateQueries({ queryKey: organizationKeys.all })
+  return () => qc.invalidateQueries({ queryKey: organizationKeys.list })
 }
 
 export function useCreateOrganization() {
-  const invalidate = useInvalidateOrganizations()
+  const invalidate = useInvalidateOrganizationList()
   return useMutation({
     mutationFn: (payload: CreateOrganizationPayload) => api.post('/organizations', payload),
     onSuccess: () => {

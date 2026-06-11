@@ -36,6 +36,16 @@ _snapshot_cleanup_task: asyncio.Task | None = None
 # unknown per frame. See settings.unknown_event_throttle_seconds.
 _last_unknown_at: dict[int | None, float] = {}
 
+# Pipeline reasons meaning no usable face was in the frame at all (e.g. the
+# person stepped out of view between the kiosk's detect and identify ticks).
+# These produce nothing worth reviewing or announcing.
+_NO_FACE_REASONS = frozenset({"no_face", "invalid_image"})
+
+# Reasons that still mean "a real face was searched and nobody matched" — the
+# pipeline leaves reason unset for a plain below-threshold miss; callers may
+# also tag it explicitly.
+_GENUINE_UNKNOWN_REASONS = frozenset({None, "low_confidence", "low_confidence_review"})
+
 
 def _unknown_throttled(org_id: int | None) -> bool:
     """True if an unknown event for this tenant was recorded within the window."""
@@ -189,7 +199,16 @@ async def record_identification(
                 event_type="recognition.matched",
                 message=f"{employee.first_name} {employee.last_name} recognized",
                 employee_id=employee.id,
-                payload={"confidence": confidence, "liveness_passed": liveness_passed},
+                camera_id=camera_id,
+                # recognition_event_id lets the dashboard's event detail view
+                # load the stored snapshot for this match.
+                payload={
+                    "recognition_event_id": event.id,
+                    "confidence": confidence,
+                    "liveness_passed": liveness_passed,
+                    "attendance_action": action,
+                    "snapshot": bool(snapshot),
+                },
             )
 
         employee_brief = (
@@ -207,11 +226,22 @@ async def record_identification(
         )
         return {"matched": True, "employee": employee_brief, "attendance": attendance}
 
-    # Unknown face. Throttle persistence so a continuously-scanning kiosk doesn't
-    # write a row + snapshot every frame; the caller still gets matched=False so
-    # the UI shows "unknown" live regardless.
+    # No match. The pipeline only sets a reason when a gate (decode, quality,
+    # liveness) stopped the frame before matching; a genuine searched-but-
+    # unmatched face (see _GENUINE_UNKNOWN_REASONS) is the only case broadcast
+    # as "recognition.unknown" (the org-wide toast). Gate rejections are still
+    # persisted for review but broadcast as "recognition.rejected".
+    reason = result.get("reason")
+    no_match = {"matched": False, "employee": None, "attendance": None, "reason": reason}
+
+    if reason in _NO_FACE_REASONS:
+        return no_match
+
+    # Throttle persistence so a continuously-scanning kiosk doesn't write a
+    # row + snapshot every frame; the caller still gets matched=False so the
+    # UI shows "unknown" live regardless.
     if _unknown_throttled(org_id):
-        return {"matched": False, "employee": None, "attendance": None, "reason": result.get("reason")}
+        return no_match
 
     event = RecognitionEvent(
         employee_id=None,
@@ -229,14 +259,22 @@ async def record_identification(
     if snapshot:
         event.snapshot_path = snapshot
         await db.flush()
+    rejected = reason not in _GENUINE_UNKNOWN_REASONS
     await create_live_event(
         db=db,
         organization_id=org_id,
-        event_type="recognition.unknown",
-        message="Unknown face detected",
-        payload={"confidence": result.get("confidence")},
+        event_type="recognition.rejected" if rejected else "recognition.unknown",
+        message=f"Face rejected ({reason})" if rejected else "Unknown face detected",
+        camera_id=camera_id,
+        payload={
+            "recognition_event_id": event.id,
+            "confidence": result.get("confidence"),
+            "liveness_passed": result.get("liveness_passed"),
+            "reason": reason,
+            "snapshot": bool(snapshot),
+        },
     )
-    return {"matched": False, "employee": None, "attendance": None, "reason": result.get("reason")}
+    return no_match
 
 
 async def _count(db: AsyncSession, stmt: Select) -> int:

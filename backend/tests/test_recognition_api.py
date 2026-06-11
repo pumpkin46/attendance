@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_tenant_org_id
+from app.models.live_event import LiveEvent
 from app.models.recognition import RecognitionEvent
 import app.services.attendance_service as attendance_service
 import app.services.face_service as face_service
@@ -174,6 +175,75 @@ def test_unknown_identify_records_unknown_event(client, fake_session, monkeypatc
     assert events[0].result == "unknown"
     assert events[0].employee_id is None
     assert events[0].organization_id == 1  # tenant from the caller context
+
+
+def test_unknown_identify_broadcasts_unknown_event(client, fake_session, monkeypatch):
+    """A searched-but-unmatched face (no gate reason) fires the org-wide toast."""
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": None,
+            "confidence": 0.40,
+            "liveness_passed": True,
+            "processing_ms": 90,
+        },
+    )
+
+    resp = client.post("/api/v1/recognition/identify", json={"image": "x"})
+    assert resp.status_code == 200
+
+    live = [o for o in fake_session.added if isinstance(o, LiveEvent)]
+    assert [e.event_type for e in live] == ["recognition.unknown"]
+
+
+def test_no_face_identify_records_nothing(client, fake_session, monkeypatch):
+    """A frame with no usable face (person left view between the kiosk's detect
+    and identify ticks) must not create an "unknown face" event or toast."""
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": None,
+            "confidence": 0.0,
+            "reason": "no_face",
+            "liveness_passed": False,
+            "processing_ms": 30,
+        },
+    )
+
+    resp = client.post("/api/v1/recognition/identify", json={"image": "x"})
+    assert resp.status_code == 200
+    assert resp.json()["matched"] is False
+    assert fake_session.added == []
+
+
+def test_gate_rejection_broadcasts_rejected_not_unknown(client, fake_session, monkeypatch):
+    """Liveness/quality rejections are kept for review but must not fire the
+    org-wide "Unknown face detected" toast (recognition.unknown)."""
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": None,
+            "confidence": 0.0,
+            "reason": "spoof_detected",
+            "liveness_passed": False,
+            "processing_ms": 95,
+        },
+    )
+
+    resp = client.post("/api/v1/recognition/identify", json={"image": "x"})
+    assert resp.status_code == 200
+
+    events = [o for o in fake_session.added if isinstance(o, RecognitionEvent)]
+    assert len(events) == 1  # still lands in the Unknown Faces review queue
+    live = [o for o in fake_session.added if isinstance(o, LiveEvent)]
+    assert [e.event_type for e in live] == ["recognition.rejected"]
+    assert live[0].message == "Face rejected (spoof_detected)"
 
 
 def test_identify_with_unevaluated_liveness(client, fake_session, monkeypatch):

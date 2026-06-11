@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { getApiErrorMessage } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
 import { Badge } from '@/shared/ui/Badge'
@@ -9,10 +10,16 @@ import { Combobox } from '@/shared/ui/Combobox'
 import { DataTable } from '@/shared/ui/DataTable'
 import { DatePicker } from '@/shared/ui/DatePicker'
 import { PageHeader } from '@/shared/ui/PageHeader'
+import { Pagination } from '@/shared/ui/Pagination'
 import { Skeleton } from '@/shared/ui/Skeleton'
 import { StatCard } from '@/shared/ui/StatCard'
 import { SnapshotImage } from '@/shared/components/SnapshotImage'
-import { useEventFeedback, useUnknownFaces } from '@/features/recognition/api/queries'
+import {
+  UNKNOWN_FACES_PER_PAGE,
+  useEventFeedback,
+  useUnknownFaces,
+  useUnknownFacesSummary,
+} from '@/features/recognition/api/queries'
 import type { RecognitionEvent } from '@/shared/types'
 
 type View = 'gallery' | 'table'
@@ -26,50 +33,80 @@ const isoDaysAgo = (days: number) => {
 const fmtTime = (iso: string) => new Date(iso).toLocaleString()
 const fmtConfidence = (c?: number) => (c != null ? `${(Number(c) * 100).toFixed(1)}%` : '—')
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
 export default function UnknownFacesPage() {
-  const [dateFrom, setDateFrom] = useState(() => isoDaysAgo(7))
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
+  // Initial range can be deep-linked (e.g. /unknown-faces?from=...&to=... from
+  // the dashboard's "Unknown today" KPI); the pickers take over from there.
+  const [searchParams] = useSearchParams()
+  const paramDate = (key: string) => {
+    const v = searchParams.get(key)
+    return v && ISO_DATE.test(v) ? v : null
+  }
+  const [dateFrom, setDateFrom] = useState(() => paramDate('from') ?? isoDaysAgo(7))
+  const [dateTo, setDateTo] = useState(
+    () => paramDate('to') ?? new Date().toISOString().slice(0, 10)
+  )
   const [cameraFilter, setCameraFilter] = useState('')
   const [alertsOnly, setAlertsOnly] = useState(false)
   const [view, setView] = useState<View>('gallery')
   const [index, setIndex] = useState<number | null>(null)
+  const [page, setPage] = useState(1)
 
-  const { data, isPending, isError, error } = useUnknownFaces(dateFrom, dateTo)
+  // Filter/date changes redefine the result set, so navigation restarts at page 1.
+  const changeDateFrom = (v: string) => {
+    setDateFrom(v)
+    setPage(1)
+  }
+  const changeDateTo = (v: string) => {
+    setDateTo(v)
+    setPage(1)
+  }
+  const changeCameraFilter = (v: string) => {
+    setCameraFilter(v)
+    setPage(1)
+    setIndex(null)
+  }
+  const changeAlertsOnly = (v: boolean) => {
+    setAlertsOnly(v)
+    setPage(1)
+    setIndex(null)
+  }
+  const changePage = (p: number) => {
+    setPage(p)
+    setIndex(null)
+  }
+
+  // Camera/alerts filters are server-side (the list is paginated — filtering
+  // the current page locally would miss matches on other pages).
+  const { data, isPending, isError, error } = useUnknownFaces(
+    dateFrom,
+    dateTo,
+    page,
+    cameraFilter,
+    alertsOnly
+  )
   const events = useMemo(() => data?.data ?? [], [data])
 
-  // Camera options derived from the loaded events.
-  const cameraOptions = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const e of events) {
-      const id = e.camera?.id ?? e.camera_id
-      if (id != null) seen.set(String(id), e.camera?.name ?? `Camera #${id}`)
-    }
-    return [
+  // Stat cards + camera options come from range-wide server aggregates, not
+  // from the rows of the current page.
+  const { data: summary } = useUnknownFacesSummary(dateFrom, dateTo)
+  const cameraOptions = useMemo(
+    () => [
       { value: '', label: 'All cameras' },
-      ...Array.from(seen, ([value, label]) => ({ value, label })),
-    ]
-  }, [events])
-
-  const filtered = useMemo(
-    () =>
-      events.filter((e) => {
-        if (alertsOnly && !e.notified_at) return false
-        if (cameraFilter && String(e.camera?.id ?? e.camera_id ?? '') !== cameraFilter) return false
-        return true
-      }),
-    [events, alertsOnly, cameraFilter]
+      ...(summary?.cameras ?? []).map((c) => ({
+        value: String(c.id),
+        label: c.name ?? `Camera #${c.id}`,
+      })),
+    ],
+    [summary]
   )
-
-  const stats = useMemo(
-    () => ({
-      total: filtered.length,
-      alerts: filtered.filter((e) => e.notified_at).length,
-      cameras: new Set(filtered.map((e) => e.camera?.id ?? e.camera_id).filter((v) => v != null))
-        .size,
-      spoof: filtered.filter((e) => e.liveness_passed === false).length,
-    }),
-    [filtered]
-  )
+  const stats = {
+    total: summary?.total ?? 0,
+    alerts: summary?.alerts ?? 0,
+    cameras: summary?.cameras.length ?? 0,
+    spoof: summary?.spoof ?? 0,
+  }
 
   const errorMsg = isError ? getApiErrorMessage(error, 'Failed to load unknown face events') : null
 
@@ -80,9 +117,9 @@ export default function UnknownFacesPage() {
         description="Review unrecognized persons captured by cameras — snapshots, liveness, and alert status."
         actions={
           <div className="flex items-center gap-2">
-            <DatePicker className="w-40" value={dateFrom} onChange={setDateFrom} max={dateTo} />
+            <DatePicker className="w-40" value={dateFrom} onChange={changeDateFrom} max={dateTo} />
             <span className="text-sm text-slate-500">to</span>
-            <DatePicker className="w-40" value={dateTo} onChange={setDateTo} min={dateFrom} />
+            <DatePicker className="w-40" value={dateTo} onChange={changeDateTo} min={dateFrom} />
           </div>
         }
       />
@@ -104,18 +141,18 @@ export default function UnknownFacesPage() {
           <Combobox
             className="w-52"
             value={cameraFilter}
-            onChange={setCameraFilter}
+            onChange={changeCameraFilter}
             options={cameraOptions}
           />
           <Checkbox
             checked={alertsOnly}
-            onChange={(e) => setAlertsOnly(e.target.checked)}
+            onChange={(e) => changeAlertsOnly(e.target.checked)}
             label="Alerts only"
           />
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-500">
-            {filtered.length} {filtered.length === 1 ? 'result' : 'results'}
+            {data?.total ?? 0} {(data?.total ?? 0) === 1 ? 'result' : 'results'}
           </span>
           <ViewToggle view={view} onChange={setView} />
         </div>
@@ -123,16 +160,15 @@ export default function UnknownFacesPage() {
 
       {view === 'gallery' ? (
         <GalleryView
-          events={filtered}
+          events={events}
           loading={isPending}
           error={errorMsg}
           onOpen={setIndex}
         />
       ) : (
         <DataTable
-          data={filtered}
+          data={events}
           rowKey={(e) => e.id}
-          pageSize={12}
           loading={isPending}
           error={errorMsg ?? undefined}
           empty="No unknown face events match these filters"
@@ -186,9 +222,20 @@ export default function UnknownFacesPage() {
         />
       )}
 
-      {index !== null && filtered[index] && (
+      {data && data.last_page > 1 && (
+        <Pagination
+          className="mt-4"
+          page={data.current_page}
+          pageCount={data.last_page}
+          onPageChange={changePage}
+          totalItems={data.total}
+          pageSize={UNKNOWN_FACES_PER_PAGE}
+        />
+      )}
+
+      {index !== null && events[index] && (
         <UnknownFaceModal
-          events={filtered}
+          events={events}
           index={index}
           onClose={() => setIndex(null)}
           onIndexChange={setIndex}

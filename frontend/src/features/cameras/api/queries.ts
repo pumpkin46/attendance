@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { removeRowFromPaginated } from '@/shared/api/cache'
 import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { Camera, Paginated } from '@/shared/types'
 import type { CameraConfig, CameraPayload, CaptureResult, Location } from '@/features/cameras/types'
 
@@ -17,21 +18,28 @@ export function useCameras() {
 }
 
 export function useCameraConfig() {
-  return useApiQuery<CameraConfig>(cameraKeys.config, '/cameras/config')
+  return useApiQuery<CameraConfig>(cameraKeys.config, '/cameras/config', undefined, {
+    staleTime: STATIC_STALE_MS,
+  })
 }
 
 export function useLocations() {
-  return useApiQuery<Location[]>(cameraKeys.locations, '/locations')
+  return useApiQuery<Location[]>(cameraKeys.locations, '/locations', undefined, {
+    staleTime: STATIC_STALE_MS,
+  })
 }
 
-/** Invalidates every camera-scoped query after a mutation. */
-export function useInvalidateCameras() {
+/**
+ * Camera mutations only ever change the camera list — config (types/zones) and
+ * locations are static reference data, so they are never invalidated here.
+ */
+export function useInvalidateCameraList() {
   const qc = useQueryClient()
-  return () => qc.invalidateQueries({ queryKey: cameraKeys.all })
+  return () => qc.invalidateQueries({ queryKey: cameraKeys.list })
 }
 
 export function useCreateCamera() {
-  const invalidate = useInvalidateCameras()
+  const invalidate = useInvalidateCameraList()
   return useMutation({
     mutationFn: (payload: CameraPayload) => api.post('/cameras', payload),
     onSuccess: () => {
@@ -42,10 +50,10 @@ export function useCreateCamera() {
 }
 
 export function useUpdateCamera() {
-  const invalidate = useInvalidateCameras()
+  const invalidate = useInvalidateCameraList()
   return useMutation({
     mutationFn: ({ id, payload }: { id: number; payload: CameraPayload }) =>
-      api.patch(`/cameras/${id}`, payload),
+      api.put(`/cameras/${id}`, payload),
     onSuccess: () => {
       toast.success('Camera updated')
       invalidate()
@@ -54,18 +62,19 @@ export function useUpdateCamera() {
 }
 
 export function useDeleteCamera() {
-  const invalidate = useInvalidateCameras()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/cameras/${id}`),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       toast.success('Camera removed')
-      invalidate()
+      // Hard delete on the backend: drop it from the cached list instead of refetching.
+      qc.setQueryData<Paginated<Camera>>(cameraKeys.list, removeRowFromPaginated<Camera>(id))
     },
   })
 }
 
 export function useCaptureFromStream() {
-  const invalidate = useInvalidateCameras()
+  const invalidate = useInvalidateCameraList()
   return useMutation({
     mutationFn: async (cameraId: number) => {
       const { data } = await api.post<CaptureResult>(`/cameras/${cameraId}/capture`, {

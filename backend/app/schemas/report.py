@@ -56,6 +56,34 @@ class MonthlyReport(BaseModel):
     employees: list[MonthlyEmployeeEntry]
 
 
+class AttendanceRangeEntry(BaseModel):
+    work_date: date
+    employee_code: str
+    employee_name: str
+    department: str | None = None
+    status: str
+    attendance_type: str | None = None
+    check_in_at: datetime | None = None
+    check_out_at: datetime | None = None
+    check_in_method: str | None = None
+    check_out_method: str | None = None
+    worked_minutes: int = 0
+    overtime_minutes: int = 0
+
+
+class AttendanceRangeReport(BaseModel):
+    """Raw attendance records over a date range (the Attendance page view)."""
+
+    period_start: date
+    period_end: date
+    total_records: int
+    present: int
+    late_or_early: int
+    worked_minutes: int
+    overtime_minutes: int
+    entries: list[AttendanceRangeEntry]
+
+
 class AttendanceSummaryReport(BaseModel):
     period_start: date
     period_end: date
@@ -107,3 +135,12 @@ class UnknownPersonEvent(BaseModel):
 class UnknownPersonReport(BaseModel):
     total: int
     events: list[UnknownPersonEvent]
+
+
+class UnknownPersonsSummary(BaseModel):
+    """Range-wide aggregates backing the Unknown Faces stat cards + camera filter."""
+
+    total: int
+    alerts: int
+    spoof: int
+    cameras: list[UnknownPersonCamera]

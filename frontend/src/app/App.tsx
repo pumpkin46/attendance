@@ -31,7 +31,6 @@ const SecurityTenancyPage = lazy(() => import('@/features/security/SecurityTenan
 const SmartBuildingPage = lazy(() => import('@/features/building/SmartBuildingPage'))
 const SecurityMonitoringPage = lazy(() => import('@/features/security/SecurityMonitoringPage'))
 const RecognitionEnginePage = lazy(() => import('@/features/recognition/RecognitionEnginePage'))
-const NotificationsPage = lazy(() => import('@/features/notifications/NotificationsPage'))
 const PrivacyPage = lazy(() => import('@/features/privacy/PrivacyPage'))
 const ProfilePage = lazy(() => import('@/features/auth/ProfilePage'))
 const LoginPage = lazy(() => import('@/features/auth/LoginPage'))
@@ -89,7 +88,6 @@ export default function App() {
                 <Route path="smart-building" element={guard('/smart-building', <SmartBuildingPage />)} />
                 <Route path="security-monitoring" element={guard('/security-monitoring', <SecurityMonitoringPage />)} />
                 <Route path="recognition-engine" element={guard('/recognition-engine', <RecognitionEnginePage />)} />
-                <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="privacy" element={<PrivacyPage />} />
                 <Route path="profile" element={<ProfilePage />} />
                 <Route path="*" element={<NotFoundPage />} />

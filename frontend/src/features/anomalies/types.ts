@@ -17,8 +17,10 @@ export const TYPE_LABELS: Record<string, string> = {
 }
 
 export interface DetectionResult {
-  anomalies_found: number
+  success: boolean
+  detection_run_id: string
   records_analyzed: number
+  anomalies_detected: number
   processing_ms: number
 }
 

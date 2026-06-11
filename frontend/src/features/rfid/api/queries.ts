@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
+import { useInvalidateKey } from '@/shared/hooks/useInvalidateKey'
 import type { Paginated, RfidEvent, RfidReader } from '@/shared/types'
 import type { ReaderForm, RfidCard, RfidLocation, TapResult } from '@/features/rfid/types'
 
@@ -9,6 +10,7 @@ export const rfidKeys = {
   all: ['rfid'] as const,
   readers: ['rfid', 'readers'] as const,
   events: ['rfid', 'events'] as const,
+  cardsAll: ['rfid', 'cards'] as const,
   cards: (employeeId: string) => ['rfid', 'cards', employeeId] as const,
 }
 
@@ -21,7 +23,9 @@ export function useRfidEvents() {
 }
 
 export function useRfidLocations() {
-  return useApiQuery<RfidLocation[]>(['locations'], '/locations')
+  return useApiQuery<RfidLocation[]>(['locations'], '/locations', undefined, {
+    staleTime: STATIC_STALE_MS,
+  })
 }
 
 export function useEmployeeCards(employeeId: string) {
@@ -33,13 +37,10 @@ export function useEmployeeCards(employeeId: string) {
   )
 }
 
-export function useInvalidateRfid() {
-  const qc = useQueryClient()
-  return () => qc.invalidateQueries({ queryKey: rfidKeys.all })
-}
+// Invalidate only the query the mutation actually changed — never the whole rfid scope.
 
 export function useCreateReader() {
-  const invalidate = useInvalidateRfid()
+  const invalidate = useInvalidateKey(rfidKeys.readers)
   return useMutation({
     mutationFn: async (form: ReaderForm) => {
       const { data } = await api.post<RfidReader & { api_token_plain?: string }>('/rfid-readers', {
@@ -69,7 +70,9 @@ export function useRegenerateToken() {
 }
 
 export function useDeleteReader() {
-  const invalidate = useInvalidateRfid()
+  // Soft delete on the backend (is_active=false) and the list includes inactive
+  // readers, so we must refetch the readers list — but only that one.
+  const invalidate = useInvalidateKey(rfidKeys.readers)
   return useMutation({
     mutationFn: (readerId: number) => api.delete(`/rfid-readers/${readerId}`),
     onSuccess: () => {
@@ -80,19 +83,20 @@ export function useDeleteReader() {
 }
 
 export function useAssignCard() {
-  const invalidate = useInvalidateRfid()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ employeeId, uid, label }: { employeeId: string; uid: string; label: string }) =>
       api.post(`/employees/${employeeId}/rfid-cards`, { uid, label: label || null }),
-    onSuccess: () => {
+    onSuccess: (_data, { employeeId }) => {
       toast.success('Card assigned')
-      invalidate()
+      qc.invalidateQueries({ queryKey: rfidKeys.cards(employeeId) })
     },
   })
 }
 
 export function useRevokeCard() {
-  const invalidate = useInvalidateRfid()
+  // Only the card id is known here, so invalidate the cards scope (not readers/events).
+  const invalidate = useInvalidateKey(rfidKeys.cardsAll)
   return useMutation({
     mutationFn: (cardId: number) => api.delete(`/rfid-cards/${cardId}`),
     onSuccess: () => {
@@ -103,7 +107,7 @@ export function useRevokeCard() {
 }
 
 export function useSimulateTap() {
-  const invalidate = useInvalidateRfid()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ readerId, uid }: { readerId: string; uid: string }) => {
       const { data } = await api.post<TapResult>('/rfid/simulate', {
@@ -112,6 +116,10 @@ export function useSimulateTap() {
       })
       return data
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      // A tap adds an event and bumps the reader's taps-today counter.
+      qc.invalidateQueries({ queryKey: rfidKeys.events })
+      qc.invalidateQueries({ queryKey: rfidKeys.readers })
+    },
   })
 }

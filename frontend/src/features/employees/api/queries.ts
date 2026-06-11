@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { removeRowFromPaginated } from '@/shared/api/cache'
 import { api, getApiErrorMessage } from '@/shared/api/client'
-import { useApiQuery } from '@/shared/hooks/useApiQuery'
+import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { Employee, Paginated } from '@/shared/types'
 import {
   toEmployeePayload,
@@ -25,7 +26,9 @@ export function useEmployees(search: string) {
 }
 
 export function useEmployeeLocations() {
-  return useApiQuery<EmployeeLocation[]>(employeeKeys.locations, '/locations')
+  return useApiQuery<EmployeeLocation[]>(employeeKeys.locations, '/locations', undefined, {
+    staleTime: STATIC_STALE_MS,
+  })
 }
 
 /** Active employees for pickers (assignment, manual entry, card assignment). */
@@ -60,12 +63,17 @@ export function useSaveEmployee() {
 }
 
 export function useDeleteEmployee() {
-  const invalidate = useInvalidateEmployees()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/employees/${id}`),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       toast.success('Employee deleted')
-      invalidate()
+      // Hard delete on the backend: drop the row from every cached employee list
+      // (search variants + active picker) instead of refetching them.
+      qc.setQueriesData<Paginated<Employee>>(
+        { queryKey: employeeKeys.all },
+        removeRowFromPaginated<Employee>(id)
+      )
     },
     onError: (err) => toast.error(getApiErrorMessage(err)),
   })
