@@ -5,10 +5,12 @@ import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Input } from '@/shared/ui/Input'
 import { Combobox } from '@/shared/ui/Combobox'
+import { confirmDialog } from '@/shared/ui/dialogs'
 import { Checkbox } from '@/shared/ui/Checkbox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Loading } from '@/shared/ui/Loading'
+import { SidePanel } from '@/shared/ui/SidePanel'
 import { CameraSelect } from '@/features/cameras/components/CameraSelect'
 import { DataTable } from '@/shared/ui/DataTable'
 import { cn } from '@/shared/lib/cn'
@@ -184,6 +186,8 @@ export default function RecognitionEnginePage() {
   const invalidateEngine = useInvalidateEngine()
 
   const [streamForm, setStreamForm] = useState({ camera_id: '', stream_url: '', protocol: 'rtsp' })
+  const [streamsPanelOpen, setStreamsPanelOpen] = useState(false)
+  const [configPanelOpen, setConfigPanelOpen] = useState(false)
 
   const addStream = useAddStream()
   const controlStream = useControlStream()
@@ -221,6 +225,16 @@ export default function RecognitionEnginePage() {
       <PageHeader
         title="AI Recognition Engine"
         description="Real-time face detection, tracking, identification, and attendance generation."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => setStreamsPanelOpen(true)}>
+              Manage streams
+            </Button>
+            <Button variant="ghost" onClick={() => setConfigPanelOpen(true)}>
+              Runtime configuration
+            </Button>
+          </div>
+        }
       />
 
       {error && (
@@ -490,71 +504,85 @@ export default function RecognitionEnginePage() {
         </section>
       )}
 
-      {/* Stream management */}
-      <section>
-        <SectionHeading
-          title="Manage streams"
-          description="Register RTSP / USB sources for server-side recognition"
-          action={
-            <Button size="sm" variant="ghost" disabled={reloadIndex.isPending} onClick={() => reloadIndex.mutate()}>
+      {/* Stream management (slide-over) */}
+      <SidePanel
+        open={streamsPanelOpen}
+        title="Manage streams"
+        description="Register RTSP / USB sources for server-side recognition"
+        onClose={() => setStreamsPanelOpen(false)}
+        footer={
+          <>
+            <Button type="submit" form="add-stream-form" isLoading={addStream.isPending}>
+              Add stream
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={reloadIndex.isPending}
+              onClick={() => reloadIndex.mutate()}
+            >
               Reload index
             </Button>
-          }
-        />
-        <Card>
-          <form
-            className="mb-5 grid items-end gap-3 sm:grid-cols-4"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (streamForm.camera_id && streamForm.stream_url)
-                addStream.mutate(streamForm, {
-                  onSuccess: () => setStreamForm({ camera_id: '', stream_url: '', protocol: 'rtsp' }),
-                })
-            }}
-          >
-            <Label>
-              Camera
-              <CameraSelect
-                value={streamForm.camera_id}
-                onChange={(camera_id) => setStreamForm({ ...streamForm, camera_id })}
-                onCameraChange={(camera) =>
-                  camera?.stream_url &&
-                  setStreamForm((prev) => ({ ...prev, stream_url: camera.stream_url ?? prev.stream_url }))
-                }
-                required
-              />
-            </Label>
-            <Label className="sm:col-span-2">
-              {streamForm.protocol === 'usb' ? 'Device index' : 'Stream URL'}
-              <Input
-                value={streamForm.stream_url}
-                onChange={(e) => setStreamForm({ ...streamForm, stream_url: e.target.value })}
-                placeholder={
-                  streamForm.protocol === 'usb'
-                    ? '0  (first USB camera on the server, 1 = next…)'
-                    : 'rtsp://user:pass@host:554/stream'
-                }
-                required
-              />
-            </Label>
-            <Label>
-              Protocol
-              <Combobox
-                value={streamForm.protocol}
-                onChange={(value) => setStreamForm({ ...streamForm, protocol: value })}
-              >
-                <option value="rtsp">RTSP</option>
-                <option value="http">HTTP</option>
-                <option value="webrtc">WebRTC</option>
-                <option value="usb">USB / Webcam</option>
-              </Combobox>
-            </Label>
-            <div className="sm:col-span-4">
-              <Button type="submit" isLoading={addStream.isPending}>
-                Add stream
-              </Button>
-            </div>
-          </form>
+            <Button type="button" variant="ghost" className="ml-auto" onClick={() => setStreamsPanelOpen(false)}>
+              Close
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="add-stream-form"
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (streamForm.camera_id && streamForm.stream_url)
+              addStream.mutate(streamForm, {
+                onSuccess: () => setStreamForm({ camera_id: '', stream_url: '', protocol: 'rtsp' }),
+              })
+          }}
+        >
+          <Label>
+            Camera
+            <CameraSelect
+              value={streamForm.camera_id}
+              onChange={(camera_id) => setStreamForm({ ...streamForm, camera_id })}
+              onCameraChange={(camera) =>
+                camera?.stream_url &&
+                setStreamForm((prev) => ({ ...prev, stream_url: camera.stream_url ?? prev.stream_url }))
+              }
+              required
+            />
+          </Label>
+          <Label>
+            {streamForm.protocol === 'usb' ? 'Device index' : 'Stream URL'}
+            <Input
+              value={streamForm.stream_url}
+              onChange={(e) => setStreamForm({ ...streamForm, stream_url: e.target.value })}
+              placeholder={
+                streamForm.protocol === 'usb'
+                  ? '0  (first USB camera on the server, 1 = next…)'
+                  : 'rtsp://user:pass@host:554/stream'
+              }
+              required
+            />
+          </Label>
+          <Label>
+            Protocol
+            <Combobox
+              value={streamForm.protocol}
+              onChange={(value) => setStreamForm({ ...streamForm, protocol: value })}
+            >
+              <option value="rtsp">RTSP</option>
+              <option value="http">HTTP</option>
+              <option value="webrtc">WebRTC</option>
+              <option value="usb">USB / Webcam</option>
+            </Combobox>
+          </Label>
+        </form>
+
+        <div className="mt-6 border-t border-slate-800 pt-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Registered streams
+          </h3>
           <DataTable
             data={streams}
             rowKey={(s) => s.camera_id}
@@ -611,8 +639,13 @@ export default function RecognitionEnginePage() {
                       variant="ghost"
                       className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
                       disabled={removeStream.isPending}
-                      onClick={() => {
-                        if (window.confirm(`Remove stream #${s.camera_id}?`)) removeStream.mutate(s.camera_id)
+                      onClick={async () => {
+                        const ok = await confirmDialog({
+                          title: 'Remove stream',
+                          message: `Remove stream #${s.camera_id}? Recognition will stop for this camera.`,
+                          confirmLabel: 'Remove',
+                        })
+                        if (ok) removeStream.mutate(s.camera_id)
                       }}
                     >
                       Remove
@@ -622,19 +655,30 @@ export default function RecognitionEnginePage() {
               },
             ]}
           />
-        </Card>
-      </section>
+        </div>
+      </SidePanel>
 
-      {/* Runtime configuration */}
-      {engineConfig && <EngineConfigForm initial={engineConfig} onSaved={invalidateEngine} />}
+      {/* Runtime configuration (slide-over) */}
+      {engineConfig && (
+        <EngineConfigPanel
+          open={configPanelOpen}
+          onClose={() => setConfigPanelOpen(false)}
+          initial={engineConfig}
+          onSaved={invalidateEngine}
+        />
+      )}
     </div>
   )
 }
 
-function EngineConfigForm({
+function EngineConfigPanel({
+  open,
+  onClose,
   initial,
   onSaved,
 }: {
+  open: boolean
+  onClose: () => void
   initial: EngineConfigDict
   onSaved: () => void
 }) {
@@ -659,82 +703,94 @@ function EngineConfigForm({
         unknown_person_enabled: form.unknown_person_enabled,
         max_faces_per_frame: Number(form.max_faces_per_frame),
       },
-      { onSuccess: onSaved }
+      {
+        onSuccess: () => {
+          onSaved()
+          onClose()
+        },
+      }
     )
 
   return (
-    <section>
-      <SectionHeading title="Runtime configuration" description="Tune thresholds and safeguards without restarting" />
-      <Card>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            submit()
-          }}
-        >
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Label>
-              Recognition threshold
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                max={1}
-                value={form.recognition_threshold}
-                onChange={(e) => setForm({ ...form, recognition_threshold: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Liveness min score
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                max={1}
-                value={form.liveness_min_score}
-                onChange={(e) => setForm({ ...form, liveness_min_score: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Duplicate window (s)
-              <Input
-                type="number"
-                min={0}
-                value={form.duplicate_window_seconds}
-                onChange={(e) => setForm({ ...form, duplicate_window_seconds: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Max faces / frame
-              <Input
-                type="number"
-                min={1}
-                value={form.max_faces_per_frame}
-                onChange={(e) => setForm({ ...form, max_faces_per_frame: e.target.value })}
-              />
-            </Label>
-          </div>
-
-          <div className="mt-2 flex flex-wrap gap-6 border-t border-slate-800 pt-4">
-            <Checkbox
-              checked={form.liveness_enabled}
-              onChange={(e) => setForm({ ...form, liveness_enabled: e.target.checked })}
-              label="Liveness enabled"
+    <SidePanel
+      open={open}
+      title="Runtime configuration"
+      description="Tune thresholds and safeguards without restarting"
+      onClose={onClose}
+      footer={
+        <>
+          <Button type="submit" form="engine-config-form" isLoading={save.isPending}>
+            Save configuration
+          </Button>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+        </>
+      }
+    >
+      <form
+        id="engine-config-form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Label>
+            Recognition threshold
+            <Input
+              type="number"
+              step="0.01"
+              min={0}
+              max={1}
+              value={form.recognition_threshold}
+              onChange={(e) => setForm({ ...form, recognition_threshold: e.target.value })}
             />
-            <Checkbox
-              checked={form.unknown_person_enabled}
-              onChange={(e) => setForm({ ...form, unknown_person_enabled: e.target.checked })}
-              label="Unknown-person alerts"
+          </Label>
+          <Label>
+            Liveness min score
+            <Input
+              type="number"
+              step="0.01"
+              min={0}
+              max={1}
+              value={form.liveness_min_score}
+              onChange={(e) => setForm({ ...form, liveness_min_score: e.target.value })}
             />
-          </div>
+          </Label>
+          <Label>
+            Duplicate window (s)
+            <Input
+              type="number"
+              min={0}
+              value={form.duplicate_window_seconds}
+              onChange={(e) => setForm({ ...form, duplicate_window_seconds: e.target.value })}
+            />
+          </Label>
+          <Label>
+            Max faces / frame
+            <Input
+              type="number"
+              min={1}
+              value={form.max_faces_per_frame}
+              onChange={(e) => setForm({ ...form, max_faces_per_frame: e.target.value })}
+            />
+          </Label>
+        </div>
 
-          <div className="mt-5 flex justify-end border-t border-slate-800 pt-4">
-            <Button type="submit" isLoading={save.isPending}>
-              Save configuration
-            </Button>
-          </div>
-        </form>
-      </Card>
-    </section>
+        <div className="mt-4 flex flex-wrap gap-6 border-t border-slate-800 pt-4">
+          <Checkbox
+            checked={form.liveness_enabled}
+            onChange={(e) => setForm({ ...form, liveness_enabled: e.target.checked })}
+            label="Liveness enabled"
+          />
+          <Checkbox
+            checked={form.unknown_person_enabled}
+            onChange={(e) => setForm({ ...form, unknown_person_enabled: e.target.checked })}
+            label="Unknown-person alerts"
+          />
+        </div>
+      </form>
+    </SidePanel>
   )
 }

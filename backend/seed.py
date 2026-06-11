@@ -91,6 +91,8 @@ async def seed():
             ("security.monitor", "AI Security Monitoring"),
             ("visitors.manage", "Manage Visitors"),
             ("visitors.view", "View Visitors"),
+            ("users.manage", "Manage Users"),
+            ("roles.manage", "Manage Roles & Permissions"),
         ]
 
         perm_map = {}

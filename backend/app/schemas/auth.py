@@ -8,6 +8,28 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    name: str = Field(max_length=255)
+    email: str = Field(max_length=255)
+    password: str = Field(min_length=8, max_length=255)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Name cannot be empty")
+        return stripped
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "@" not in normalized or "." not in normalized.split("@")[-1]:
+            raise ValueError("Invalid email address")
+        return normalized
+
+
 class UpdateProfileRequest(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     email: str | None = Field(default=None, max_length=255)
@@ -85,3 +107,4 @@ class AuthConfigResponse(BaseModel):
     oauth_providers: list[str]
     saml_enabled: bool
     ldap_enabled: bool
+    registration_enabled: bool

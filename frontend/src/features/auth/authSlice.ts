@@ -1,5 +1,5 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { api } from '@/shared/api/client'
+import { api, getApiErrorMessage } from '@/shared/api/client'
 import { clearToken, setToken } from '@/shared/lib/session'
 import type { User } from '@/shared/types'
 import type { RootState } from '@/store'
@@ -60,6 +60,22 @@ export const loginUser = createAsyncThunk(
   }
 )
 
+/** Create an account; the API returns a token + user, so registration signs in. */
+export const registerUser = createAsyncThunk<
+  User,
+  { name: string; email: string; password: string },
+  { rejectValue: string }
+>('auth/register', async (details, { rejectWithValue }) => {
+  try {
+    const { data } = await api.post<{ token: string; user: User }>('/auth/register', details)
+    setToken(data.token)
+    return data.user
+  } catch (err) {
+    // Surface the server's message (duplicate email, registration disabled, …).
+    return rejectWithValue(getApiErrorMessage(err, 'Registration failed'))
+  }
+})
+
 /** Update the signed-in user's profile (name/email); returns the fresh user. */
 export const updateProfile = createAsyncThunk<User, { name?: string; email?: string }>(
   'auth/updateProfile',
@@ -114,6 +130,14 @@ const authSlice = createSlice({
         state.status = 'authenticated'
       })
       .addCase(loginUser.rejected, (state) => {
+        state.user = null
+        state.status = 'anonymous'
+      })
+      .addCase(registerUser.fulfilled, (state, action: PayloadAction<User>) => {
+        state.user = action.payload
+        state.status = 'authenticated'
+      })
+      .addCase(registerUser.rejected, (state) => {
         state.user = null
         state.status = 'anonymous'
       })

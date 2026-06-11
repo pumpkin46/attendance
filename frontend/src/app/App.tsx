@@ -35,6 +35,8 @@ const NotificationsPage = lazy(() => import('@/features/notifications/Notificati
 const PrivacyPage = lazy(() => import('@/features/privacy/PrivacyPage'))
 const ProfilePage = lazy(() => import('@/features/auth/ProfilePage'))
 const LoginPage = lazy(() => import('@/features/auth/LoginPage'))
+const RegisterPage = lazy(() => import('@/features/auth/RegisterPage'))
+const UserManagementPage = lazy(() => import('@/features/users/UserManagementPage'))
 
 function FullScreenFallback() {
   return <Loading fullScreen />
@@ -55,6 +57,7 @@ export default function App() {
           <Suspense fallback={<FullScreenFallback />}>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
               <Route
                 path="/"
                 element={
@@ -82,6 +85,7 @@ export default function App() {
                 <Route path="unknown-faces" element={guard('/unknown-faces', <UnknownFacesPage />)} />
                 <Route path="audit-logs" element={guard('/audit-logs', <AuditLogsPage />)} />
                 <Route path="security" element={guard('/security', <SecurityTenancyPage />)} />
+                <Route path="user-management" element={guard('/user-management', <UserManagementPage />)} />
                 <Route path="smart-building" element={guard('/smart-building', <SmartBuildingPage />)} />
                 <Route path="security-monitoring" element={guard('/security-monitoring', <SecurityMonitoringPage />)} />
                 <Route path="recognition-engine" element={guard('/recognition-engine', <RecognitionEnginePage />)} />

@@ -3,6 +3,7 @@ import { cn } from '@/shared/lib/cn'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
+import { confirmDialog } from '@/shared/ui/dialogs'
 import { Input } from '@/shared/ui/Input'
 import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
@@ -259,8 +260,13 @@ export default function RfidPage() {
                     variant="ghost"
                     className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
                     disabled={deleteReader.isPending}
-                    onClick={() => {
-                      if (window.confirm(`Deactivate reader "${r.name}"?`)) deleteReader.mutate(r.id)
+                    onClick={async () => {
+                      const ok = await confirmDialog({
+                        title: 'Deactivate reader',
+                        message: `Deactivate reader "${r.name}"? It will stop accepting taps.`,
+                        confirmLabel: 'Deactivate',
+                      })
+                      if (ok) deleteReader.mutate(r.id)
                     }}
                   >
                     Delete

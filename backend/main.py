@@ -11,6 +11,7 @@ from app.realtime.hub import get_hub
 
 from app.api.routes import router as ai_router
 from app.api.auth import router as auth_router
+from app.api.users import router as users_router
 from app.api.organizations import router as org_router
 from app.api.employees import router as employees_router
 from app.api.enrollment import router as enrollment_router
@@ -87,6 +88,7 @@ app.include_router(ai_router)
 
 # Business API routes
 app.include_router(auth_router)
+app.include_router(users_router)
 app.include_router(org_router)
 app.include_router(employees_router)
 app.include_router(enrollment_router)

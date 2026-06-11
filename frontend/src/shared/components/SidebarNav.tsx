@@ -160,7 +160,10 @@ const navGroups: NavGroup[] = [
         </svg>
       </Icon>
     ),
-    items: [{ to: '/security', label: 'Security & Tenancy' }],
+    items: [
+      { to: '/user-management', label: 'Users & Permissions' },
+      { to: '/security', label: 'Security & Tenancy' },
+    ],
   },
 ]
 

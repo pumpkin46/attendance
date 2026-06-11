@@ -5,6 +5,7 @@ import {
   fetchCurrentUser,
   loginUser,
   logoutUser,
+  registerUser,
   selectAuthLoading,
   selectUser,
   updateProfile,
@@ -46,6 +47,13 @@ export function useAuth() {
     [dispatch]
   )
 
+  const register = useCallback(
+    async (name: string, email: string, password: string) => {
+      await dispatch(registerUser({ name, email, password })).unwrap()
+    },
+    [dispatch]
+  )
+
   const logout = useCallback(async () => {
     await dispatch(logoutUser())
   }, [dispatch])
@@ -82,12 +90,13 @@ export function useAuth() {
       user,
       loading,
       login,
+      register,
       logout,
       hasPermission,
       isSuperAdmin,
       saveProfile,
       changeUserPassword,
     }),
-    [user, loading, login, logout, hasPermission, isSuperAdmin, saveProfile, changeUserPassword]
+    [user, loading, login, register, logout, hasPermission, isSuperAdmin, saveProfile, changeUserPassword]
   )
 }

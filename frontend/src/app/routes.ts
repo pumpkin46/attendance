@@ -36,6 +36,7 @@ const routeLoaders: Record<string, () => Promise<unknown>> = {
   '/recognition-engine': () => import('@/features/recognition/RecognitionEnginePage'),
   '/notifications': () => import('@/features/notifications/NotificationsPage'),
   '/privacy': () => import('@/features/privacy/PrivacyPage'),
+  '/user-management': () => import('@/features/users/UserManagementPage'),
 }
 
 const prefetched = new Set<string>()

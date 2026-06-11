@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
+import { confirmDialog } from '@/shared/ui/dialogs'
 import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
@@ -119,17 +120,16 @@ export default function PrivacyPage() {
     URL.revokeObjectURL(url)
   }
 
-  const confirmErase = () => {
+  const confirmErase = async () => {
     if (!eraseId) return
     const emp = employees.find((e) => String(e.id) === eraseId)
     const name = emp ? `${emp.first_name} ${emp.last_name}` : `#${eraseId}`
-    if (
-      window.confirm(
-        `Permanently erase ${name}'s biometric data, attendance, and PII? This anonymizes the record and cannot be undone.`
-      )
-    ) {
-      erase.mutate(Number(eraseId), { onSuccess: () => setEraseId('') })
-    }
+    const ok = await confirmDialog({
+      title: 'Erase personal data',
+      message: `Permanently erase ${name}'s biometric data, attendance, and PII? This anonymizes the record and cannot be undone.`,
+      confirmLabel: 'Erase permanently',
+    })
+    if (ok) erase.mutate(Number(eraseId), { onSuccess: () => setEraseId('') })
   }
 
   return (

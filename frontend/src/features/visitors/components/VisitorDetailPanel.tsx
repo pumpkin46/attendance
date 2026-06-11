@@ -7,6 +7,7 @@ import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { Badge } from '@/shared/ui/Badge'
 import { SidePanel } from '@/shared/ui/SidePanel'
+import { promptDialog } from '@/shared/ui/dialogs'
 import { AuthImage } from '@/shared/components/AuthImage'
 import { openAuthMedia } from '@/shared/lib/authMedia'
 
@@ -136,8 +137,17 @@ export function VisitorDetailPanel({
   }
 
   const reject = async () => {
-    const notes = prompt('Rejection reason (optional)') ?? undefined
-    await api.post(`/visitors/${visitorId}/reject`, { notes })
+    const notes = await promptDialog({
+      title: 'Reject visitor',
+      message: 'The visit request will be rejected and the visitor will not be able to check in.',
+      label: 'Reason (optional)',
+      placeholder: 'e.g. host unavailable, missing documents…',
+      multiline: true,
+      confirmLabel: 'Reject visitor',
+      tone: 'danger',
+    })
+    if (notes === null) return
+    await api.post(`/visitors/${visitorId}/reject`, { notes: notes.trim() || undefined })
     load()
     onUpdated()
   }

@@ -61,6 +61,26 @@ def require_permission(permission_name: str):
     return Annotated[User, Depends(checker)]
 
 
+def require_any_permission(*permission_names: str):
+    """Like require_permission, but passes when the user holds ANY of the names.
+
+    Used for read endpoints shared by multiple admin areas (e.g. the role list
+    is needed by both the user manager and the role editor).
+    """
+
+    async def checker(user: Annotated[User, Depends(get_current_user)]) -> User:
+        if user.has_role(settings.super_admin_role):
+            return user
+        if not any(user.has_permission(name) for name in permission_names):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission required: {' or '.join(permission_names)}",
+            )
+        return user
+
+    return Annotated[User, Depends(checker)]
+
+
 async def get_tenant_org_id(
     request: Request,
     user: CurrentUser,

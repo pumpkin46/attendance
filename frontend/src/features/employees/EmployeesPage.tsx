@@ -10,6 +10,7 @@ import { PageHeader } from '@/shared/ui/PageHeader'
 import { SidePanel } from '@/shared/ui/SidePanel'
 import { SearchBox } from '@/shared/ui/SearchBox'
 import { DataTable } from '@/shared/ui/DataTable'
+import { confirmDialog } from '@/shared/ui/dialogs'
 import { cn } from '@/shared/lib/cn'
 import { initialsOf } from '@/shared/lib/format'
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue'
@@ -116,10 +117,13 @@ export default function EmployeesPage() {
     setFormOpen(true)
   }
 
-  const remove = (e: Employee) => {
-    if (window.confirm(`Delete ${e.first_name} ${e.last_name} (${e.employee_code})? This cannot be undone.`)) {
-      deleteMutation.mutate(e.id)
-    }
+  const remove = async (e: Employee) => {
+    const ok = await confirmDialog({
+      title: 'Delete employee',
+      message: `Delete ${e.first_name} ${e.last_name} (${e.employee_code})? This cannot be undone.`,
+      confirmLabel: 'Delete',
+    })
+    if (ok) deleteMutation.mutate(e.id)
   }
 
   const submit = (e: React.FormEvent) => {

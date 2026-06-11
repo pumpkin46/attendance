@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_login_max: int = 10
     rate_limit_login_window_seconds: int = 60
+    rate_limit_register_max: int = 5
+    rate_limit_register_window_seconds: int = 300
     rate_limit_recognition_max: int = 60
     rate_limit_recognition_window_seconds: int = 60
 
@@ -191,6 +193,13 @@ class Settings(BaseSettings):
     security_after_hours_end: str = "06:00"
     security_tailgating_window: int = 8
     security_alert_cooldown: int = 120
+
+    # ── Self-registration ─────────────────────────────────────────────────
+    # When enabled, anyone can create an account via POST /auth/register; new
+    # accounts get registration_default_role (no permissions by default) until
+    # an administrator assigns more via the user management UI.
+    registration_enabled: bool = True
+    registration_default_role: str = "employee"
 
     # ── OAuth / SSO ───────────────────────────────────────────────────────
     oauth_enabled: bool = False

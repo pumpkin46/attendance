@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { Button } from '@/shared/ui/Button'
 import { AppLogo } from '@/shared/components/AppLogo'
@@ -215,6 +215,16 @@ export default function LoginPage() {
               Sign in
             </Button>
           </form>
+
+          <p className="mt-6 text-center text-sm text-slate-400">
+            Don&apos;t have an account?{' '}
+            <Link
+              to="/register"
+              className="font-medium text-blue-400 transition-colors hover:text-blue-300"
+            >
+              Create one
+            </Link>
+          </p>
 
           <p className="mt-8 text-center text-xs text-slate-600">
             Protected by enterprise-grade encryption.

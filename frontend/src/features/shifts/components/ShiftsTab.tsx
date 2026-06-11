@@ -3,6 +3,7 @@ import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Combobox } from '@/shared/ui/Combobox'
+import { confirmDialog } from '@/shared/ui/dialogs'
 import { DatePicker } from '@/shared/ui/DatePicker'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
@@ -289,8 +290,13 @@ export function ShiftsTab() {
                   variant="danger"
                   size="sm"
                   disabled={deleteShift.isPending}
-                  onClick={() => {
-                    if (window.confirm(`Remove shift "${s.name}"?`)) deleteShift.mutate(s.id)
+                  onClick={async () => {
+                    const ok = await confirmDialog({
+                      title: 'Remove shift',
+                      message: `Remove shift "${s.name}"? Employees assigned to it will fall back to the default schedule.`,
+                      confirmLabel: 'Remove',
+                    })
+                    if (ok) deleteShift.mutate(s.id)
                   }}
                 >
                   Delete

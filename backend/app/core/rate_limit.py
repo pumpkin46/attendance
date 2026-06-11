@@ -103,6 +103,14 @@ def login_rate_limit():
     )
 
 
+def register_rate_limit():
+    return rate_limit(
+        "register",
+        settings.rate_limit_register_max,
+        settings.rate_limit_register_window_seconds,
+    )
+
+
 def recognition_rate_limit():
     return rate_limit(
         "recognition",

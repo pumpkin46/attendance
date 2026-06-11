@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
+import { confirmDialog } from '@/shared/ui/dialogs'
 import { Input } from '@/shared/ui/Input'
 import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
@@ -268,8 +269,13 @@ export default function CamerasPage() {
     }
   }
 
-  const removeCamera = (c: Camera) => {
-    if (window.confirm(`Remove camera "${c.name}"?`)) deleteCamera.mutate(c.id)
+  const removeCamera = async (c: Camera) => {
+    const ok = await confirmDialog({
+      title: 'Remove camera',
+      message: `Remove camera "${c.name}"? Its stream and recognition events will stop.`,
+      confirmLabel: 'Remove',
+    })
+    if (ok) deleteCamera.mutate(c.id)
   }
 
   return (

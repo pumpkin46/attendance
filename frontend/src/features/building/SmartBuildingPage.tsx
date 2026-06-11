@@ -3,6 +3,7 @@ import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Input } from '@/shared/ui/Input'
 import { Combobox } from '@/shared/ui/Combobox'
+import { confirmDialog, promptDialog } from '@/shared/ui/dialogs'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Badge } from '@/shared/ui/Badge'
@@ -58,10 +59,26 @@ export default function SmartBuildingPage() {
     )
   }
 
-  const publishOccupancy = () => {
-    const locationId = window.prompt('Location ID for occupancy update:', '1')
-    if (!locationId) return
-    const count = window.prompt('Occupant count:', '0')
+  const publishOccupancy = async () => {
+    const locationId = await promptDialog({
+      title: 'Publish occupancy',
+      message: 'Step 1 of 2 — choose the location to update.',
+      label: 'Location ID',
+      type: 'number',
+      initialValue: '1',
+      required: true,
+      confirmLabel: 'Next',
+    })
+    if (locationId === null) return
+    const count = await promptDialog({
+      title: 'Publish occupancy',
+      message: `Step 2 of 2 — current occupant count for location #${locationId}.`,
+      label: 'Occupant count',
+      type: 'number',
+      initialValue: '0',
+      required: true,
+      confirmLabel: 'Publish',
+    })
     if (count === null) return
     publishOccupancyMutation.mutate({
       location_id: Number(locationId),
@@ -163,8 +180,13 @@ export default function SmartBuildingPage() {
                   <Button
                     variant="danger"
                     disabled={deleteConnector.isPending}
-                    onClick={() => {
-                      if (window.confirm(`Delete connector "${c.name}"?`)) deleteConnector.mutate(c.id)
+                    onClick={async () => {
+                      const ok = await confirmDialog({
+                        title: 'Delete connector',
+                        message: `Delete connector "${c.name}"? Its building events will stop syncing.`,
+                        confirmLabel: 'Delete',
+                      })
+                      if (ok) deleteConnector.mutate(c.id)
                     }}
                   >
                     Delete

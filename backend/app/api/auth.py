@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession
 from app.core.errors import AuthError, ConflictError, PermissionDeniedError, ValidationError
-from app.core.rate_limit import login_rate_limit
+from app.core.rate_limit import login_rate_limit, register_rate_limit
 from app.core.security import (
     create_access_token,
     hash_password,
@@ -21,6 +21,7 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
+    RegisterRequest,
     UpdateProfileRequest,
     UserOut,
 )
@@ -58,6 +59,61 @@ async def login(body: LoginRequest, request: Request, db: DbSession):
         db,
         user_id=user.id,
         action="login",
+        entity_type="user",
+        entity_id=user.id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("User-Agent"),
+    )
+
+    return LoginResponse(
+        token=token,
+        user=UserOut.model_validate(user, from_attributes=True),
+    )
+
+
+@router.post(
+    "/register",
+    response_model=LoginResponse,
+    status_code=201,
+    dependencies=[register_rate_limit()],
+)
+async def register(body: RegisterRequest, request: Request, db: DbSession):
+    if not settings.registration_enabled:
+        raise PermissionDeniedError(
+            "Self-registration is disabled. Ask an administrator to create your account."
+        )
+
+    existing = await db.execute(select(User.id).where(User.email == body.email))
+    if existing.scalar_one_or_none() is not None:
+        raise ConflictError("An account with that email already exists")
+
+    role_stmt = (
+        select(Role)
+        .options(selectinload(Role.permissions))
+        .where(Role.name == settings.registration_default_role)
+    )
+    default_role = (await db.execute(role_stmt)).scalar_one_or_none()
+
+    user = User(
+        name=body.name,
+        email=body.email,
+        password=hash_password(body.password),
+        auth_provider="local",
+        is_active=True,
+    )
+    # New accounts start with the default role (no elevated permissions);
+    # admins grant access later through user management.
+    user.roles = [default_role] if default_role else []
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+
+    token = create_access_token({"sub": str(user.id)})
+
+    await log_action(
+        db,
+        user_id=user.id,
+        action="register",
         entity_type="user",
         entity_id=user.id,
         ip_address=request.client.host if request.client else None,
@@ -158,4 +214,5 @@ async def auth_config():
         oauth_providers=providers,
         saml_enabled=settings.saml_enabled,
         ldap_enabled=settings.ldap_enabled,
+        registration_enabled=settings.registration_enabled,
     )

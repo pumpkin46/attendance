@@ -4,6 +4,7 @@ import { Provider } from 'react-redux'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import App from '@/app/App'
+import { DialogHost } from '@/shared/ui/DialogHost'
 import { store } from '@/store'
 import { queryClient } from '@/shared/lib/queryClient'
 import '@/index.css'
@@ -14,6 +15,7 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <App />
         <Toaster position="top-right" theme="dark" richColors closeButton />
+        <DialogHost />
       </QueryClientProvider>
     </Provider>
   </StrictMode>

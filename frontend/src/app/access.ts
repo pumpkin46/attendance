@@ -22,4 +22,5 @@ export const ROUTE_PERMISSIONS: Record<string, string> = {
   '/reports': 'reports.view',
   '/audit-logs': 'audit.view',
   '/security': 'security.view',
+  '/user-management': 'users.manage',
 }

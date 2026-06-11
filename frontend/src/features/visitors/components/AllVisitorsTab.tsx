@@ -3,6 +3,7 @@ import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Combobox } from '@/shared/ui/Combobox'
+import { confirmDialog } from '@/shared/ui/dialogs'
 import { SearchBox } from '@/shared/ui/SearchBox'
 import { DataTable } from '@/shared/ui/DataTable'
 import { FaceCaptureModal } from '@/shared/components/FaceCaptureModal'
@@ -31,8 +32,14 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
 
   const runSearch = () => setQuery({ search, status: statusFilter })
 
-  const onCancel = (id: number) => {
-    if (confirm('Cancel this visit?')) cancel.mutate(id)
+  const onCancel = async (id: number) => {
+    const ok = await confirmDialog({
+      title: 'Cancel visit',
+      message: 'Cancel this visit? The visitor will no longer be able to check in.',
+      confirmLabel: 'Cancel visit',
+      cancelLabel: 'Keep visit',
+    })
+    if (ok) cancel.mutate(id)
   }
 
   return (
