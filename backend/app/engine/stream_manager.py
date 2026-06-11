@@ -122,6 +122,7 @@ class CameraStream:
     # opening the camera a second time (which would conflict with this loop —
     # especially for USB devices that allow only one reader).
     _last_frame: Any = field(default=None, repr=False)
+    _last_processed: float = 0.0
 
 
 FrameCallback = Callable[[int, np.ndarray, float], Coroutine[Any, Any, None]]
@@ -146,6 +147,9 @@ class StreamManager:
 
     def register_callback(self, callback: FrameCallback) -> None:
         self._frame_callbacks.append(callback)
+
+    def get_stream(self, camera_id: int) -> CameraStream | None:
+        return self._streams.get(camera_id)
 
     def add_stream(
         self,
@@ -364,12 +368,17 @@ class StreamManager:
 
                 self._validate_stream(stream)
 
-                timestamp = time.time()
-                for callback in self._frame_callbacks:
-                    try:
-                        await callback(camera_id, frame, timestamp)
-                    except Exception as e:
-                        logger.error("Frame callback error for camera %d: %s", camera_id, e)
+                # Analyze at process_fps, not stream fps: frames keep flowing
+                # for preview/health, but recognition only sees a bounded rate.
+                now = time.perf_counter()
+                if now - stream._last_processed >= 1.0 / max(cfg.process_fps, 1):
+                    stream._last_processed = now
+                    timestamp = time.time()
+                    for callback in self._frame_callbacks:
+                        try:
+                            await callback(camera_id, frame, timestamp)
+                        except Exception as e:
+                            logger.error("Frame callback error for camera %d: %s", camera_id, e)
 
                 frame_interval = 1.0 / max(stream.target_fps, 1)
                 await asyncio.sleep(max(0, frame_interval - (time.perf_counter() - t0)))

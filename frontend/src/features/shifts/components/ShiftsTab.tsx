@@ -47,25 +47,23 @@ export function ShiftsTab() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<ShiftForm>(emptyForm)
   const [assignFor, setAssignFor] = useState<Shift | null>(null)
+  const [assignOpen, setAssignOpen] = useState(false)
   const [assign, setAssign] = useState({ employee_id: '', effective_from: '', effective_to: '' })
 
   const shiftTypes = config?.shift_types ?? SHIFT_TYPE_FALLBACK
 
-  const close = () => {
-    setFormOpen(false)
-    setEditingId(null)
-    setForm(emptyForm)
-  }
+  // State resets happen in openCreate/openEdit so the exit animation doesn't flash.
+  const close = () => setFormOpen(false)
 
   const openCreate = () => {
-    setAssignFor(null)
+    setAssignOpen(false)
     setEditingId(null)
     setForm(emptyForm)
     setFormOpen(true)
   }
 
   const openEdit = (s: Shift) => {
-    setAssignFor(null)
+    setAssignOpen(false)
     setEditingId(s.id)
     setForm({
       name: s.name,
@@ -83,6 +81,8 @@ export function ShiftsTab() {
   const openAssign = (s: Shift) => {
     setFormOpen(false)
     setAssignFor(s)
+    setAssign({ employee_id: '', effective_from: '', effective_to: '' })
+    setAssignOpen(true)
   }
 
   const submit = (e: React.FormEvent) => {
@@ -113,10 +113,7 @@ export function ShiftsTab() {
         },
       },
       {
-        onSuccess: () => {
-          setAssignFor(null)
-          setAssign({ employee_id: '', effective_from: '', effective_to: '' })
-        },
+        onSuccess: () => setAssignOpen(false),
       }
     )
   }
@@ -136,124 +133,122 @@ export function ShiftsTab() {
         <Button onClick={openCreate}>+ New shift</Button>
       </div>
 
-      {formOpen && (
-        <SidePanel
-          title={editingId ? 'Edit shift' : 'New shift'}
-          description="Working hours, grace, and policy"
-          onClose={close}
-          footer={
-            <>
-              <Button type="submit" form="shift-form" isLoading={saveShift.isPending}>
-                {editingId ? 'Save changes' : 'Create shift'}
-              </Button>
-              <Button type="button" variant="ghost" onClick={close}>
-                Cancel
-              </Button>
-            </>
-          }
-        >
-          <form id="shift-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
-            <Label className="sm:col-span-2">
-              Name *
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-            </Label>
+      <SidePanel
+        open={formOpen}
+        title={editingId ? 'Edit shift' : 'New shift'}
+        description="Working hours, grace, and policy"
+        onClose={close}
+        footer={
+          <>
+            <Button type="submit" form="shift-form" isLoading={saveShift.isPending}>
+              {editingId ? 'Save changes' : 'Create shift'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={close}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <form id="shift-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
+          <Label className="sm:col-span-2">
+            Name *
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          </Label>
+          <Label>
+            Type
+            <Combobox value={form.type} onChange={(value) => setForm({ ...form, type: value })}>
+              {Object.entries(shiftTypes).map(([k, meta]) => (
+                <option key={k} value={k}>
+                  {meta.label}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          {form.type === 'rotational' && (
             <Label>
-              Type
-              <Combobox value={form.type} onChange={(value) => setForm({ ...form, type: value })}>
-                {Object.entries(shiftTypes).map(([k, meta]) => (
-                  <option key={k} value={k}>
-                    {meta.label}
-                  </option>
-                ))}
-              </Combobox>
-            </Label>
-            {form.type === 'rotational' && (
-              <Label>
-                Rotation slot
-                <Combobox
-                  value={form.rotation_slot}
-                  onChange={(value) => setForm({ ...form, rotation_slot: value })}
-                >
-                  <option value="">—</option>
-                  <option value="morning">Morning</option>
-                  <option value="evening">Evening</option>
-                  <option value="night">Night</option>
-                </Combobox>
-              </Label>
-            )}
-            <Label>
-              Start time
-              <Input type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} />
-            </Label>
-            <Label>
-              End time
-              <Input type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} />
-            </Label>
-            <Label>
-              Grace (min)
-              <Input type="number" min={0} value={form.grace_minutes} onChange={(e) => setForm({ ...form, grace_minutes: e.target.value })} />
-            </Label>
-            <Label>
-              Break (min)
-              <Input type="number" min={0} value={form.break_minutes} onChange={(e) => setForm({ ...form, break_minutes: e.target.value })} />
-            </Label>
-            <Label className="sm:col-span-2">
-              Attendance policy
+              Rotation slot
               <Combobox
-                value={form.attendance_policy_id}
-                onChange={(value) => setForm({ ...form, attendance_policy_id: value })}
+                value={form.rotation_slot}
+                onChange={(value) => setForm({ ...form, rotation_slot: value })}
               >
-                <option value="">Default</option>
-                {policies.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
+                <option value="">—</option>
+                <option value="morning">Morning</option>
+                <option value="evening">Evening</option>
+                <option value="night">Night</option>
               </Combobox>
             </Label>
-          </form>
-        </SidePanel>
-      )}
+          )}
+          <Label>
+            Start time
+            <Input type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} />
+          </Label>
+          <Label>
+            End time
+            <Input type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} />
+          </Label>
+          <Label>
+            Grace (min)
+            <Input type="number" min={0} value={form.grace_minutes} onChange={(e) => setForm({ ...form, grace_minutes: e.target.value })} />
+          </Label>
+          <Label>
+            Break (min)
+            <Input type="number" min={0} value={form.break_minutes} onChange={(e) => setForm({ ...form, break_minutes: e.target.value })} />
+          </Label>
+          <Label className="sm:col-span-2">
+            Attendance policy
+            <Combobox
+              value={form.attendance_policy_id}
+              onChange={(value) => setForm({ ...form, attendance_policy_id: value })}
+            >
+              <option value="">Default</option>
+              {policies.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+        </form>
+      </SidePanel>
 
-      {assignFor && (
-        <SidePanel
-          title="Assign shift"
-          description={`Assign “${assignFor.name}” to an employee`}
-          onClose={() => setAssignFor(null)}
-          footer={
-            <>
-              <Button type="submit" form="assign-form" isLoading={assignShift.isPending}>
-                Assign
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setAssignFor(null)}>
-                Cancel
-              </Button>
-            </>
-          }
-        >
-          <form id="assign-form" className="grid gap-4" onSubmit={submitAssign}>
-            <Label>
-              Employee
-              <Combobox value={assign.employee_id} onChange={(value) => setAssign({ ...assign, employee_id: value })} required>
-                <option value="">Select employee</option>
-                {employees.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.employee_code} — {e.first_name} {e.last_name}
-                  </option>
-                ))}
-              </Combobox>
-            </Label>
-            <Label>
-              Effective from
-              <DatePicker value={assign.effective_from} onChange={(value) => setAssign({ ...assign, effective_from: value })} required />
-            </Label>
-            <Label>
-              Effective to
-              <DatePicker value={assign.effective_to} onChange={(value) => setAssign({ ...assign, effective_to: value })} />
-            </Label>
-          </form>
-        </SidePanel>
-      )}
+      <SidePanel
+        open={assignOpen}
+        title="Assign shift"
+        description={assignFor ? `Assign “${assignFor.name}” to an employee` : undefined}
+        onClose={() => setAssignOpen(false)}
+        footer={
+          <>
+            <Button type="submit" form="assign-form" isLoading={assignShift.isPending}>
+              Assign
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setAssignOpen(false)}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <form id="assign-form" className="grid gap-4" onSubmit={submitAssign}>
+          <Label>
+            Employee
+            <Combobox value={assign.employee_id} onChange={(value) => setAssign({ ...assign, employee_id: value })} required>
+              <option value="">Select employee</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.employee_code} — {e.first_name} {e.last_name}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          <Label>
+            Effective from
+            <DatePicker value={assign.effective_from} onChange={(value) => setAssign({ ...assign, effective_from: value })} required />
+          </Label>
+          <Label>
+            Effective to
+            <DatePicker value={assign.effective_to} onChange={(value) => setAssign({ ...assign, effective_to: value })} />
+          </Label>
+        </form>
+      </SidePanel>
 
       <DataTable
         data={shifts}

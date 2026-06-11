@@ -15,7 +15,6 @@ from app.core.errors import NotFoundError
 from app.engine.config import engine_config
 from app.engine.recognition_engine import get_recognition_engine
 from app.engine.stream_manager import (
-    CameraType,
     StreamMode,
     StreamProtocol,
     get_stream_manager,
@@ -185,36 +184,61 @@ async def engine_detect(body: EngineDetectRequest, user: CurrentUser):
 async def add_stream(
     body: StreamAddRequest,
     user: require_permission("cameras.manage"),
+    db: DbSession,
+    org_id: TenantOrgId,
 ):
-    """Register a new camera stream for real-time processing."""
-    manager = get_stream_manager()
-    try:
-        protocol = StreamProtocol(body.protocol)
-    except ValueError:
-        protocol = StreamProtocol.RTSP
-    try:
-        camera_type = CameraType(body.camera_type)
-    except ValueError:
-        camera_type = CameraType.IP_CAMERA
+    """Register a camera stream and persist its settings on the camera row.
+
+    The camera must already exist; stream settings are written back to it so
+    the registration survives backend restarts (the engine re-registers all
+    active cameras with a stream URL on start).
+    """
+    from app.core.cache import invalidate_prefix
+    from app.models.camera import CameraDirection
+    from app.services import camera_service, stream_sync
+
+    camera = await camera_service.get_camera(db, body.camera_id, org_id)
+
+    provided = body.model_fields_set
+    camera.stream_url = body.stream_url
+    if "target_fps" in provided:
+        camera.target_fps = body.target_fps
+    if "resolution_width" in provided:
+        camera.resolution_width = body.resolution_width
+    if "resolution_height" in provided:
+        camera.resolution_height = body.resolution_height
+    if "zone" in provided and body.zone:
+        camera.zone = body.zone
+    if "direction" in provided:
+        try:
+            camera.direction = CameraDirection(body.direction)
+        except ValueError:
+            pass
+    await db.flush()
+    await invalidate_prefix("cache:cameras:")
+
+    protocol: StreamProtocol | None = None
+    if "protocol" in provided:
+        try:
+            protocol = StreamProtocol(body.protocol)
+        except ValueError:
+            protocol = None
     try:
         mode = StreamMode(body.mode)
     except ValueError:
         mode = StreamMode.LIVE_STREAM
 
-    stream = await run_in_threadpool(
-        manager.add_stream,
-        camera_id=body.camera_id,
-        stream_url=body.stream_url,
+    manager = get_stream_manager()
+    if manager.get_stream(body.camera_id) is not None:
+        manager.remove_stream(body.camera_id)
+    stream_sync.register_camera(
+        manager,
+        camera,
+        camera.location.organization_id if camera.location else org_id,
         protocol=protocol,
-        camera_type=camera_type,
         mode=mode,
-        organization_id=body.organization_id,
-        location_id=body.location_id,
-        zone=body.zone,
-        direction=body.direction,
-        target_fps=body.target_fps,
-        resolution=(body.resolution_width, body.resolution_height),
     )
+    stream = manager.get_stream(body.camera_id)
     return {"success": True, "camera_id": body.camera_id, "status": stream.status.value}
 
 
@@ -277,12 +301,19 @@ async def get_stream_snapshot(camera_id: int, user: CurrentUser):
 
 
 @router.post("/start", response_model=EngineActionResult)
-async def start_engine(user: require_permission("recognition.manage")):
-    """Start the recognition engine."""
+async def start_engine(user: require_permission("recognition.manage"), db: DbSession):
+    """Start the recognition engine.
+
+    Re-registers streams for all active cameras with a stream URL first, so
+    registrations survive backend restarts.
+    """
+    from app.services.stream_sync import sync_streams_from_db
+
+    synced = await sync_streams_from_db(db)
     engine = get_recognition_engine()
     await engine.start()
     await emit(None, "engine.changed", {"status": "running"})
-    return {"success": True, "status": "running"}
+    return {"success": True, "status": "running", "streams_synced": synced}
 
 
 @router.post("/stop", response_model=EngineActionResult)

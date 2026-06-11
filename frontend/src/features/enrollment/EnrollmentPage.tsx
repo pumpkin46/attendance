@@ -16,6 +16,7 @@ import {
   WebcamIcon,
 } from '@/features/enrollment/components/EnrollmentUI'
 import { useEnrollFace, useEnrollableEmployees, useEnrollmentConfig, useValidateImage } from '@/features/enrollment/api/queries'
+import { useLivePoseGuide } from '@/features/enrollment/hooks/useLivePoseGuide'
 import { reasonLabel, type PoseCapture } from '@/features/enrollment/types'
 
 export default function EnrollmentPage() {
@@ -26,7 +27,7 @@ export default function EnrollmentPage() {
   const [employeeId, setEmployeeId] = useState('')
   const [poses, setPoses] = useState<Record<string, PoseCapture>>({})
   const [stepIndex, setStepIndex] = useState(0)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [source, setSource] = useState<'camera' | 'upload'>('camera')
 
   const validateImage = useValidateImage()
@@ -112,7 +113,6 @@ export default function EnrollmentPage() {
   const completedCount = requiredPoses.filter((p) => poses[p]?.accepted).length
   const allComplete = requiredPoses.length > 0 && completedCount === requiredPoses.length
   const canSubmit = allComplete && employeeId && !submitting
-  const successMessage = message.includes('completed') || message.includes('stored')
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -123,15 +123,17 @@ export default function EnrollmentPage() {
       if (poses[p]?.accepted) posePayload[p] = poses[p].dataUrl
     }
 
-    setMessage('')
+    setMessage(null)
     try {
       const data = await enrollFace.mutateAsync({ employeeId, poses: posePayload })
 
-      setMessage(
-        `${data.message} — ${data.embeddings_stored} embeddings, ` +
+      setMessage({
+        tone: 'ok',
+        text:
+          `Enrollment completed — ${data.embeddings_stored} embeddings, ` +
           `enrollment score ${((data.enrollment_score ?? 0) * 100).toFixed(0)}%, ` +
-          `avg quality ${((data.average_quality_score ?? 0) * 100).toFixed(0)}%`
-      )
+          `avg quality ${((data.average_quality_score ?? 0) * 100).toFixed(0)}%`,
+      })
       setPoses({})
       setStepIndex(0)
       stop()
@@ -139,17 +141,28 @@ export default function EnrollmentPage() {
       const body = (err as { response?: { data?: { error?: string; rejected?: { pose_type: string; reason: string }[] } } })
         ?.response?.data
       if (body?.rejected?.length) {
-        setMessage(
-          body.rejected.map((r) => `${poseLabel(r.pose_type)}: ${reasonLabel(r.reason)}`).join('; ')
-        )
+        setMessage({
+          tone: 'error',
+          text: body.rejected
+            .map((r) => `${poseLabel(r.pose_type)}: ${reasonLabel(r.reason)}`)
+            .join('; '),
+        })
       } else {
-        setMessage(body?.error ?? 'Enrollment failed')
+        setMessage({ tone: 'error', text: body?.error ?? 'Enrollment failed' })
       }
     }
   }
 
   const current = currentPose ? poses[currentPose] : undefined
   const selectedEmployee = employees.find((e) => String(e.id) === employeeId)
+
+  // Real-time coaching while the camera is live: pauses once the current pose
+  // is accepted and while a full-resolution capture is being validated.
+  const liveGuide = useLivePoseGuide({
+    enabled: source === 'camera' && active && !current?.accepted && !validateImage.isPending,
+    poseType: currentPose,
+    captureFrame,
+  })
 
   return (
     <div>
@@ -209,9 +222,26 @@ export default function EnrollmentPage() {
                 error={camError}
                 onStart={start}
                 hint={
-                  currentPose
-                    ? `Align your face with the guide for the “${currentLabel}” pose, then capture.`
-                    : 'Center your face in the guide, then capture.'
+                  liveGuide ? (
+                    <span
+                      className={cn(
+                        'inline-flex items-center gap-2 font-medium',
+                        liveGuide.ok ? 'text-green-400' : 'text-amber-300'
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'h-1.5 w-1.5 shrink-0 animate-pulse rounded-full',
+                          liveGuide.ok ? 'bg-green-400' : 'bg-amber-400'
+                        )}
+                      />
+                      {liveGuide.text}
+                    </span>
+                  ) : currentPose ? (
+                    `Align your face with the guide for the “${currentLabel}” pose, then capture.`
+                  ) : (
+                    'Center your face in the guide, then capture.'
+                  )
                 }
                 controls={
                   <>
@@ -345,7 +375,7 @@ export default function EnrollmentPage() {
 
             {message && (
               <div className="mt-4">
-                <StatusAlert tone={successMessage ? 'ok' : 'error'}>{message}</StatusAlert>
+                <StatusAlert tone={message.tone}>{message.text}</StatusAlert>
               </div>
             )}
           </SectionCard>

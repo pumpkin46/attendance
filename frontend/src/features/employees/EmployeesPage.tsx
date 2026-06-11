@@ -91,11 +91,8 @@ export default function EmployeesPage() {
   const inactiveCount = employees.filter((e) => !e.is_active).length
   const pct = (n: number) => (employees.length ? Math.round((n / employees.length) * 100) : 0)
 
-  const closeForm = () => {
-    setFormOpen(false)
-    setEditingId(null)
-    setForm(emptyEmployeeForm)
-  }
+  // State resets happen in openCreate/openEdit so the exit animation doesn't flash.
+  const closeForm = () => setFormOpen(false)
 
   const openCreate = () => {
     setEditingId(null)
@@ -172,109 +169,108 @@ export default function EmployeesPage() {
         />
       </div>
 
-      {formOpen && (
-        <SidePanel
-          title={editingId === null ? 'New employee' : 'Edit employee'}
-          description={
-            editingId === null
-              ? 'Add a new employee to the workforce registry'
-              : 'Update employee details'
-          }
-          onClose={closeForm}
-          footer={
-            <>
-              <Button type="submit" form="employee-form" isLoading={saveEmployee.isPending}>
-                {editingId === null ? 'Create employee' : 'Save changes'}
-              </Button>
-              <Button type="button" variant="ghost" onClick={closeForm}>
-                Cancel
-              </Button>
-            </>
-          }
-        >
-          <form id="employee-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
+      <SidePanel
+        open={formOpen}
+        title={editingId === null ? 'New employee' : 'Edit employee'}
+        description={
+          editingId === null
+            ? 'Add a new employee to the workforce registry'
+            : 'Update employee details'
+        }
+        onClose={closeForm}
+        footer={
+          <>
+            <Button type="submit" form="employee-form" isLoading={saveEmployee.isPending}>
+              {editingId === null ? 'Create employee' : 'Save changes'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={closeForm}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <form id="employee-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
+          <Label>
+            Employee code *
+            <Input
+              value={form.employee_code}
+              onChange={(e) => setForm({ ...form, employee_code: e.target.value })}
+              required
+            />
+          </Label>
+          <Label>
+            Location
+            <Combobox
+              value={form.location_id}
+              onChange={(value) => setForm({ ...form, location_id: value })}
+            >
+              <option value="">—</option>
+              {locations.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          <Label>
+            First name *
+            <Input
+              value={form.first_name}
+              onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+              required
+            />
+          </Label>
+          <Label>
+            Last name *
+            <Input
+              value={form.last_name}
+              onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+              required
+            />
+          </Label>
+          <Label>
+            Email
+            <Input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+            />
+          </Label>
+          <Label>
+            Department
+            <Input
+              value={form.department}
+              onChange={(e) => setForm({ ...form, department: e.target.value })}
+            />
+          </Label>
+          <Label>
+            Job title
+            <Input
+              value={form.job_title}
+              onChange={(e) => setForm({ ...form, job_title: e.target.value })}
+            />
+          </Label>
+          <Label>
+            Hire date
+            <DatePicker
+              value={form.hire_date}
+              onChange={(value) => setForm({ ...form, hire_date: value })}
+            />
+          </Label>
+          {editingId !== null && (
             <Label>
-              Employee code *
-              <Input
-                value={form.employee_code}
-                onChange={(e) => setForm({ ...form, employee_code: e.target.value })}
-                required
-              />
-            </Label>
-            <Label>
-              Location
+              Status
               <Combobox
-                value={form.location_id}
-                onChange={(value) => setForm({ ...form, location_id: value })}
+                value={form.is_active}
+                onChange={(value) => setForm({ ...form, is_active: value })}
               >
-                <option value="">—</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
               </Combobox>
             </Label>
-            <Label>
-              First name *
-              <Input
-                value={form.first_name}
-                onChange={(e) => setForm({ ...form, first_name: e.target.value })}
-                required
-              />
-            </Label>
-            <Label>
-              Last name *
-              <Input
-                value={form.last_name}
-                onChange={(e) => setForm({ ...form, last_name: e.target.value })}
-                required
-              />
-            </Label>
-            <Label>
-              Email
-              <Input
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Department
-              <Input
-                value={form.department}
-                onChange={(e) => setForm({ ...form, department: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Job title
-              <Input
-                value={form.job_title}
-                onChange={(e) => setForm({ ...form, job_title: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Hire date
-              <DatePicker
-                value={form.hire_date}
-                onChange={(value) => setForm({ ...form, hire_date: value })}
-              />
-            </Label>
-            {editingId !== null && (
-              <Label>
-                Status
-                <Combobox
-                  value={form.is_active}
-                  onChange={(value) => setForm({ ...form, is_active: value })}
-                >
-                  <option value="true">Active</option>
-                  <option value="false">Inactive</option>
-                </Combobox>
-              </Label>
-            )}
-          </form>
-        </SidePanel>
-      )}
+          )}
+        </form>
+      </SidePanel>
 
       <DataTable
         data={employees}

@@ -114,6 +114,12 @@ class RecognitionEngine:
         self._metrics = get_metrics()
         self._running = False
         self._process_task: asyncio.Task | None = None
+        # Live-video backpressure: when this many recognitions are in flight,
+        # further faces are dropped (not queued) — the tracker keeps
+        # needs_recognition set, so they retry on a later frame.
+        self._max_concurrent_recognitions = 2
+        self._inflight_recognitions = 0
+        self._recognition_tasks: set[asyncio.Task] = set()
 
     @property
     def is_running(self) -> bool:
@@ -137,9 +143,7 @@ class RecognitionEngine:
     ) -> None:
         """Process a single frame through the full pipeline."""
         try:
-            wall_start = time.perf_counter()
-
-            detection = self._detector.detect(frame)
+            detection = await asyncio.to_thread(self._detector.detect, frame)
             self._metrics.record_detection(detection.face_count)
             self._metrics.record_pipeline_stage(
                 "face_detection", detection.detection_ms
@@ -153,12 +157,17 @@ class RecognitionEngine:
             for face, track_info in track_results:
                 if not track_info.needs_recognition:
                     continue
+                if self._inflight_recognitions >= self._max_concurrent_recognitions:
+                    continue
 
-                asyncio.create_task(
+                self._inflight_recognitions += 1
+                task = asyncio.create_task(
                     self._recognize_tracked_face(
                         frame, face, track_info.track_id, camera_id, timestamp
                     )
                 )
+                self._recognition_tasks.add(task)
+                task.add_done_callback(self._recognition_tasks.discard)
 
         except Exception as e:
             logger.error("Frame processing error on camera %d: %s", camera_id, e)
@@ -173,7 +182,9 @@ class RecognitionEngine:
     ) -> None:
         """Run the full recognition pipeline on a tracked face."""
         try:
-            result = self.recognize_face(frame, face, camera_id=camera_id)
+            result = await asyncio.to_thread(
+                self.recognize_face, frame, face, camera_id=camera_id
+            )
 
             self._tracker.mark_recognized(
                 camera_id, track_id,
@@ -187,6 +198,8 @@ class RecognitionEngine:
 
         except Exception as e:
             logger.error("Recognition error for track %d: %s", track_id, e)
+        finally:
+            self._inflight_recognitions -= 1
 
     def recognize_face(
         self,

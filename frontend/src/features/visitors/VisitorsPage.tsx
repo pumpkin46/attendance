@@ -15,9 +15,15 @@ import type { VisitorTab } from '@/features/visitors/types'
 export default function VisitorsPage() {
   const [tab, setTab] = useState<VisitorTab>('dashboard')
   const [detailVisitorId, setDetailVisitorId] = useState<number | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
   const [showRegister, setShowRegister] = useState(false)
   const invalidate = useInvalidateVisitors()
   const { data: stats } = useVisitorStats()
+
+  const openDetail = (id: number) => {
+    setDetailVisitorId(id)
+    setDetailOpen(true)
+  }
 
   const withCount = (label: string, n?: number) => (n && n > 0 ? `${label} · ${n}` : label)
   const TABS: TabItem<VisitorTab>[] = [
@@ -40,26 +46,27 @@ export default function VisitorsPage() {
 
       <div role="tabpanel" id={`tabpanel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === 'dashboard' && <VisitorDashboardTab />}
-        {tab === 'approvals' && <ApprovalsTab onSelect={setDetailVisitorId} />}
-        {tab === 'visitors' && <AllVisitorsTab onSelect={setDetailVisitorId} />}
+        {tab === 'approvals' && <ApprovalsTab onSelect={openDetail} />}
+        {tab === 'visitors' && <AllVisitorsTab onSelect={openDetail} />}
         {tab === 'active' && <OnSiteTab />}
         {tab === 'blacklist' && <BlacklistTab />}
       </div>
 
-      {showRegister && (
-        <VisitorRegisterPanel
-          onClose={() => setShowRegister(false)}
-          onRegistered={() => {
-            setShowRegister(false)
-            setTab('visitors')
-          }}
-        />
-      )}
+      <VisitorRegisterPanel
+        open={showRegister}
+        onClose={() => setShowRegister(false)}
+        onRegistered={() => {
+          setShowRegister(false)
+          setTab('visitors')
+        }}
+      />
 
       {detailVisitorId !== null && (
         <VisitorDetailPanel
+          key={detailVisitorId}
+          open={detailOpen}
           visitorId={detailVisitorId}
-          onClose={() => setDetailVisitorId(null)}
+          onClose={() => setDetailOpen(false)}
           onUpdated={invalidate}
         />
       )}

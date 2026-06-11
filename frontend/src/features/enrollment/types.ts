@@ -25,7 +25,7 @@ export interface ValidateImageResult {
 }
 
 export interface EnrollFaceResult {
-  message: string
+  success: boolean
   embeddings_stored: number
   enrollment_score?: number
   average_quality_score?: number
@@ -108,4 +108,52 @@ export function reasonLabel(reason?: string): string {
     return hint ? `Pose doesn't match — please ${hint}` : 'Pose does not match instruction'
   }
   return reason.replace(/_/g, ' ')
+}
+
+export interface LiveGuidance {
+  ok: boolean
+  text: string
+}
+
+/** Corrective moves for the "front" slot, keyed by the pose the backend
+ * actually detected (`wrong_pose_expected_front_got_<detected>`). */
+const FRONT_CORRECTIONS: Record<string, string> = {
+  left: 'Turn your head back to the right a little',
+  right: 'Turn your head back to the left a little',
+  up: 'Lower your chin a little',
+  down: 'Raise your chin a little',
+}
+
+const LIVE_CORRECTIONS: Record<string, string> = {
+  not_smiling: 'Give a bigger smile',
+  not_neutral: 'Relax your expression',
+  glasses_not_detected: 'Put your glasses on',
+  glasses_detected: 'Take your glasses off',
+  no_face: 'Center your face inside the guide',
+  multiple_faces: 'Make sure only your face is in frame',
+  blurry: 'Hold still — the image is blurry',
+  too_dark: 'Add more light on your face',
+  occluded_face: 'Uncover your face fully',
+}
+
+/**
+ * Turns a live preview validation result into real-time coaching text so the
+ * user can self-correct before pressing capture.
+ */
+export function liveGuidance(accepted: boolean, reason?: string): LiveGuidance {
+  if (accepted) return { ok: true, text: 'Pose looks good — capture now' }
+  if (reason && LIVE_CORRECTIONS[reason]) return { ok: false, text: LIVE_CORRECTIONS[reason] }
+  const m = /^wrong_pose_expected_([a-z_]+?)_got_([a-z_]+)$/.exec(reason ?? '')
+  if (m) {
+    const [, expected, got] = m
+    if (expected === 'front') {
+      return { ok: false, text: FRONT_CORRECTIONS[got] ?? 'Face the camera straight on' }
+    }
+    const hint = POSE_HINTS[expected]
+    if (hint) {
+      const text = hint.charAt(0).toUpperCase() + hint.slice(1)
+      return { ok: false, text: `${text} a bit more` }
+    }
+  }
+  return { ok: false, text: reasonLabel(reason) }
 }

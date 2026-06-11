@@ -43,9 +43,11 @@ function FormSection({ title, children }: { title: string; children: ReactNode }
 }
 
 export function VisitorRegisterPanel({
+  open,
   onClose,
   onRegistered,
 }: {
+  open: boolean
   onClose: () => void
   onRegistered: () => void
 }) {
@@ -83,6 +85,7 @@ export function VisitorRegisterPanel({
 
   return (
     <SidePanel
+      open={open}
       title="Register visitor"
       description="Capture visitor and visit details. Fields marked * are required."
       onClose={onClose}

@@ -38,11 +38,8 @@ export function PoliciesTab() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<PolicyForm>(emptyForm)
 
-  const close = () => {
-    setFormOpen(false)
-    setEditingId(null)
-    setForm(emptyForm)
-  }
+  // State resets happen in openCreate/openEdit so the exit animation doesn't flash.
+  const close = () => setFormOpen(false)
 
   const openCreate = () => {
     setEditingId(null)
@@ -94,43 +91,42 @@ export function PoliciesTab() {
         <Button onClick={openCreate}>+ New policy</Button>
       </div>
 
-      {formOpen && (
-        <SidePanel
-          title={editingId ? 'Edit policy' : 'New policy'}
-          description="All thresholds are in minutes"
-          onClose={close}
-          footer={
-            <>
-              <Button type="submit" form="policy-form" isLoading={savePolicy.isPending}>
-                {editingId ? 'Save changes' : 'Create policy'}
-              </Button>
-              <Button type="button" variant="ghost" onClick={close}>
-                Cancel
-              </Button>
-            </>
-          }
-        >
-          <form id="policy-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
-            <Label className="sm:col-span-2">
-              Name *
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-            </Label>
-            {numField('grace_minutes', 'Grace (min)')}
-            {numField('break_minutes', 'Break (min)')}
-            {numField('min_work_minutes', 'Min work (min)')}
-            {numField('max_work_minutes', 'Max work (min)')}
-            {numField('overtime_after_minutes', 'Overtime after (min)')}
-            {numField('half_day_minutes', 'Half-day (min)')}
-            <div className="sm:col-span-2">
-              <Checkbox
-                checked={form.is_default}
-                onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
-                label="Set as default policy"
-              />
-            </div>
-          </form>
-        </SidePanel>
-      )}
+      <SidePanel
+        open={formOpen}
+        title={editingId ? 'Edit policy' : 'New policy'}
+        description="All thresholds are in minutes"
+        onClose={close}
+        footer={
+          <>
+            <Button type="submit" form="policy-form" isLoading={savePolicy.isPending}>
+              {editingId ? 'Save changes' : 'Create policy'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={close}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <form id="policy-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
+          <Label className="sm:col-span-2">
+            Name *
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          </Label>
+          {numField('grace_minutes', 'Grace (min)')}
+          {numField('break_minutes', 'Break (min)')}
+          {numField('min_work_minutes', 'Min work (min)')}
+          {numField('max_work_minutes', 'Max work (min)')}
+          {numField('overtime_after_minutes', 'Overtime after (min)')}
+          {numField('half_day_minutes', 'Half-day (min)')}
+          <div className="sm:col-span-2">
+            <Checkbox
+              checked={form.is_default}
+              onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
+              label="Set as default policy"
+            />
+          </div>
+        </form>
+      </SidePanel>
 
       <DataTable
         data={policies}

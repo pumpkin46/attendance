@@ -87,13 +87,39 @@ class FaceDetector:
 
         self._initialized = True
         try:
+            import os
+
+            import onnxruntime as ort
             from insightface.app import FaceAnalysis
+            from insightface.model_zoo import model_zoo
 
             cfg = engine_config.detection
-            app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
-            app.prepare(ctx_id=0, det_size=cfg.det_size)
+            threads = cfg.intra_op_threads or max(1, (os.cpu_count() or 4) // 2)
+            sess_options = ort.SessionOptions()
+            sess_options.intra_op_num_threads = threads
+
+            # FaceAnalysis only forwards providers/provider_options to
+            # onnxruntime.InferenceSession, so the thread cap has to go in via
+            # the session wrapper. Patched only around this construction so
+            # other FaceAnalysis users keep default threading.
+            orig_init = model_zoo.PickableInferenceSession.__init__
+
+            def capped_init(session_self, model_path, **kwargs):
+                kwargs.setdefault("sess_options", sess_options)
+                orig_init(session_self, model_path, **kwargs)
+
+            model_zoo.PickableInferenceSession.__init__ = capped_init
+            try:
+                app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+                app.prepare(ctx_id=0, det_size=cfg.det_size)
+            finally:
+                model_zoo.PickableInferenceSession.__init__ = orig_init
+
             self._app = app
-            logger.info("FaceDetector initialized with InsightFace buffalo_l")
+            logger.info(
+                "FaceDetector initialized with InsightFace buffalo_l (%d intra-op threads)",
+                threads,
+            )
             return True
         except Exception as e:
             logger.warning("InsightFace not available: %s — using mock detection", e)

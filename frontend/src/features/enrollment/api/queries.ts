@@ -41,15 +41,25 @@ export function useInvalidateEnrollment() {
 }
 
 /**
+ * Validates a pose image without storing it. Also used directly (outside a
+ * mutation) by the live pose guide, which polls while the camera is open and
+ * must not churn react-query mutation state on every frame.
+ */
+export async function validatePoseImage(payload: {
+  image: string
+  expected_pose: string
+}): Promise<ValidateImageResult> {
+  const { data } = await api.post<ValidateImageResult>('/enrollment/validate-image', payload)
+  return data
+}
+
+/**
  * Validates a single captured pose. Rejection is part of the normal capture
  * flow (driven into page state), so failures stay silent rather than toasting.
  */
 export function useValidateImage() {
   return useMutation({
-    mutationFn: async (payload: { image: string; expected_pose: string }) => {
-      const { data } = await api.post<ValidateImageResult>('/enrollment/validate-image', payload)
-      return data
-    },
+    mutationFn: validatePoseImage,
     meta: { silent: true },
   })
 }

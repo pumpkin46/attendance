@@ -6,6 +6,7 @@ import { Combobox } from '@/shared/ui/Combobox'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { Badge } from '@/shared/ui/Badge'
+import { SidePanel } from '@/shared/ui/SidePanel'
 import { AuthImage } from '@/shared/components/AuthImage'
 import { openAuthMedia } from '@/shared/lib/authMedia'
 
@@ -79,10 +80,12 @@ function stepIndex(status?: string) {
 
 export function VisitorDetailPanel({
   visitorId,
+  open = true,
   onClose,
   onUpdated,
 }: {
   visitorId: number
+  open?: boolean
   onClose: () => void
   onUpdated: () => void
 }) {
@@ -167,215 +170,201 @@ export function VisitorDetailPanel({
     load()
   }
 
-  if (!visitor) {
-    return (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-        onClick={onClose}
-      >
-        <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md">
-          <Card className="p-6 text-center">
-            {loadError ? (
-              <>
-                <p className="text-sm text-red-400">Failed to load visitor details.</p>
-                <div className="mt-4 flex justify-center gap-2">
-                  <Button variant="ghost" onClick={retry}>Retry</Button>
-                  <Button variant="ghost" onClick={onClose}>Close</Button>
-                </div>
-              </>
-            ) : (
-              <p className="text-slate-400">Loading…</p>
-            )}
-          </Card>
-        </div>
-      </div>
-    )
-  }
-
-  const currentStep = stepIndex(visitor.approval_status)
-  const isRejected = visitor.approval_status === 'rejected'
+  const currentStep = stepIndex(visitor?.approval_status)
+  const isRejected = visitor?.approval_status === 'rejected'
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={onClose}>
-      <div
-        className="h-full w-full max-w-xl overflow-y-auto border-l border-slate-700 bg-slate-900 p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-6 flex items-start justify-between">
-          <div>
-            <h2 className="text-xl font-semibold">{visitor.name}</h2>
-            <p className="text-sm text-slate-400">{visitor.company ?? '—'}</p>
-            <div className="mt-2 flex gap-2">
-              <Badge tone="neutral">{visitor.status.replace(/_/g, ' ')}</Badge>
-              {visitor.approval_status && (
-                <Badge tone={isRejected ? 'danger' : 'ok'}>
-                  {visitor.approval_status.replace(/_/g, ' ')}
-                </Badge>
-              )}
-            </div>
-          </div>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
-
-        {auxError && (
-          <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-            <span>Some details (photos, documents, or zones) couldn&apos;t be loaded.</span>
-            <button type="button" onClick={retry} className="font-medium underline hover:no-underline">
-              Retry
-            </button>
-          </div>
-        )}
-
-        {/* Approval workflow */}
-        <Card className="mb-4">
-          <h3 className="mb-3 text-sm font-semibold text-slate-300">Approval workflow</h3>
-          <div className="flex items-center gap-1">
-            {APPROVAL_STEPS.map((step, i) => (
-              <div key={step.key} className="flex flex-1 flex-col items-center">
-                <div
-                  className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
-                    isRejected
-                      ? 'bg-slate-700 text-slate-500'
-                      : i <= currentStep
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-700 text-slate-400'
-                  }`}
-                >
-                  {i + 1}
-                </div>
-                <span className="mt-1 text-center text-[10px] text-slate-400">{step.label}</span>
+    <SidePanel
+      open={open}
+      title={visitor?.name ?? 'Visitor details'}
+      description={visitor ? (visitor.company ?? '—') : 'Loading visitor record…'}
+      onClose={onClose}
+    >
+      {!visitor ? (
+        <div className="py-16 text-center">
+          {loadError ? (
+            <>
+              <p className="text-sm text-red-400">Failed to load visitor details.</p>
+              <div className="mt-4 flex justify-center gap-2">
+                <Button variant="ghost" onClick={retry}>Retry</Button>
+                <Button variant="ghost" onClick={onClose}>Close</Button>
               </div>
-            ))}
+            </>
+          ) : (
+            <p className="text-slate-400">Loading…</p>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="mb-4 flex gap-2">
+            <Badge tone="neutral">{visitor.status.replace(/_/g, ' ')}</Badge>
+            {visitor.approval_status && (
+              <Badge tone={isRejected ? 'danger' : 'ok'}>
+                {visitor.approval_status.replace(/_/g, ' ')}
+              </Badge>
+            )}
           </div>
-          {visitor.status === 'pending_approval' && !isRejected && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {visitor.approval_status === 'pending' && (
-                <Button variant="ghost" onClick={() => approve('manager')}>Manager approve</Button>
-              )}
-              {visitor.approval_status === 'manager_approved' && (
-                <Button variant="ghost" onClick={() => approve('security')}>Security approve</Button>
-              )}
-              {visitor.approval_status === 'security_approved' && (
-                <Button variant="ghost" onClick={() => approve('final')}>Final approve</Button>
-              )}
-              {(visitor.approval_status === 'pending' ||
-                visitor.approval_status === 'manager_approved' ||
-                visitor.approval_status === 'security_approved') && (
-                <Button variant="ghost" onClick={() => approve('final')}>Approve all</Button>
-              )}
-              <Button variant="ghost" onClick={reject}>Reject</Button>
+
+          {auxError && (
+            <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+              <span>Some details (photos, documents, or zones) couldn&apos;t be loaded.</span>
+              <button type="button" onClick={retry} className="font-medium underline hover:no-underline">
+                Retry
+              </button>
             </div>
           )}
-        </Card>
 
-        {/* Visit info */}
-        <Card className="mb-4 text-sm">
-          <dl className="grid gap-2 sm:grid-cols-2">
-            <div><dt className="text-slate-500">Host</dt><dd>{visitor.host ? `${visitor.host.first_name} ${visitor.host.last_name}` : '—'}</dd></div>
-            <div><dt className="text-slate-500">Purpose</dt><dd>{visitor.purpose ?? '—'}</dd></div>
-            <div><dt className="text-slate-500">Badge</dt><dd className="font-mono">{visitor.badge_number ?? '—'}</dd></div>
-            <div><dt className="text-slate-500">PIN</dt><dd className="font-mono">{visitor.pin_code ?? '—'}</dd></div>
-            <div><dt className="text-slate-500">Check-in code</dt><dd className="font-mono">{visitor.check_in_code ?? '—'}</dd></div>
-            <div><dt className="text-slate-500">Face</dt><dd>{visitor.face_registered ? 'Enrolled' : 'Not enrolled'}</dd></div>
-          </dl>
-        </Card>
-
-        {/* Photos */}
-        <Card className="mb-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-300">Photos</h3>
-            <Button variant="ghost" onClick={() => photoRef.current?.click()}>Upload photo</Button>
-            <input
-              ref={photoRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) uploadPhoto(f)
-              }}
-            />
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {visitor.photo_url && (
-              <AuthImage src={visitor.photo_url} alt="Primary" className="h-20 w-20 rounded-lg object-cover" />
-            )}
-            {photos.map((p) => (
-              <AuthImage
-                key={p.id}
-                src={p.url}
-                alt={p.caption ?? ''}
-                className="h-20 w-20 rounded-lg object-cover"
-              />
-            ))}
-            {photos.length === 0 && !visitor.photo_url && (
-              <p className="text-sm text-slate-500">No photos uploaded.</p>
-            )}
-          </div>
-        </Card>
-
-        {/* Documents */}
-        <Card className="mb-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-slate-300">Documents</h3>
-            <Combobox
-              value={docType}
-              onChange={(value) => setDocType(value)}
-              className="rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs"
-            >
-              {DOC_TYPES.map((d) => (
-                <option key={d.value} value={d.value}>{d.label}</option>
+          {/* Approval workflow */}
+          <Card className="mb-4">
+            <h3 className="mb-3 text-sm font-semibold text-slate-300">Approval workflow</h3>
+            <div className="flex items-center gap-1">
+              {APPROVAL_STEPS.map((step, i) => (
+                <div key={step.key} className="flex flex-1 flex-col items-center">
+                  <div
+                    className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
+                      isRejected
+                        ? 'bg-slate-700 text-slate-500'
+                        : i <= currentStep
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {i + 1}
+                  </div>
+                  <span className="mt-1 text-center text-[10px] text-slate-400">{step.label}</span>
+                </div>
               ))}
-            </Combobox>
-            <Button variant="ghost" onClick={() => docRef.current?.click()}>Upload</Button>
-            <input
-              ref={docRef}
-              type="file"
-              accept="image/*,.pdf"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) uploadDoc(f)
-              }}
-            />
-          </div>
-          <ul className="space-y-2 text-sm">
-            {documents.map((d) => (
-              <li key={d.id} className="flex items-center justify-between rounded bg-slate-800/50 px-3 py-2">
-                <span className="capitalize">{d.document_type.replace(/_/g, ' ')}</span>
-                <button
-                  type="button"
-                  onClick={() => openAuthMedia(d.url).catch(() => {})}
-                  className="text-indigo-400 hover:underline"
-                >
-                  {d.filename ?? 'View'}
-                </button>
-              </li>
-            ))}
-            {documents.length === 0 && <li className="text-slate-500">No documents.</li>}
-          </ul>
-        </Card>
+            </div>
+            {visitor.status === 'pending_approval' && !isRejected && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {visitor.approval_status === 'pending' && (
+                  <Button variant="ghost" onClick={() => approve('manager')}>Manager approve</Button>
+                )}
+                {visitor.approval_status === 'manager_approved' && (
+                  <Button variant="ghost" onClick={() => approve('security')}>Security approve</Button>
+                )}
+                {visitor.approval_status === 'security_approved' && (
+                  <Button variant="ghost" onClick={() => approve('final')}>Final approve</Button>
+                )}
+                {(visitor.approval_status === 'pending' ||
+                  visitor.approval_status === 'manager_approved' ||
+                  visitor.approval_status === 'security_approved') && (
+                  <Button variant="ghost" onClick={() => approve('final')}>Approve all</Button>
+                )}
+                <Button variant="ghost" onClick={reject}>Reject</Button>
+              </div>
+            )}
+          </Card>
 
-        {/* Access zones */}
-        <Card>
-          <h3 className="mb-3 text-sm font-semibold text-slate-300">Access zones</h3>
-          <form onSubmit={saveZones} className="space-y-3">
-            <Label>
-              Authorized zones (comma-separated)
-              <Input
-                value={zones}
-                onChange={(e) => setZones(e.target.value)}
-                placeholder="Reception, Meeting Rooms, Visitor Lounge"
+          {/* Visit info */}
+          <Card className="mb-4 text-sm">
+            <dl className="grid gap-2 sm:grid-cols-2">
+              <div><dt className="text-slate-500">Host</dt><dd>{visitor.host ? `${visitor.host.first_name} ${visitor.host.last_name}` : '—'}</dd></div>
+              <div><dt className="text-slate-500">Purpose</dt><dd>{visitor.purpose ?? '—'}</dd></div>
+              <div><dt className="text-slate-500">Badge</dt><dd className="font-mono">{visitor.badge_number ?? '—'}</dd></div>
+              <div><dt className="text-slate-500">PIN</dt><dd className="font-mono">{visitor.pin_code ?? '—'}</dd></div>
+              <div><dt className="text-slate-500">Check-in code</dt><dd className="font-mono">{visitor.check_in_code ?? '—'}</dd></div>
+              <div><dt className="text-slate-500">Face</dt><dd>{visitor.face_registered ? 'Enrolled' : 'Not enrolled'}</dd></div>
+            </dl>
+          </Card>
+
+          {/* Photos */}
+          <Card className="mb-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-300">Photos</h3>
+              <Button variant="ghost" onClick={() => photoRef.current?.click()}>Upload photo</Button>
+              <input
+                ref={photoRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) uploadPhoto(f)
+                }}
               />
-            </Label>
-            <p className="text-xs text-slate-500">
-              Match access point names or use &quot;Reception&quot; for lobby doors.
-              {perms.length > 0 && ` Current: ${perms.map((p) => p.zone_name).join(', ')}`}
-            </p>
-            <Button type="submit">Save access zones</Button>
-          </form>
-        </Card>
-      </div>
-    </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {visitor.photo_url && (
+                <AuthImage src={visitor.photo_url} alt="Primary" className="h-20 w-20 rounded-lg object-cover" />
+              )}
+              {photos.map((p) => (
+                <AuthImage
+                  key={p.id}
+                  src={p.url}
+                  alt={p.caption ?? ''}
+                  className="h-20 w-20 rounded-lg object-cover"
+                />
+              ))}
+              {photos.length === 0 && !visitor.photo_url && (
+                <p className="text-sm text-slate-500">No photos uploaded.</p>
+              )}
+            </div>
+          </Card>
+
+          {/* Documents */}
+          <Card className="mb-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-300">Documents</h3>
+              <Combobox
+                value={docType}
+                onChange={(value) => setDocType(value)}
+                className="rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs"
+              >
+                {DOC_TYPES.map((d) => (
+                  <option key={d.value} value={d.value}>{d.label}</option>
+                ))}
+              </Combobox>
+              <Button variant="ghost" onClick={() => docRef.current?.click()}>Upload</Button>
+              <input
+                ref={docRef}
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) uploadDoc(f)
+                }}
+              />
+            </div>
+            <ul className="space-y-2 text-sm">
+              {documents.map((d) => (
+                <li key={d.id} className="flex items-center justify-between rounded bg-slate-800/50 px-3 py-2">
+                  <span className="capitalize">{d.document_type.replace(/_/g, ' ')}</span>
+                  <button
+                    type="button"
+                    onClick={() => openAuthMedia(d.url).catch(() => {})}
+                    className="text-indigo-400 hover:underline"
+                  >
+                    {d.filename ?? 'View'}
+                  </button>
+                </li>
+              ))}
+              {documents.length === 0 && <li className="text-slate-500">No documents.</li>}
+            </ul>
+          </Card>
+
+          {/* Access zones */}
+          <Card>
+            <h3 className="mb-3 text-sm font-semibold text-slate-300">Access zones</h3>
+            <form onSubmit={saveZones} className="space-y-3">
+              <Label>
+                Authorized zones (comma-separated)
+                <Input
+                  value={zones}
+                  onChange={(e) => setZones(e.target.value)}
+                  placeholder="Reception, Meeting Rooms, Visitor Lounge"
+                />
+              </Label>
+              <p className="text-xs text-slate-500">
+                Match access point names or use &quot;Reception&quot; for lobby doors.
+                {perms.length > 0 && ` Current: ${perms.map((p) => p.zone_name).join(', ')}`}
+              </p>
+              <Button type="submit">Save access zones</Button>
+            </form>
+          </Card>
+        </>
+      )}
+    </SidePanel>
   )
 }

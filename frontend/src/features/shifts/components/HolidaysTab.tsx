@@ -18,9 +18,12 @@ export function HolidaysTab() {
   const [formOpen, setFormOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
 
-  const close = () => {
-    setFormOpen(false)
+  // Form resets on open so the exit animation doesn't flash cleared fields.
+  const close = () => setFormOpen(false)
+
+  const openCreate = () => {
     setForm(emptyForm)
+    setFormOpen(true)
   }
 
   const submit = (e: React.FormEvent) => {
@@ -38,42 +41,41 @@ export function HolidaysTab() {
           <h2 className="text-sm font-semibold text-slate-200">Holiday calendar</h2>
           <p className="text-xs text-slate-400">Company holidays excluded from attendance rules.</p>
         </div>
-        <Button onClick={() => setFormOpen(true)}>+ Add holiday</Button>
+        <Button onClick={openCreate}>+ Add holiday</Button>
       </div>
 
-      {formOpen && (
-        <SidePanel
-          title="Add holiday"
-          description="A non-working day for the organization"
-          onClose={close}
-          footer={
-            <>
-              <Button type="submit" form="holiday-form" isLoading={createHoliday.isPending}>
-                Add holiday
-              </Button>
-              <Button type="button" variant="ghost" onClick={close}>
-                Cancel
-              </Button>
-            </>
-          }
-        >
-          <form id="holiday-form" className="grid gap-4" onSubmit={submit}>
-            <Label>
-              Name *
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-            </Label>
-            <Label>
-              Date *
-              <DatePicker value={form.date} onChange={(value) => setForm({ ...form, date: value })} required />
-            </Label>
-            <Checkbox
-              checked={form.is_recurring}
-              onChange={(e) => setForm({ ...form, is_recurring: e.target.checked })}
-              label="Recurs every year"
-            />
-          </form>
-        </SidePanel>
-      )}
+      <SidePanel
+        open={formOpen}
+        title="Add holiday"
+        description="A non-working day for the organization"
+        onClose={close}
+        footer={
+          <>
+            <Button type="submit" form="holiday-form" isLoading={createHoliday.isPending}>
+              Add holiday
+            </Button>
+            <Button type="button" variant="ghost" onClick={close}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <form id="holiday-form" className="grid gap-4" onSubmit={submit}>
+          <Label>
+            Name *
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          </Label>
+          <Label>
+            Date *
+            <DatePicker value={form.date} onChange={(value) => setForm({ ...form, date: value })} required />
+          </Label>
+          <Checkbox
+            checked={form.is_recurring}
+            onChange={(e) => setForm({ ...form, is_recurring: e.target.checked })}
+            label="Recurs every year"
+          />
+        </form>
+      </SidePanel>
 
       <DataTable
         data={holidays}

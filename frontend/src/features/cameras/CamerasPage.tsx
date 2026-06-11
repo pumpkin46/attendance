@@ -222,10 +222,13 @@ export default function CamerasPage() {
     })
   }
 
-  const resetForm = () => {
-    setShowForm(false)
+  // State resets happen in openCreate/startEdit so the exit animation doesn't flash.
+  const closePanel = () => setShowForm(false)
+
+  const openCreate = () => {
     setEditingId(null)
     setForm(emptyForm)
+    setShowForm(true)
   }
 
   const saveCamera = async (e: React.FormEvent) => {
@@ -251,7 +254,7 @@ export default function CamerasPage() {
       await createCamera.mutateAsync(payload)
     }
 
-    resetForm()
+    closePanel()
   }
 
   const captureFromStream = async (cameraId: number) => {
@@ -275,165 +278,164 @@ export default function CamerasPage() {
         title="Camera Management"
         description="Configure cameras and monitor stream health: online status, FPS, latency, bandwidth, CPU/GPU, and recognition events."
         actions={
-          <Button onClick={() => (showForm ? resetForm() : setShowForm(true))} variant={showForm ? 'ghost' : 'primary'}>
+          <Button onClick={() => (showForm ? closePanel() : openCreate())} variant={showForm ? 'ghost' : 'primary'}>
             {showForm ? 'Cancel' : '+ Register camera'}
           </Button>
         }
       />
 
-      {showForm && (
-        <SidePanel
-          title={editingId ? 'Edit camera' : 'Register camera'}
-          description={
-            editingId ? 'Update camera configuration' : 'Add a new camera and configure its stream'
-          }
-          onClose={resetForm}
-          footer={
-            <>
-              <Button
-                type="submit"
-                form="camera-form"
-                isLoading={createCamera.isPending || updateCamera.isPending}
-              >
-                {editingId ? 'Update camera' : 'Register camera'}
-              </Button>
-              <Button type="button" variant="ghost" onClick={resetForm}>
-                Cancel
-              </Button>
-            </>
-          }
-        >
-          <form id="camera-form" className="grid gap-4 sm:grid-cols-2" onSubmit={saveCamera}>
-            <Label>
-              Camera name *
-              <Input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Main entrance"
-                required
-              />
-            </Label>
-            <Label>
-              Camera type *
-              <Combobox
-                value={form.camera_type}
-                onChange={(value) => setForm({ ...form, camera_type: value })}
-              >
-                {Object.entries(cameraTypes).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
-                ))}
-              </Combobox>
-            </Label>
-            <Label>
-              Location *
-              <Combobox
-                value={form.location_id}
-                onChange={(value) => setForm({ ...form, location_id: value })}
-                required
-              >
-                <option value="">Select location</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </Combobox>
-            </Label>
-            <Label>
-              Zone
-              <Combobox
-                value={form.zone}
-                onChange={(value) => setForm({ ...form, zone: value })}
-              >
-                <option value="">—</option>
-                {Object.entries(zones).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
-                ))}
-              </Combobox>
-            </Label>
-            <Label>
-              Floor
-              <Input
-                value={form.floor}
-                onChange={(e) => setForm({ ...form, floor: e.target.value })}
-                placeholder="Ground, L1, …"
-              />
-            </Label>
-            <Label className="sm:col-span-2">
-              RTSP URL
-              <Input
-                placeholder="rtsp://user:pass@192.168.1.100:554/stream"
-                value={form.stream_url}
-                onChange={(e) => setForm({ ...form, stream_url: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Target FPS
-              <Input
-                type="number"
-                min={1}
-                max={120}
-                value={form.target_fps}
-                onChange={(e) => setForm({ ...form, target_fps: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Resolution width
-              <Input
-                type="number"
-                value={form.resolution_width}
-                onChange={(e) => setForm({ ...form, resolution_width: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Resolution height
-              <Input
-                type="number"
-                value={form.resolution_height}
-                onChange={(e) => setForm({ ...form, resolution_height: e.target.value })}
-              />
-            </Label>
-            <Label>
-              Direction
-              <Combobox
-                value={form.direction}
-                onChange={(value) => setForm({ ...form, direction: value })}
-              >
-                <option value="in">Entry (check-in)</option>
-                <option value="out">Exit (check-out)</option>
-                <option value="both">Both</option>
-              </Combobox>
-            </Label>
-            <Label>
-              Status *
-              <Combobox
-                value={form.status}
-                onChange={(value) => setForm({ ...form, status: value as Camera['status'] })}
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="maintenance">Maintenance</option>
-              </Combobox>
-            </Label>
-            <Label>
-              Deployment
-              <Combobox
-                value={form.deployment_mode}
-                onChange={(value) =>
-                  setForm({ ...form, deployment_mode: value as Camera['deployment_mode'] })
-                }
-              >
-                <option value="cloud">Cloud (central AI)</option>
-                <option value="edge">Edge (on-device AI)</option>
-              </Combobox>
-            </Label>
-          </form>
-        </SidePanel>
-      )}
+      <SidePanel
+        open={showForm}
+        title={editingId ? 'Edit camera' : 'Register camera'}
+        description={
+          editingId ? 'Update camera configuration' : 'Add a new camera and configure its stream'
+        }
+        onClose={closePanel}
+        footer={
+          <>
+            <Button
+              type="submit"
+              form="camera-form"
+              isLoading={createCamera.isPending || updateCamera.isPending}
+            >
+              {editingId ? 'Update camera' : 'Register camera'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={closePanel}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <form id="camera-form" className="grid gap-4 sm:grid-cols-2" onSubmit={saveCamera}>
+          <Label>
+            Camera name *
+            <Input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="Main entrance"
+              required
+            />
+          </Label>
+          <Label>
+            Camera type *
+            <Combobox
+              value={form.camera_type}
+              onChange={(value) => setForm({ ...form, camera_type: value })}
+            >
+              {Object.entries(cameraTypes).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          <Label>
+            Location *
+            <Combobox
+              value={form.location_id}
+              onChange={(value) => setForm({ ...form, location_id: value })}
+              required
+            >
+              <option value="">Select location</option>
+              {locations.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          <Label>
+            Zone
+            <Combobox
+              value={form.zone}
+              onChange={(value) => setForm({ ...form, zone: value })}
+            >
+              <option value="">—</option>
+              {Object.entries(zones).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          <Label>
+            Floor
+            <Input
+              value={form.floor}
+              onChange={(e) => setForm({ ...form, floor: e.target.value })}
+              placeholder="Ground, L1, …"
+            />
+          </Label>
+          <Label className="sm:col-span-2">
+            RTSP URL
+            <Input
+              placeholder="rtsp://user:pass@192.168.1.100:554/stream"
+              value={form.stream_url}
+              onChange={(e) => setForm({ ...form, stream_url: e.target.value })}
+            />
+          </Label>
+          <Label>
+            Target FPS
+            <Input
+              type="number"
+              min={1}
+              max={120}
+              value={form.target_fps}
+              onChange={(e) => setForm({ ...form, target_fps: e.target.value })}
+            />
+          </Label>
+          <Label>
+            Resolution width
+            <Input
+              type="number"
+              value={form.resolution_width}
+              onChange={(e) => setForm({ ...form, resolution_width: e.target.value })}
+            />
+          </Label>
+          <Label>
+            Resolution height
+            <Input
+              type="number"
+              value={form.resolution_height}
+              onChange={(e) => setForm({ ...form, resolution_height: e.target.value })}
+            />
+          </Label>
+          <Label>
+            Direction
+            <Combobox
+              value={form.direction}
+              onChange={(value) => setForm({ ...form, direction: value })}
+            >
+              <option value="in">Entry (check-in)</option>
+              <option value="out">Exit (check-out)</option>
+              <option value="both">Both</option>
+            </Combobox>
+          </Label>
+          <Label>
+            Status *
+            <Combobox
+              value={form.status}
+              onChange={(value) => setForm({ ...form, status: value as Camera['status'] })}
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="maintenance">Maintenance</option>
+            </Combobox>
+          </Label>
+          <Label>
+            Deployment
+            <Combobox
+              value={form.deployment_mode}
+              onChange={(value) =>
+                setForm({ ...form, deployment_mode: value as Camera['deployment_mode'] })
+              }
+            >
+              <option value="cloud">Cloud (central AI)</option>
+              <option value="edge">Edge (on-device AI)</option>
+            </Combobox>
+          </Label>
+        </form>
+      </SidePanel>
 
       {captureResult && (
         <Card className="mb-6 flex items-start justify-between gap-3 border-l-4 border-l-blue-500">

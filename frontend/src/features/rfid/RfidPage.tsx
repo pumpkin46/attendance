@@ -147,7 +147,13 @@ export default function RfidPage() {
         description="Register readers, assign cards to employees, and process tap events for attendance."
         actions={
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => setSimPanel(true)}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setTapResult(null)
+                setSimPanel(true)
+              }}
+            >
               Simulate tap
             </Button>
             <Button onClick={() => setReaderPanel(true)}>Register reader</Button>
@@ -424,138 +430,126 @@ export default function RfidPage() {
         </>
       )}
 
-      {readerPanel && (
-        <SidePanel
-          title="Register RFID reader"
-          description="Add a physical reader and issue its API token"
-          onClose={() => setReaderPanel(false)}
-          footer={
-            <>
-              <Button type="submit" form="reader-form" isLoading={createReader.isPending}>
-                Register reader
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setReaderPanel(false)}>
-                Cancel
-              </Button>
-            </>
-          }
-        >
-          <form id="reader-form" className="grid gap-4" onSubmit={saveReader}>
-            <Label>
-              Name *
-              <Input
-                value={readerForm.name}
-                onChange={(e) => setReaderForm({ ...readerForm, name: e.target.value })}
-                placeholder="Lobby entrance"
-                required
-              />
-            </Label>
-            <Label>
-              Location *
-              <Combobox
-                value={readerForm.location_id}
-                onChange={(value) => setReaderForm({ ...readerForm, location_id: value })}
-                required
-              >
-                <option value="">Select location</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </Combobox>
-            </Label>
-            <Label>
-              Direction
-              <Combobox
-                value={readerForm.direction}
-                onChange={(value) =>
-                  setReaderForm({ ...readerForm, direction: value as ReaderForm['direction'] })
-                }
-              >
-                <option value="both">Check in &amp; out</option>
-                <option value="in">Check in only</option>
-                <option value="out">Check out only</option>
-              </Combobox>
-            </Label>
-          </form>
-        </SidePanel>
-      )}
-
-      {simPanel && (
-        <SidePanel
-          title="Simulate tap"
-          description="Send a test tap to verify reader and card mapping"
-          onClose={() => {
-            setSimPanel(false)
-            setTapResult(null)
-          }}
-          footer={
-            <>
-              <Button type="submit" form="sim-form" isLoading={simulate.isPending}>
-                Simulate tap
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setSimPanel(false)
-                  setTapResult(null)
-                }}
-              >
-                Close
-              </Button>
-            </>
-          }
-        >
-          <form id="sim-form" className="grid gap-4" onSubmit={simulateTap}>
-            <Label>
-              Reader
-              <Combobox value={simulateReaderId} onChange={setSimulateReaderId} required>
-                <option value="">Select reader</option>
-                {readers.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </Combobox>
-            </Label>
-            <Label>
-              Card UID
-              <Input
-                value={simulateUid}
-                onChange={(e) => setSimulateUid(e.target.value.toUpperCase())}
-                placeholder="A1B2C3D4"
-                required
-              />
-            </Label>
-          </form>
-
-          {tapResult && (
-            <div
-              className={cn(
-                'mt-5 rounded-lg border p-4 text-sm',
-                tapResult.matched
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                  : 'border-red-500/30 bg-red-500/10 text-red-200'
-              )}
+      <SidePanel
+        open={readerPanel}
+        title="Register RFID reader"
+        description="Add a physical reader and issue its API token"
+        onClose={() => setReaderPanel(false)}
+        footer={
+          <>
+            <Button type="submit" form="reader-form" isLoading={createReader.isPending}>
+              Register reader
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setReaderPanel(false)}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <form id="reader-form" className="grid gap-4" onSubmit={saveReader}>
+          <Label>
+            Name *
+            <Input
+              value={readerForm.name}
+              onChange={(e) => setReaderForm({ ...readerForm, name: e.target.value })}
+              placeholder="Lobby entrance"
+              required
+            />
+          </Label>
+          <Label>
+            Location *
+            <Combobox
+              value={readerForm.location_id}
+              onChange={(value) => setReaderForm({ ...readerForm, location_id: value })}
+              required
             >
-              {tapResult.matched ? (
-                <>
-                  <p className="font-medium">
-                    Matched {tapResult.employee?.first_name} {tapResult.employee?.last_name}
-                  </p>
-                  <p className="mt-1 text-xs opacity-80">
-                    Action: {tapResult.attendance_action?.replace(/_/g, ' ') ?? 'none'}
-                  </p>
-                </>
-              ) : (
-                <p className="font-medium">Not matched — {tapResult.reason ?? 'unknown'}</p>
-              )}
-            </div>
-          )}
-        </SidePanel>
-      )}
+              <option value="">Select location</option>
+              {locations.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          <Label>
+            Direction
+            <Combobox
+              value={readerForm.direction}
+              onChange={(value) =>
+                setReaderForm({ ...readerForm, direction: value as ReaderForm['direction'] })
+              }
+            >
+              <option value="both">Check in &amp; out</option>
+              <option value="in">Check in only</option>
+              <option value="out">Check out only</option>
+            </Combobox>
+          </Label>
+        </form>
+      </SidePanel>
+
+      <SidePanel
+        open={simPanel}
+        title="Simulate tap"
+        description="Send a test tap to verify reader and card mapping"
+        onClose={() => setSimPanel(false)}
+        footer={
+          <>
+            <Button type="submit" form="sim-form" isLoading={simulate.isPending}>
+              Simulate tap
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setSimPanel(false)}>
+              Close
+            </Button>
+          </>
+        }
+      >
+        <form id="sim-form" className="grid gap-4" onSubmit={simulateTap}>
+          <Label>
+            Reader
+            <Combobox value={simulateReaderId} onChange={setSimulateReaderId} required>
+              <option value="">Select reader</option>
+              {readers.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          <Label>
+            Card UID
+            <Input
+              value={simulateUid}
+              onChange={(e) => setSimulateUid(e.target.value.toUpperCase())}
+              placeholder="A1B2C3D4"
+              required
+            />
+          </Label>
+        </form>
+
+        {tapResult && (
+          <div
+            className={cn(
+              'mt-5 rounded-lg border p-4 text-sm',
+              tapResult.matched
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                : 'border-red-500/30 bg-red-500/10 text-red-200'
+            )}
+          >
+            {tapResult.matched ? (
+              <>
+                <p className="font-medium">
+                  Matched {tapResult.employee?.first_name} {tapResult.employee?.last_name}
+                </p>
+                <p className="mt-1 text-xs opacity-80">
+                  Action: {tapResult.attendance_action?.replace(/_/g, ' ') ?? 'none'}
+                </p>
+              </>
+            ) : (
+              <p className="font-medium">Not matched — {tapResult.reason ?? 'unknown'}</p>
+            )}
+          </div>
+        )}
+      </SidePanel>
     </div>
   )
 }

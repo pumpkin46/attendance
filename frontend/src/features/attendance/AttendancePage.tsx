@@ -147,77 +147,76 @@ export default function AttendancePage() {
         </span>
       </div>
 
-      {formOpen && (
-        <SidePanel
-          title="Manual attendance entry"
-          description="Record a check-in or check-out manually"
-          onClose={() => setFormOpen(false)}
-          footer={
-            <>
-              <Button type="submit" form="manual-attendance-form" isLoading={createManual.isPending}>
-                Save record
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setFormOpen(false)}>
-                Cancel
-              </Button>
-            </>
-          }
+      <SidePanel
+        open={formOpen}
+        title="Manual attendance entry"
+        description="Record a check-in or check-out manually"
+        onClose={() => setFormOpen(false)}
+        footer={
+          <>
+            <Button type="submit" form="manual-attendance-form" isLoading={createManual.isPending}>
+              Save record
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setFormOpen(false)}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="manual-attendance-form"
+          className="grid gap-4 sm:grid-cols-2"
+          onSubmit={submitManual}
         >
-          <form
-            id="manual-attendance-form"
-            className="grid gap-4 sm:grid-cols-2"
-            onSubmit={submitManual}
-          >
-            <Label className="sm:col-span-2">
-              Employee *
-              <Combobox
-                value={manual.employee_id}
-                onChange={(value) => setManual({ ...manual, employee_id: value })}
-                required
-              >
-                <option value="">Select employee</option>
-                {employees.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.employee_code} — {e.first_name} {e.last_name}
-                  </option>
-                ))}
-              </Combobox>
-            </Label>
-            <Label>
-              Work date *
-              <DatePicker
-                value={manual.work_date}
-                onChange={(value) => setManual({ ...manual, work_date: value })}
-                required
-              />
-            </Label>
-            <Label>
-              Check in
-              <DatePicker
-                withTime
-                value={manual.check_in_at}
-                onChange={(value) => setManual({ ...manual, check_in_at: value })}
-              />
-            </Label>
-            <Label>
-              Check out
-              <DatePicker
-                withTime
-                value={manual.check_out_at}
-                onChange={(value) => setManual({ ...manual, check_out_at: value })}
-              />
-            </Label>
-            <Label className="sm:col-span-2">
-              Notes
-              <Input
-                value={manual.notes}
-                onChange={(e) => setManual({ ...manual, notes: e.target.value })}
-                placeholder="Reason for manual entry"
-              />
-            </Label>
-          </form>
-        </SidePanel>
-      )}
+          <Label className="sm:col-span-2">
+            Employee *
+            <Combobox
+              value={manual.employee_id}
+              onChange={(value) => setManual({ ...manual, employee_id: value })}
+              required
+            >
+              <option value="">Select employee</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.employee_code} — {e.first_name} {e.last_name}
+                </option>
+              ))}
+            </Combobox>
+          </Label>
+          <Label>
+            Work date *
+            <DatePicker
+              value={manual.work_date}
+              onChange={(value) => setManual({ ...manual, work_date: value })}
+              required
+            />
+          </Label>
+          <Label>
+            Check in
+            <DatePicker
+              withTime
+              value={manual.check_in_at}
+              onChange={(value) => setManual({ ...manual, check_in_at: value })}
+            />
+          </Label>
+          <Label>
+            Check out
+            <DatePicker
+              withTime
+              value={manual.check_out_at}
+              onChange={(value) => setManual({ ...manual, check_out_at: value })}
+            />
+          </Label>
+          <Label className="sm:col-span-2">
+            Notes
+            <Input
+              value={manual.notes}
+              onChange={(e) => setManual({ ...manual, notes: e.target.value })}
+              placeholder="Reason for manual entry"
+            />
+          </Label>
+        </form>
+      </SidePanel>
 
       <DataTable
         data={filtered}

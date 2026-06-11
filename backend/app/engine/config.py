@@ -14,6 +14,10 @@ class StreamConfig:
     reconnect_interval_seconds: int = 5
     max_reconnect_attempts: int = 10
     health_check_interval_seconds: int = 30
+    # Frames per second handed to the recognition pipeline, independent of the
+    # stream read rate. On CPU-only hosts a single detection takes hundreds of
+    # ms, so analyzing every frame of a 30fps stream saturates every core.
+    process_fps: int = 5
 
 
 @dataclass
@@ -23,6 +27,10 @@ class DetectionConfig:
     confidence_threshold: float = 0.5
     det_size: tuple[int, int] = (640, 640)
     nms_threshold: float = 0.4
+    # onnxruntime intra-op threads for the engine's InsightFace sessions.
+    # 0 = half the logical cores (min 1), leaving headroom for the OS and the
+    # API event loop; the ORT default grabs every core.
+    intra_op_threads: int = 0
 
 
 @dataclass
