@@ -5,7 +5,7 @@ import { check, fail } from 'k6'
 // Override anything via env: BASE_URL, EMAIL, PASSWORD.
 export const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:8000'
 export const EMAIL = __ENV.EMAIL || 'admin@attendance.local'
-export const PASSWORD = __ENV.PASSWORD || ''
+export const PASSWORD = __ENV.PASSWORD || 'Loadtest123!'
 
 /** Log in once and return the bearer token. Call from a k6 `setup()`. */
 export function login() {

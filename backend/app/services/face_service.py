@@ -32,7 +32,8 @@ def _get_face_app():
         from insightface.app import FaceAnalysis
 
         app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
-        app.prepare(ctx_id=0, det_size=(640, 640))
+        det = settings.recognition_det_size
+        app.prepare(ctx_id=0, det_size=(det, det))
         _face_app = app
         return _face_app
     except Exception:

@@ -197,6 +197,12 @@ class Settings(BaseSettings):
     recognition_require_quality: bool = False
     recognition_sla_ms: int = 300
     liveness_sla_ms: int = 500
+    # Detection input resolution (square, px) for the recognition pipeline. The
+    # InsightFace detector resizes each frame to this before detection, and CPU
+    # cost scales ~quadratically with it: 640 is most accurate; 480/320 trade
+    # some small/far-face recall for markedly lower latency on CPU-only hosts.
+    # Tune via RECOGNITION_DET_SIZE.
+    recognition_det_size: int = 640
     target_accuracy: float = 0.99
     max_false_positive_rate: float = 0.001
     max_false_negative_rate: float = 0.01
