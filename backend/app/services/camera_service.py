@@ -9,6 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import invalidate_prefix
 from app.core.config import settings
 from app.core.errors import NotFoundError, ValidationError
 from app.middleware.tenant import apply_tenant_filter
@@ -94,6 +95,7 @@ async def create_camera(db: AsyncSession, body: CameraCreate) -> Camera:
     db.add(camera)
     await db.flush()
     await db.refresh(camera)
+    await invalidate_prefix("cache:cameras:")
     return camera
 
 
@@ -109,12 +111,14 @@ async def update_camera(
         setattr(camera, field, value)
     await db.flush()
     await db.refresh(camera)
+    await invalidate_prefix("cache:cameras:")
     return camera
 
 
 async def delete_camera(db: AsyncSession, camera_id: int, org_id: int | None) -> None:
     camera = await _get_camera_or_404(db, camera_id, org_id)
     await db.delete(camera)
+    await invalidate_prefix("cache:cameras:")
 
 
 def health_query(camera_id: int) -> Select:

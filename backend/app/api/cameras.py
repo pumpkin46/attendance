@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, status
 
+from app.core.cache import cached_json
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
@@ -49,10 +52,30 @@ async def list_cameras(
     org_id: TenantOrgId,
     pagination: PaginationDep,
 ):
-    stmt = camera_service.cameras_query(org_id)
-    page = await paginate(db, stmt, pagination.page, pagination.per_page)
-    page.data = [camera_service.format_monitoring_camera(c) for c in page.data]
-    return page
+    # Cap is small (settings.max_cameras), so cache the whole formatted per-org
+    # list once and paginate in memory — turns N page queries into one cached
+    # read. Invalidated on camera create/update/delete; online-status drift from
+    # heartbeats is bounded by the TTL.
+    async def compute_all() -> list[dict]:
+        stmt = camera_service.cameras_query(org_id)
+        rows = list((await db.execute(stmt)).scalars().all())
+        return [camera_service.format_monitoring_camera(c) for c in rows]
+
+    items = await cached_json(
+        f"cache:cameras:{org_id}", settings.cache_cameras_ttl_seconds, compute_all
+    )
+
+    total = len(items)
+    start = (pagination.page - 1) * pagination.per_page
+    data = items[start : start + pagination.per_page]
+    last_page = max(1, math.ceil(total / pagination.per_page))
+    return PaginatedResponse(
+        data=data,
+        current_page=pagination.page,
+        last_page=last_page,
+        per_page=pagination.per_page,
+        total=total,
+    )
 
 
 @router.post("/cameras", response_model=CameraOut, status_code=status.HTTP_201_CREATED)

@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     redis_enabled: bool = False
     redis_url: str = "redis://127.0.0.1:6379/0"
 
+    # ── Response caching ──────────────────────────────────────────────────
+    # Short-TTL Redis cache for read-heavy aggregation endpoints (monitoring
+    # dashboard, cameras list). Requires REDIS_ENABLED; best-effort, so it is a
+    # no-op when Redis is off/unreachable. Disable entirely with CACHE_ENABLED=false.
+    cache_enabled: bool = True
+    cache_dashboard_ttl_seconds: int = 10
+    cache_cameras_ttl_seconds: int = 30
+
     # ── Celery (background tasks) ─────────────────────────────────────────
     # When disabled, the in-process visitor-expiry loop runs instead of Beat.
     celery_enabled: bool = False
