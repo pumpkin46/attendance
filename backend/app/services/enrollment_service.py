@@ -13,8 +13,6 @@ Enrollment Process:
 
 from __future__ import annotations
 
-import base64
-import io
 import logging
 import time
 from dataclasses import dataclass, field
@@ -22,11 +20,10 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-import cv2
 import numpy as np
-from PIL import Image
 
 from app.core.config import settings
+from app.services.face_utils import decode_image, get_face_app, mock_embedding
 from app.services.enrollment_scoring import (
     EnrollmentScorer,
     EnrollmentScore,
@@ -131,7 +128,6 @@ class FaceEnrollmentService:
         self._index = index
         self._processor = processor or get_face_image_processor()
         self._scorer = scorer or get_enrollment_scorer()
-        self._face_app = None
 
     @property
     def index(self) -> FaissIndex:
@@ -268,7 +264,7 @@ class FaceEnrollmentService:
     ) -> dict:
         """Validate a single image without storing (for live preview)."""
         start = time.perf_counter()
-        img = self._decode_image(image_b64)
+        img = decode_image(image_b64)
         if img is None:
             return {
                 "accepted": False,
@@ -400,7 +396,7 @@ class FaceEnrollmentService:
         capture_metadata: dict | None,
     ) -> EnrollmentImageResult:
         """Validate and process a single enrollment image."""
-        img = self._decode_image(image_b64)
+        img = decode_image(image_b64)
         if img is None:
             return EnrollmentImageResult(
                 index=index, accepted=False, quality_score=0.0,
@@ -460,13 +456,13 @@ class FaceEnrollmentService:
         self, image_b64: str, employee_id: str, index: int
     ) -> np.ndarray | None:
         """Generate a 512-d embedding from a face image."""
-        img = self._decode_image(image_b64)
+        img = decode_image(image_b64)
         if img is None:
             return None
 
         app = self._get_face_app()
         if app is None:
-            return self._mock_embedding(f"{employee_id}-{index}")
+            return mock_embedding(f"{employee_id}-{index}")
 
         faces = app.get(img)
         if not faces:
@@ -487,16 +483,10 @@ class FaceEnrollmentService:
         return app.get(img)
 
     def _get_face_app(self):
-        if self._face_app is not None:
-            return self._face_app
-        try:
-            from insightface.app import FaceAnalysis
-            app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
-            app.prepare(ctx_id=0, det_size=(640, 640))
-            self._face_app = app
-            return self._face_app
-        except Exception:
-            return None
+        # Delegates to the shared singleton in face_utils so enrollment uses the
+        # same model instance and RECOGNITION_DET_SIZE as recognition. Kept as a
+        # method so tests can still patch it to force mock mode.
+        return get_face_app()
 
     def _get_landmarks(self, faces) -> np.ndarray | None:
         if not faces:
@@ -514,22 +504,10 @@ class FaceEnrollmentService:
         bb = face.bbox
         return (int(bb[0]), int(bb[1]), int(bb[2]), int(bb[3]))
 
-    @staticmethod
-    def _decode_image(image_b64: str) -> np.ndarray | None:
-        try:
-            if "," in image_b64:
-                image_b64 = image_b64.split(",", 1)[1]
-            data = base64.b64decode(image_b64)
-            pil = Image.open(io.BytesIO(data)).convert("RGB")
-            return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-        except Exception:
-            return None
-
-    @staticmethod
-    def _mock_embedding(seed: str) -> np.ndarray:
-        rng = np.random.default_rng(abs(hash(seed)) % (2**32))
-        vec = rng.standard_normal(settings.embedding_dim).astype(np.float32)
-        return vec / np.linalg.norm(vec)
+    # Backward-compatible handles to the shared helpers (single implementation
+    # lives in face_utils); existing callers/tests reach them via the service.
+    _decode_image = staticmethod(decode_image)
+    _mock_embedding = staticmethod(mock_embedding)
 
 
 _service: FaceEnrollmentService | None = None

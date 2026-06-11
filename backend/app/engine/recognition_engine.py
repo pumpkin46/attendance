@@ -17,17 +17,13 @@ Handles:
 from __future__ import annotations
 
 import asyncio
-import base64
-import io
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-import cv2
 import numpy as np
-from PIL import Image
 
 from app.engine.attendance_generator import (
     AttendanceEvent,
@@ -49,6 +45,7 @@ from app.engine.quality_assessor import get_quality_assessor
 from app.engine.stream_manager import StreamManager, get_stream_manager
 from app.engine.unknown_detector import get_unknown_detector
 from app.engine.vector_search import MatchAction, get_vector_search
+from app.services.face_utils import decode_image
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +393,7 @@ class RecognitionEngine:
 
         # Stage 1: Decode image
         t0 = time.perf_counter()
-        frame = self._decode_image(image_b64)
+        frame = decode_image(image_b64)
         decode_ms = int((time.perf_counter() - t0) * 1000)
         pipeline.append({"stage": "video_acquisition", "duration_ms": decode_ms})
 
@@ -442,7 +439,7 @@ class RecognitionEngine:
         liveness_frames = None
         if liveness_frames_b64:
             liveness_frames = [
-                f for f in (self._decode_image(fb) for fb in liveness_frames_b64) if f is not None
+                f for f in (decode_image(fb) for fb in liveness_frames_b64) if f is not None
             ]
 
         result = self.recognize_face(
@@ -498,7 +495,7 @@ class RecognitionEngine:
 
     def detect_faces(self, image_b64: str) -> dict:
         """Detect faces without full recognition (for real-time overlay)."""
-        frame = self._decode_image(image_b64)
+        frame = decode_image(image_b64)
         if frame is None:
             return {"success": False, "faces": [], "face_count": 0}
 
@@ -523,16 +520,6 @@ class RecognitionEngine:
             "metrics": self._metrics.get_performance_summary(),
             "sla_compliance": self._metrics.get_sla_compliance(),
         }
-
-    def _decode_image(self, image_b64: str) -> np.ndarray | None:
-        try:
-            if "," in image_b64:
-                image_b64 = image_b64.split(",", 1)[1]
-            data = base64.b64decode(image_b64)
-            pil = Image.open(io.BytesIO(data)).convert("RGB")
-            return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-        except Exception:
-            return None
 
 
 _engine: RecognitionEngine | None = None

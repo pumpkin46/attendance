@@ -1,19 +1,15 @@
-import base64
-import io
 import time
 
-import cv2
 import numpy as np
-from PIL import Image
 
 from app.core.config import settings
+from app.services.face_utils import decode_image, get_face_app, mock_embedding
 from app.services.face_pose import ENROLLMENT_POSE_TYPES
 from app.services.face_quality import validate_face_image
 from app.services.faiss_index import FaissIndex
 from app.services.liveness import verify_liveness
 
 _index: FaissIndex | None = None
-_face_app = None
 
 
 def get_index() -> FaissIndex:
@@ -23,21 +19,11 @@ def get_index() -> FaissIndex:
     return _index
 
 
+# Thin wrapper over the shared loader in face_utils. Kept as a module-level
+# function (not a bare alias) so it stays an independently patchable seam for
+# tests that force mock mode via ``monkeypatch.setattr(face_service, ...)``.
 def _get_face_app():
-    global _face_app
-    if _face_app is not None:
-        return _face_app
-
-    try:
-        from insightface.app import FaceAnalysis
-
-        app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
-        det = settings.recognition_det_size
-        app.prepare(ctx_id=0, det_size=(det, det))
-        _face_app = app
-        return _face_app
-    except Exception:
-        return None
+    return get_face_app()
 
 
 _detection_app = None
@@ -72,21 +58,11 @@ def _get_detection_app():
         return _get_face_app()
 
 
-def _decode_image(image_b64: str) -> np.ndarray | None:
-    try:
-        if "," in image_b64:
-            image_b64 = image_b64.split(",", 1)[1]
-        data = base64.b64decode(image_b64)
-        pil = Image.open(io.BytesIO(data)).convert("RGB")
-        return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-    except Exception:
-        return None
-
-
-def _mock_embedding(seed: str) -> np.ndarray:
-    rng = np.random.default_rng(abs(hash(seed)) % (2**32))
-    vec = rng.standard_normal(settings.embedding_dim).astype(np.float32)
-    return vec / np.linalg.norm(vec)
+# Implementations live in face_utils; kept under their historical private names
+# here because other modules (active_liveness, recognition_pipeline) import them
+# from face_service.
+_decode_image = decode_image
+_mock_embedding = mock_embedding
 
 
 def _bbox_from_face(face) -> list[float]:
