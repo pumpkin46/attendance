@@ -12,7 +12,7 @@ import { PageHeader } from '@/shared/ui/PageHeader'
 import { Skeleton } from '@/shared/ui/Skeleton'
 import { StatCard } from '@/shared/ui/StatCard'
 import { SnapshotImage } from '@/shared/components/SnapshotImage'
-import { useUnknownFaces } from '@/features/recognition/api/queries'
+import { useEventFeedback, useUnknownFaces } from '@/features/recognition/api/queries'
 import type { RecognitionEvent } from '@/shared/types'
 
 type View = 'gallery' | 'table'
@@ -323,6 +323,16 @@ function UnknownFaceModal({
   const hasPrev = index > 0
   const hasNext = index < events.length - 1
 
+  // Ground-truth labels recorded during this review session (event id → label).
+  const [labels, setLabels] = useState<Record<number, string>>({})
+  const feedback = useEventFeedback()
+  const recordFeedback = (outcome: 'correct' | 'incorrect') =>
+    feedback.mutate(
+      { eventId: event.id, outcome },
+      { onSuccess: (res) => setLabels((prev) => ({ ...prev, [event.id]: res.label })) }
+    )
+  const label = labels[event.id]
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -427,6 +437,43 @@ function UnknownFaceModal({
                 </Badge>
               }
             />
+
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-800/40 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Ground truth
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Is this really an unknown person? Your verdict feeds the measured
+                accuracy and false-rejection metrics.
+              </p>
+              {label ? (
+                <div className="mt-3">
+                  <Badge tone={label === 'true_reject' ? 'ok' : 'danger'}>
+                    Labeled: {label.replace(/_/g, ' ')}
+                  </Badge>
+                </div>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={feedback.isPending}
+                    onClick={() => recordFeedback('correct')}
+                  >
+                    Truly unknown
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    disabled={feedback.isPending}
+                    onClick={() => recordFeedback('incorrect')}
+                  >
+                    Enrolled person missed
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

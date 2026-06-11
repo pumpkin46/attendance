@@ -526,12 +526,52 @@ class TestFaceEnrollmentService:
     @patch.object(FaceEnrollmentService, "_get_face_app", return_value=None)
     @patch.object(FaceEnrollmentService, "_detect_faces", return_value=None)
     def test_enroll_with_expected_poses(self, mock_detect, mock_app, enrollment_service, enrollment_images):
-        poses = ["front", "left", "right", "up", "down"] + [None] * 7
+        poses = ["front", "left", "right", "up", "down", "smiling", "neutral",
+                 "glasses", "without_glasses"] + [None] * 3
         result = enrollment_service.enroll("emp-1", enrollment_images, expected_poses=poses)
 
         assert result.success is True
         pose_types = [a.pose_type for a in result.accepted_images if a.pose_type]
         assert "front" in pose_types
+        assert "glasses" in pose_types
+
+    @patch.object(FaceEnrollmentService, "_get_face_app", return_value=None)
+    @patch.object(FaceEnrollmentService, "_detect_faces", return_value=None)
+    def test_enroll_missing_required_poses_fails(self, mock_detect, mock_app, enrollment_service, enrollment_images):
+        """Guided enrollment must cover every required pose slot."""
+        poses = ["front", "left", "right", "up", "down"] + [None] * 7
+        result = enrollment_service.enroll("emp-1", enrollment_images, expected_poses=poses)
+
+        assert result.success is False
+        assert "Missing required poses" in result.error
+        assert result.missing_poses is not None
+        assert "smiling" in result.missing_poses
+        assert "glasses" in result.missing_poses
+        assert "front" not in result.missing_poses
+        assert result.required_poses is not None
+        d = result.to_dict()
+        assert d["missing_poses"] == result.missing_poses
+
+    @patch.object(FaceEnrollmentService, "_get_face_app", return_value=None)
+    @patch.object(FaceEnrollmentService, "_detect_faces", return_value=None)
+    def test_enroll_without_pose_slots_not_enforced(self, mock_detect, mock_app, enrollment_service, enrollment_images):
+        """Plain uploads carry no slot info, so coverage cannot be enforced."""
+        result = enrollment_service.enroll("emp-1", enrollment_images)
+
+        assert result.success is True
+
+    @patch.object(FaceEnrollmentService, "_get_face_app", return_value=None)
+    @patch.object(FaceEnrollmentService, "_detect_faces", return_value=None)
+    def test_enroll_pose_coverage_enforcement_can_be_disabled(
+        self, mock_detect, mock_app, enrollment_service, enrollment_images, monkeypatch
+    ):
+        from app.core.config import settings as app_settings
+
+        monkeypatch.setattr(app_settings, "face_enrollment_enforce_pose_coverage", False)
+        poses = ["front", "left", "right", "up", "down"] + [None] * 7
+        result = enrollment_service.enroll("emp-1", enrollment_images, expected_poses=poses)
+
+        assert result.success is True
 
     @patch.object(FaceEnrollmentService, "_get_face_app", return_value=None)
     @patch.object(FaceEnrollmentService, "_detect_faces", return_value=None)
@@ -552,6 +592,41 @@ class TestFaceEnrollmentService:
 
         assert result.success is True
         assert result.metadata["re_enrollment_trigger"] == "employee_appearance_changes"
+
+    def test_pose_slot_label_overrides_detected_pose(
+        self, enrollment_service, test_image_b64, monkeypatch
+    ):
+        """Attribute slots (glasses/smiling) keep their slot label even though
+        the pose detector reports a head pose like front/neutral."""
+        from types import SimpleNamespace
+
+        import app.services.enrollment_service as es
+
+        face = SimpleNamespace(bbox=np.array([10.0, 10.0, 200.0, 200.0]), kps=None)
+        monkeypatch.setattr(
+            es,
+            "validate_face_image",
+            lambda img, faces, expected_pose=None: {
+                "accepted": True,
+                "quality_score": 0.9,
+                "checks": {},
+                "face_metadata": {"detected_pose": "front", "glasses_detected": True},
+            },
+        )
+        monkeypatch.setattr(enrollment_service, "_detect_faces", lambda img: [face])
+        monkeypatch.setattr(
+            enrollment_service._processor,
+            "process",
+            lambda *a, **k: SimpleNamespace(processing_applied=[]),
+        )
+
+        result = enrollment_service._process_single_image(
+            test_image_b64, "emp-1", 0, "glasses", None
+        )
+
+        assert result.accepted is True
+        assert result.pose_type == "glasses"
+        assert result.face_metadata["detected_pose"] == "front"
 
     def test_delete_enrollment(self, enrollment_service):
         result = enrollment_service.delete_enrollment("emp-1")
@@ -591,12 +666,14 @@ class TestFaceEnrollmentService:
         assert reqs["min_resolution"]["height"] == 480
         assert "jpg" in reqs["supported_formats"]
         assert "png" in reqs["supported_formats"]
-        assert "front" in reqs["required_poses"]
-        assert "left" in reqs["required_poses"]
-        assert "right" in reqs["required_poses"]
-        assert "up" in reqs["required_poses"]
-        assert "down" in reqs["required_poses"]
-        assert "smiling" in reqs["optional_poses"]
+        # All nine capture slots are required per the enrollment requirements
+        for pose in (
+            "front", "left", "right", "up", "down",
+            "smiling", "neutral", "glasses", "without_glasses",
+        ):
+            assert pose in reqs["required_poses"]
+        assert reqs["optional_poses"] == []
+        assert reqs["pose_coverage_enforced"] is True
         assert reqs["embedding"]["dimension"] == 512
         assert reqs["embedding"]["model"] == "ArcFace/InsightFace"
         assert reqs["pose_validation"]["yaw_range"] == "±45°"

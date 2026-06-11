@@ -84,6 +84,12 @@ class RecognitionMetrics:
     total_quality_rejected: int = 0
     total_attendance_events: int = 0
     total_duplicates_prevented: int = 0
+    # Ground-truth-labeled outcomes (from review feedback or offline
+    # evaluation runs) — the only way accuracy/FPR/FNR can be measured.
+    true_accepts: int = 0
+    false_accepts: int = 0
+    false_rejects: int = 0
+    true_rejects: int = 0
 
     @property
     def recognition_rate(self) -> float:
@@ -97,7 +103,43 @@ class RecognitionMetrics:
             return 0.0
         return self.total_unknown / self.total_detections
 
+    @property
+    def labeled_total(self) -> int:
+        return (
+            self.true_accepts
+            + self.false_accepts
+            + self.false_rejects
+            + self.true_rejects
+        )
+
+    @property
+    def measured_accuracy(self) -> float | None:
+        """Correct decisions over all labeled attempts; None until labeled."""
+        total = self.labeled_total
+        if total == 0:
+            return None
+        return (self.true_accepts + self.true_rejects) / total
+
+    @property
+    def false_positive_rate(self) -> float | None:
+        """False accepts over attempts that should have been rejected."""
+        impostor_attempts = self.false_accepts + self.true_rejects
+        if impostor_attempts == 0:
+            return None
+        return self.false_accepts / impostor_attempts
+
+    @property
+    def false_negative_rate(self) -> float | None:
+        """False rejects over attempts that should have been accepted."""
+        genuine_attempts = self.false_rejects + self.true_accepts
+        if genuine_attempts == 0:
+            return None
+        return self.false_rejects / genuine_attempts
+
     def to_dict(self) -> dict:
+        accuracy = self.measured_accuracy
+        fpr = self.false_positive_rate
+        fnr = self.false_negative_rate
         return {
             "total_detections": self.total_detections,
             "total_recognized": self.total_recognized,
@@ -109,7 +151,19 @@ class RecognitionMetrics:
             "total_duplicates_prevented": self.total_duplicates_prevented,
             "recognition_rate": round(self.recognition_rate, 4),
             "unknown_rate": round(self.unknown_rate, 4),
+            "true_accepts": self.true_accepts,
+            "false_accepts": self.false_accepts,
+            "false_rejects": self.false_rejects,
+            "true_rejects": self.true_rejects,
+            "labeled_total": self.labeled_total,
+            "measured_accuracy": round(accuracy, 4) if accuracy is not None else None,
+            "false_positive_rate": round(fpr, 4) if fpr is not None else None,
+            "false_negative_rate": round(fnr, 4) if fnr is not None else None,
         }
+
+
+# Valid ground-truth labels for record_match_outcome()
+MATCH_OUTCOMES = ("true_accept", "false_accept", "false_reject", "true_reject")
 
 
 class EngineMetricsCollector:
@@ -155,6 +209,26 @@ class EngineMetricsCollector:
 
     def record_duplicate_prevented(self) -> None:
         self._recognition.total_duplicates_prevented += 1
+
+    def record_match_outcome(self, outcome: str) -> None:
+        """Record a ground-truth-labeled match outcome.
+
+        Fed by review feedback on recognition events and by offline evaluation
+        runs; these labeled outcomes are what measured accuracy / false
+        positive rate / false negative rate are computed from.
+        """
+        if outcome == "true_accept":
+            self._recognition.true_accepts += 1
+        elif outcome == "false_accept":
+            self._recognition.false_accepts += 1
+        elif outcome == "false_reject":
+            self._recognition.false_rejects += 1
+        elif outcome == "true_reject":
+            self._recognition.true_rejects += 1
+        else:
+            raise ValueError(
+                f"Unknown match outcome {outcome!r}; expected one of {MATCH_OUTCOMES}"
+            )
 
     def record_pipeline_stage(self, stage: str, duration_ms: int, success: bool = True) -> None:
         metric = PipelineMetrics(stage=stage, duration_ms=duration_ms, success=success)
@@ -215,12 +289,51 @@ class EngineMetricsCollector:
                 "total": len(self._alerts),
                 "recent": [a.to_dict() for a in list(self._alerts)[-10:]],
             },
+            "accuracy_compliance": self.get_accuracy_compliance(),
+        }
+
+    def get_accuracy_compliance(self) -> dict:
+        """Measured accuracy/FPR/FNR vs the required performance targets.
+
+        ``met`` is None for a metric until at least one labeled outcome of the
+        relevant kind exists (targets cannot be verified without ground truth).
+        """
+        from app.engine.config import engine_config
+        perf = engine_config.performance
+        rec = self._recognition
+
+        def _entry(target: float, measured: float | None, lower_is_better: bool) -> dict:
+            met: bool | None = None
+            if measured is not None:
+                met = measured <= target if lower_is_better else measured >= target
+            return {
+                "target": target,
+                "measured": round(measured, 6) if measured is not None else None,
+                "met": met,
+            }
+
+        return {
+            "labeled_samples": rec.labeled_total,
+            "recognition_accuracy": _entry(
+                perf.target_accuracy, rec.measured_accuracy, lower_is_better=False
+            ),
+            "false_positive_rate": _entry(
+                perf.max_false_positive_rate, rec.false_positive_rate, lower_is_better=True
+            ),
+            "false_negative_rate": _entry(
+                perf.max_false_negative_rate, rec.false_negative_rate, lower_is_better=True
+            ),
         }
 
     def get_sla_compliance(self) -> dict:
         from app.engine.config import engine_config
         perf = engine_config.performance
         avgs = self.get_stage_averages()
+        # Recognition time excludes the liveness stage — it has its own SLA
+        # (mirrors the per-result calculation in RecognitionEngine).
+        recognition_ms = sum(
+            v for k, v in avgs.items() if k != "liveness_detection"
+        )
 
         return {
             "face_detection": {
@@ -240,8 +353,8 @@ class EngineMetricsCollector:
             },
             "total_recognition": {
                 "target_ms": perf.max_recognition_ms,
-                "actual_ms": round(sum(avgs.values()), 1),
-                "met": sum(avgs.values()) <= perf.max_recognition_ms,
+                "actual_ms": round(recognition_ms, 1),
+                "met": recognition_ms <= perf.max_recognition_ms,
             },
             "liveness_verification": {
                 "target_ms": perf.max_liveness_ms,

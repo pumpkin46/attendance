@@ -102,6 +102,24 @@ UI runs at **http://127.0.0.1:5173** (proxies API to port 8000 via `VITE_API_URL
 
 For on-site inference, set a camera to **edge** deployment mode and run a local `backend` instance (e.g. port 8001). Sync the FAISS index with `GET /api/v1/embeddings/export` and `POST /api/v1/embeddings/import` so recognition runs without streaming video to the central server.
 
+## Accuracy measurement & compliance
+
+Accuracy, false-positive rate, and false-negative rate can only be *measured*
+against ground truth, so the platform collects labeled outcomes two ways:
+
+1. **Event feedback** — reviewers label recognition events as correct/incorrect
+   (`POST /api/v1/recognition/events/{id}/feedback`, surfaced in the Unknown
+   Faces review modal). A wrongly-rejected enrolled person counts as a false
+   reject; a confirmed stranger as a true reject.
+2. **Offline evaluation** — `POST /api/v1/recognition/evaluate` runs a labeled
+   probe set (genuine + impostor images) through the live pipeline and index
+   and scores accuracy / FPR / FNR / latency.
+
+`GET /api/v1/recognition/performance-compliance` reports the required targets
+(accuracy ≥ 99 %, FPR < 0.1 %, FNR < 1 %, recognition < 300 ms, liveness
+< 500 ms) against measured values; the AI Engine page shows the same table
+under **Required performance metrics**.
+
 ## Anomaly detection
 
 1. API gathers attendance features (check-in time, overtime, recognition frequency, etc.)

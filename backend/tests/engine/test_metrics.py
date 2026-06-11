@@ -69,3 +69,76 @@ def test_performance_summary_structure():
     assert "pipeline_performance" in summary
     assert "camera_health" in summary
     assert "alerts" in summary
+    assert "accuracy_compliance" in summary
+
+
+def test_accuracy_metrics_none_without_ground_truth():
+    metrics = EngineMetricsCollector()
+    rec = metrics.recognition
+
+    assert rec.measured_accuracy is None
+    assert rec.false_positive_rate is None
+    assert rec.false_negative_rate is None
+
+    compliance = metrics.get_accuracy_compliance()
+    assert compliance["labeled_samples"] == 0
+    assert compliance["recognition_accuracy"]["met"] is None
+    assert compliance["false_positive_rate"]["met"] is None
+    assert compliance["false_negative_rate"]["met"] is None
+
+
+def test_record_match_outcomes_compute_rates():
+    metrics = EngineMetricsCollector()
+    for _ in range(98):
+        metrics.record_match_outcome("true_accept")
+    metrics.record_match_outcome("false_reject")
+    metrics.record_match_outcome("false_accept")
+    for _ in range(100):
+        metrics.record_match_outcome("true_reject")
+
+    rec = metrics.recognition
+    assert rec.labeled_total == 200
+    assert rec.measured_accuracy == (98 + 100) / 200
+    assert rec.false_positive_rate == 1 / 101  # FA / (FA + TR)
+    assert rec.false_negative_rate == 1 / 99  # FR / (FR + TA)
+
+    data = rec.to_dict()
+    assert data["true_accepts"] == 98
+    assert data["labeled_total"] == 200
+    assert data["measured_accuracy"] == round(198 / 200, 4)
+
+
+def test_record_match_outcome_rejects_unknown_label():
+    metrics = EngineMetricsCollector()
+    import pytest
+
+    with pytest.raises(ValueError):
+        metrics.record_match_outcome("maybe")
+
+
+def test_accuracy_compliance_targets():
+    metrics = EngineMetricsCollector()
+    # 100% accuracy, zero FPR/FNR -> all requirements met
+    for _ in range(50):
+        metrics.record_match_outcome("true_accept")
+    for _ in range(50):
+        metrics.record_match_outcome("true_reject")
+
+    compliance = metrics.get_accuracy_compliance()
+    assert compliance["recognition_accuracy"]["met"] is True
+    assert compliance["false_positive_rate"]["met"] is True
+    assert compliance["false_negative_rate"]["met"] is True
+
+
+def test_sla_total_recognition_excludes_liveness():
+    metrics = EngineMetricsCollector()
+    metrics.record_pipeline_stage("face_detection", 100)
+    metrics.record_pipeline_stage("embedding_generation", 50)
+    metrics.record_pipeline_stage("vector_search", 20)
+    metrics.record_pipeline_stage("liveness_detection", 400)
+
+    sla = metrics.get_sla_compliance()
+    # 170ms of recognition work; the 400ms liveness stage has its own SLA
+    assert sla["total_recognition"]["actual_ms"] == 170.0
+    assert sla["total_recognition"]["met"] is True
+    assert sla["liveness_verification"]["actual_ms"] == 400.0

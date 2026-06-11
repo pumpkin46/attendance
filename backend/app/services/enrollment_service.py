@@ -32,6 +32,7 @@ from app.services.enrollment_scoring import (
     get_enrollment_scorer,
 )
 from app.services.face_image_processor import FaceImageProcessor, get_face_image_processor
+from app.services.face_pose import ENROLLMENT_POSE_TYPES
 from app.services.face_quality import validate_face_image
 from app.services.faiss_index import FaissIndex
 
@@ -94,6 +95,8 @@ class EnrollmentResult:
     processing_ms: int = 0
     error: str | None = None
     metadata: dict = field(default_factory=dict)
+    missing_poses: list[str] | None = None
+    required_poses: list[str] | None = None
 
     def to_dict(self) -> dict:
         result: dict[str, Any] = {
@@ -113,6 +116,10 @@ class EnrollmentResult:
             result["error"] = self.error
         if self.metadata:
             result["metadata"] = self.metadata
+        if self.missing_poses is not None:
+            result["missing_poses"] = self.missing_poses
+        if self.required_poses is not None:
+            result["required_poses"] = self.required_poses
         return result
 
 
@@ -211,6 +218,21 @@ class FaceEnrollmentService:
                 processing_ms=int((time.perf_counter() - start) * 1000),
             )
 
+        missing_poses = self._missing_required_poses(accepted, expected_poses)
+        if missing_poses:
+            return EnrollmentResult(
+                success=False,
+                employee_id=employee_id,
+                enrollment_type=enrollment_type,
+                enrollment_method=enrollment_method,
+                accepted_images=accepted,
+                rejected_images=rejected,
+                error=f"Missing required poses: {', '.join(missing_poses)}",
+                missing_poses=missing_poses,
+                required_poses=self._required_poses(),
+                processing_ms=int((time.perf_counter() - start) * 1000),
+            )
+
         for result_item in accepted:
             embedding = self._generate_embedding(
                 images_b64[result_item.index], employee_id, result_item.index
@@ -254,6 +276,7 @@ class FaceEnrollmentService:
                 "pose_coverage": list({
                     a.pose_type for a in accepted if a.pose_type
                 }),
+                "required_poses": self._required_poses(),
             },
         )
 
@@ -350,6 +373,33 @@ class FaceEnrollmentService:
         self.index.remove_employee(employee_id)
         return {"success": True, "employee_id": employee_id}
 
+    @staticmethod
+    def _required_poses() -> list[str]:
+        """Pose slots every enrollment must cover (from settings)."""
+        return [
+            p.strip()
+            for p in settings.face_enrollment_required_poses.split(",")
+            if p.strip()
+        ]
+
+    def _missing_required_poses(
+        self,
+        accepted: list[EnrollmentImageResult],
+        expected_poses: list[str | None] | None,
+    ) -> list[str]:
+        """Required poses not covered by any accepted image.
+
+        Coverage is only enforced for guided captures (requests that supply
+        expected_poses) — a plain image upload carries no slot information, so
+        attribute slots like glasses/without_glasses cannot be verified there.
+        """
+        if not settings.face_enrollment_enforce_pose_coverage:
+            return []
+        if not expected_poses or not any(expected_poses):
+            return []
+        covered = {a.pose_type for a in accepted if a.pose_type}
+        return [p for p in self._required_poses() if p not in covered]
+
     def get_enrollment_quality_requirements(self) -> dict:
         """Return enrollment requirements and thresholds."""
         return {
@@ -361,8 +411,11 @@ class FaceEnrollmentService:
                 "height": RECOMMENDED_RESOLUTION[1],
             },
             "supported_formats": list(SUPPORTED_IMAGE_FORMATS),
-            "required_poses": ["front", "left", "right", "up", "down"],
-            "optional_poses": ["smiling", "neutral", "glasses", "without_glasses"],
+            "required_poses": self._required_poses(),
+            "optional_poses": [
+                p for p in ENROLLMENT_POSE_TYPES if p not in self._required_poses()
+            ],
+            "pose_coverage_enforced": settings.face_enrollment_enforce_pose_coverage,
             "quality_thresholds": {
                 "min_det_score": settings.quality_min_det_score,
                 "min_blur_score": settings.quality_min_blur_score,
@@ -432,7 +485,11 @@ class FaceEnrollmentService:
             )
 
         face_metadata = validation.get("face_metadata") or {}
-        detected_pose = face_metadata.get("detected_pose") or expected_pose
+        # Label the image with its enrollment slot when one was requested —
+        # pose match against the slot was already validated above, and slots
+        # like "glasses"/"smiling" are attributes the pose detector reports as
+        # front/neutral, so the detected pose must not overwrite the slot.
+        pose_type = expected_pose or face_metadata.get("detected_pose")
 
         processed = self._processor.process(
             img,
@@ -447,7 +504,7 @@ class FaceEnrollmentService:
             index=index,
             accepted=True,
             quality_score=validation["quality_score"],
-            pose_type=detected_pose,
+            pose_type=pose_type,
             checks=checks,
             face_metadata=face_metadata,
         )

@@ -11,6 +11,9 @@ import type {
   EngineConfigDict,
   EngineConfigPatch,
   EngineStatus,
+  EventFeedbackResult,
+  FeedbackOutcome,
+  PerformanceCompliance,
   StreamsResponse,
 } from '@/features/recognition/types'
 
@@ -167,6 +170,46 @@ export function useReloadIndex() {
     onSuccess: () => {
       toast.success('Vector index reloaded')
       invalidate()
+    },
+    onError,
+  })
+}
+
+export const complianceKey = ['recognition', 'performance-compliance'] as const
+
+/** Required performance metrics (accuracy, FPR, FNR, latency) vs measured. */
+export function usePerformanceCompliance() {
+  return useApiQuery<PerformanceCompliance>(
+    complianceKey,
+    '/recognition/performance-compliance',
+    undefined,
+    { refetchInterval: 30_000, silent: true }
+  )
+}
+
+/** Label a recognition event as correct/incorrect (ground truth). */
+export function useEventFeedback() {
+  const qc = useQueryClient()
+  const onError = useEngineError()
+  return useMutation({
+    mutationFn: async ({
+      eventId,
+      outcome,
+      note,
+    }: {
+      eventId: number
+      outcome: FeedbackOutcome
+      note?: string
+    }) => {
+      const { data } = await api.post<EventFeedbackResult>(
+        `/recognition/events/${eventId}/feedback`,
+        { outcome, note }
+      )
+      return data
+    },
+    onSuccess: () => {
+      toast.success('Feedback recorded — accuracy metrics updated')
+      qc.invalidateQueries({ queryKey: complianceKey })
     },
     onError,
   })

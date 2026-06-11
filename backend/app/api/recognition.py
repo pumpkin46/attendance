@@ -21,12 +21,17 @@ from app.schemas.recognition import (
     RecognizeStreamRequest,
 )
 from app.schemas.recognition_api import (
+    EvaluationReport,
+    EvaluationRequest,
+    EventFeedbackRequest,
+    EventFeedbackResponse,
+    PerformanceComplianceResponse,
     RecognitionConfigResponse,
     RecognitionEventOut,
     RecognitionMetrics,
     UnknownSummary,
 )
-from app.services import face_service, recognition_service
+from app.services import face_service, recognition_evaluation, recognition_service
 from app.services.stream_capture import capture_stream_frame
 
 router = APIRouter(prefix="/api/v1", tags=["recognition"])
@@ -162,3 +167,76 @@ async def get_unknown_summary(
     org_id: TenantOrgId = None,
 ):
     return await recognition_service.unknown_summary(db, org_id)
+
+
+@router.get(
+    "/recognition/performance-compliance",
+    response_model=PerformanceComplianceResponse,
+)
+async def get_performance_compliance(user: require_permission("recognition.view")):
+    """Required performance metrics (accuracy, FPR, FNR, latency) vs measured.
+
+    Accuracy/FPR/FNR are measured from ground-truth-labeled outcomes (event
+    feedback and evaluation runs); latency comes from live pipeline stage
+    timings. ``met`` is null for metrics with no measurement yet.
+    """
+    from app.engine.metrics import get_metrics
+
+    metrics = get_metrics()
+    rec = metrics.recognition
+    stage_avgs = metrics.get_stage_averages()
+    recognition_ms = (
+        sum(v for k, v in stage_avgs.items() if k != "liveness_detection")
+        if stage_avgs else None
+    )
+    return PerformanceComplianceResponse(
+        requirements=recognition_evaluation.requirements_compliance(
+            accuracy=rec.measured_accuracy,
+            false_positive_rate=rec.false_positive_rate,
+            false_negative_rate=rec.false_negative_rate,
+            recognition_ms=recognition_ms,
+            liveness_ms=stage_avgs.get("liveness_detection"),
+        ),
+        labeled_samples=rec.labeled_total,
+        pipeline_stage_averages_ms={k: round(v, 1) for k, v in stage_avgs.items()},
+    )
+
+
+@router.post("/recognition/evaluate", response_model=EvaluationReport)
+async def evaluate_recognition(
+    body: EvaluationRequest,
+    user: require_permission("recognition.manage"),
+):
+    """Run a labeled accuracy evaluation against the live pipeline and index.
+
+    Genuine probes (employee_id set) measure accuracy and false rejects;
+    impostor probes (employee_id null) measure false accepts. Returns the
+    measured metrics with a compliance verdict per requirement.
+    """
+    return await run_in_threadpool(
+        recognition_evaluation.evaluate,
+        [s.model_dump() for s in body.samples],
+        require_liveness=body.require_liveness,
+        record_metrics=body.record_metrics,
+    )
+
+
+@router.post(
+    "/recognition/events/{event_id}/feedback",
+    response_model=EventFeedbackResponse,
+)
+async def record_event_feedback(
+    event_id: int,
+    body: EventFeedbackRequest,
+    db: DbSession,
+    user: require_permission("recognition.manage"),
+    org_id: TenantOrgId = None,
+):
+    """Label a recognition event as correct/incorrect (ground truth).
+
+    Feeds measured accuracy / false positive rate / false negative rate so the
+    performance-compliance report reflects real-world outcomes.
+    """
+    return await recognition_service.record_event_feedback(
+        db, event_id, body.outcome, org_id, note=body.note, user_id=user.id
+    )

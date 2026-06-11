@@ -20,12 +20,17 @@ import {
   useEngineStatus,
   useEngineStreams,
   useInvalidateEngine,
+  usePerformanceCompliance,
   useReloadIndex,
   useRemoveStream,
   useSaveEngineConfig,
   useToggleEngine,
 } from '@/features/recognition/api/queries'
-import type { EngineAlert, EngineConfigDict } from '@/features/recognition/types'
+import type {
+  EngineAlert,
+  EngineConfigDict,
+  RequirementCompliance,
+} from '@/features/recognition/types'
 import WebcamMonitor from '@/features/recognition/WebcamMonitor'
 
 /* ------------------------------------------------------------------ *
@@ -148,6 +153,14 @@ function InfoCard({ title, icon, rows }: { title: string; icon?: ReactNode; rows
   )
 }
 
+/** Rates render as percentages; *_ms metrics render as milliseconds. */
+function fmtComplianceValue(req: RequirementCompliance): string {
+  if (req.measured == null) return '—'
+  return req.metric.endsWith('_ms')
+    ? `${req.measured.toFixed(1)} ms`
+    : `${(req.measured * 100).toFixed(2)}%`
+}
+
 function SectionHeading({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return (
     <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
@@ -166,6 +179,7 @@ export default function RecognitionEnginePage() {
   const toggleEngine = useToggleEngine()
   const { data: streamsData } = useEngineStreams()
   const { data: engineConfig } = useEngineConfig()
+  const { data: compliance } = usePerformanceCompliance()
   const streams = Object.values(streamsData?.streams ?? {})
   const invalidateEngine = useInvalidateEngine()
 
@@ -360,6 +374,52 @@ export default function RecognitionEnginePage() {
           </Card>
         </div>
       </section>
+
+      {/* Required performance metrics */}
+      {compliance && (
+        <section>
+          <SectionHeading
+            title="Required performance metrics"
+            description={
+              compliance.labeled_samples > 0
+                ? `Accuracy targets measured from ${compliance.labeled_samples} ground-truth-labeled sample(s); latency from live pipeline timings.`
+                : 'Accuracy targets need ground truth — label recognition events (Unknown Faces review) or run an evaluation to measure them.'
+            }
+          />
+          <Card padding={false}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-800 text-left text-xs uppercase tracking-wider text-slate-500">
+                  <th className="px-4 py-3 font-semibold">Metric</th>
+                  <th className="px-4 py-3 font-semibold">Requirement</th>
+                  <th className="px-4 py-3 text-right font-semibold">Measured</th>
+                  <th className="px-4 py-3 text-right font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compliance.requirements.map((req) => (
+                  <tr key={req.metric} className="border-b border-slate-800/60 last:border-0">
+                    <td className="px-4 py-3 capitalize text-slate-200">
+                      {req.metric.replace(/_/g, ' ').replace(/ ms$/, '')}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-slate-400">{req.requirement}</td>
+                    <td className="px-4 py-3 text-right font-mono text-slate-200">
+                      {fmtComplianceValue(req)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {req.met == null ? (
+                        <Badge tone="neutral">No data</Badge>
+                      ) : (
+                        <Badge tone={req.met ? 'ok' : 'danger'}>{req.met ? 'Met' : 'Missed'}</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </section>
+      )}
 
       {/* Infrastructure */}
       <section>

@@ -66,6 +66,31 @@ export interface EngineConfigPatch {
   max_faces_per_frame: number
 }
 
+// ── Performance compliance & ground-truth feedback ───────────────────────────
+
+export interface RequirementCompliance {
+  metric: string
+  requirement: string
+  target: number
+  measured: number | null
+  met: boolean | null
+}
+
+export interface PerformanceCompliance {
+  requirements: RequirementCompliance[]
+  labeled_samples: number
+  pipeline_stage_averages_ms: Record<string, number>
+}
+
+export type FeedbackOutcome = 'correct' | 'incorrect'
+
+export interface EventFeedbackResult {
+  event_id: number
+  result: string
+  outcome: string
+  label: string
+}
+
 // ── Recognition requests (kiosk / test) ──────────────────────────────────────
 
 export interface FaceBox {

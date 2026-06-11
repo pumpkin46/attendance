@@ -25,6 +25,8 @@ class FakeSession:
 
     def __init__(self):
         self.added = []
+        # Single row returned by execute().scalar_one_or_none() (event feedback)
+        self.event = None
 
     def add(self, obj):
         self.added.append(obj)
@@ -36,6 +38,9 @@ class FakeSession:
         return SimpleNamespace(
             id=pk, first_name="Ada", last_name="Lovelace", organization_id=1
         )
+
+    async def execute(self, stmt):
+        return SimpleNamespace(scalar_one_or_none=lambda: self.event)
 
 
 @pytest.fixture(autouse=True)
@@ -253,6 +258,132 @@ def test_unknown_event_throttle_disabled(monkeypatch):
 
     assert rs._unknown_throttled(1) is False
     assert rs._unknown_throttled(1) is False  # 0 = never throttle
+
+
+def test_event_feedback_labels_false_accept(client, fake_session, monkeypatch):
+    """Reviewer marks a matched event as wrong -> false accept in metrics."""
+    import app.engine.metrics as engine_metrics
+
+    fresh = engine_metrics.EngineMetricsCollector()
+    monkeypatch.setattr(engine_metrics, "_metrics", fresh)
+    fake_session.event = SimpleNamespace(
+        id=42, organization_id=1, result="matched", meta=None
+    )
+
+    resp = client.post(
+        "/api/v1/recognition/events/42/feedback",
+        json={"outcome": "incorrect", "note": "wrong person"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["label"] == "false_accept"
+    assert body["result"] == "matched"
+    assert fresh.recognition.false_accepts == 1
+    assert fake_session.event.meta["feedback"]["label"] == "false_accept"
+    assert fake_session.event.meta["feedback"]["note"] == "wrong person"
+
+
+def test_event_feedback_labels_false_reject(client, fake_session, monkeypatch):
+    """Reviewer marks an unknown event as wrong -> false reject (missed match)."""
+    import app.engine.metrics as engine_metrics
+
+    fresh = engine_metrics.EngineMetricsCollector()
+    monkeypatch.setattr(engine_metrics, "_metrics", fresh)
+    fake_session.event = SimpleNamespace(
+        id=43, organization_id=1, result="unknown", meta={"existing": True}
+    )
+
+    resp = client.post(
+        "/api/v1/recognition/events/43/feedback", json={"outcome": "incorrect"}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["label"] == "false_reject"
+    assert fresh.recognition.false_rejects == 1
+    assert fake_session.event.meta["existing"] is True  # prior metadata kept
+
+
+def test_event_feedback_missing_event_404(client, fake_session):
+    fake_session.event = None
+    resp = client.post(
+        "/api/v1/recognition/events/999/feedback", json={"outcome": "correct"}
+    )
+    assert resp.status_code == 404
+
+
+def test_performance_compliance_report(client, monkeypatch):
+    """Required metrics table: measured accuracy/FPR/FNR + pipeline latency."""
+    import app.engine.metrics as engine_metrics
+
+    fresh = engine_metrics.EngineMetricsCollector()
+    monkeypatch.setattr(engine_metrics, "_metrics", fresh)
+    fresh.record_pipeline_stage("face_detection", 80)
+    fresh.record_pipeline_stage("liveness_detection", 200)
+    for _ in range(99):
+        fresh.record_match_outcome("true_accept")
+    fresh.record_match_outcome("true_reject")
+
+    resp = client.get("/api/v1/recognition/performance-compliance")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["labeled_samples"] == 100
+    rows = {r["metric"]: r for r in data["requirements"]}
+    assert rows["recognition_accuracy"]["measured"] == 1.0
+    assert rows["recognition_accuracy"]["met"] is True
+    assert rows["recognition_time_ms"]["measured"] == 80.0  # excludes liveness
+    assert rows["recognition_time_ms"]["met"] is True
+    assert rows["liveness_verification_ms"]["measured"] == 200.0
+    assert rows["liveness_verification_ms"]["met"] is True
+
+
+def test_performance_compliance_unmeasured_is_null(client, monkeypatch):
+    import app.engine.metrics as engine_metrics
+
+    monkeypatch.setattr(
+        engine_metrics, "_metrics", engine_metrics.EngineMetricsCollector()
+    )
+
+    data = client.get("/api/v1/recognition/performance-compliance").json()
+    rows = {r["metric"]: r for r in data["requirements"]}
+    assert all(r["met"] is None for r in rows.values())
+    assert data["labeled_samples"] == 0
+
+
+def test_evaluate_endpoint(client, monkeypatch):
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda image_b64, require_liveness=True, **kw: {
+            "success": True,
+            "employee_id": "1" if image_b64 == "genuine" else None,
+            "confidence": 0.95,
+            "processing_ms": 100,
+            "recognition_ms": 80,
+            "liveness_ms": 20,
+        },
+    )
+
+    resp = client.post(
+        "/api/v1/recognition/evaluate",
+        json={
+            "samples": [
+                {"image": "genuine", "employee_id": "1"},
+                {"image": "impostor", "employee_id": None},
+            ],
+            "record_metrics": False,
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_samples"] == 2
+    assert data["true_accepts"] == 1
+    assert data["true_rejects"] == 1
+    assert data["accuracy"] == 1.0
+    rows = {r["metric"]: r for r in data["compliance"]}
+    assert rows["recognition_accuracy"]["met"] is True
 
 
 def test_purge_old_snapshots_removes_expired(tmp_path, monkeypatch):

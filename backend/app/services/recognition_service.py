@@ -279,6 +279,58 @@ def events_query(org_id: int | None) -> Select:
     return stmt.order_by(RecognitionEvent.recognized_at.desc())
 
 
+async def record_event_feedback(
+    db: AsyncSession,
+    event_id: int,
+    outcome: str,
+    org_id: int | None,
+    note: str | None = None,
+    user_id: int | None = None,
+) -> dict:
+    """Label a recognition event as correct/incorrect (ground truth).
+
+    Maps the reviewer's verdict onto a match outcome (true/false accept or
+    reject), persists it on the event, and feeds the engine metrics collector
+    so measured accuracy / FPR / FNR reflect real-world feedback.
+    """
+    event = (
+        await db.execute(select(RecognitionEvent).where(RecognitionEvent.id == event_id))
+    ).scalar_one_or_none()
+    if not event or (org_id is not None and event.organization_id != org_id):
+        raise NotFoundError("Event not found")
+
+    result_value = (
+        event.result.value if hasattr(event.result, "value") else str(event.result)
+    )
+    correct = outcome == "correct"
+    if result_value == "matched":
+        label = "true_accept" if correct else "false_accept"
+    else:
+        # unknown / liveness_failed / low_confidence are all rejections
+        label = "true_reject" if correct else "false_reject"
+
+    meta = dict(event.meta or {})
+    meta["feedback"] = {
+        "outcome": outcome,
+        "label": label,
+        "note": note,
+        "user_id": user_id,
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    event.meta = meta
+    await db.flush()
+
+    from app.engine.metrics import get_metrics
+
+    get_metrics().record_match_outcome(label)
+    return {
+        "event_id": event.id,
+        "result": result_value,
+        "outcome": outcome,
+        "label": label,
+    }
+
+
 async def snapshot_path(db: AsyncSession, event_id: int) -> str:
     event = (
         await db.execute(select(RecognitionEvent).where(RecognitionEvent.id == event_id))

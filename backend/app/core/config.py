@@ -144,6 +144,11 @@ class Settings(BaseSettings):
     face_enrollment_min_images: int = 10
     face_enrollment_max_images: int = 50
     face_enrollment_retain_raw_images: bool = False
+    # When True, guided enrollments (requests that supply expected_poses) must
+    # cover every pose in face_enrollment_required_poses; missing slots fail the
+    # enrollment with the list of missing poses. Plain uploads without pose
+    # slots are unaffected (pose coverage cannot be verified without slots).
+    face_enrollment_enforce_pose_coverage: bool = True
 
     # ── Unknown face handling ─────────────────────────────────────────────
     unknown_person_alert: bool = True
