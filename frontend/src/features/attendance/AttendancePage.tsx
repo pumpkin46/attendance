@@ -6,6 +6,7 @@ import { Button } from '@/shared/ui/Button'
 import { Input } from '@/shared/ui/Input'
 import { Combobox } from '@/shared/ui/Combobox'
 import { DatePicker } from '@/shared/ui/DatePicker'
+import { DateRangePicker } from '@/shared/ui/DateRangePicker'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { SearchBox } from '@/shared/ui/SearchBox'
@@ -116,9 +117,16 @@ export default function AttendancePage() {
         description="Auto check-in on recognition with confidence and liveness; auto check-out at exit cameras per policy."
         actions={
           <div className="flex items-center gap-2">
-            <DatePicker className="w-40" value={dateFrom} onChange={setDateFrom} max={dateTo} />
-            <span className="text-sm text-slate-500">to</span>
-            <DatePicker className="w-40" value={dateTo} onChange={setDateTo} min={dateFrom} />
+            <DateRangePicker
+              className="w-60"
+              aria-label="Filter by date range"
+              from={dateFrom}
+              to={dateTo}
+              onChange={({ from, to }) => {
+                setDateFrom(from)
+                setDateTo(to)
+              }}
+            />
             <Button onClick={() => setFormOpen((v) => !v)}>
               {formOpen ? 'Cancel' : 'Record manually'}
             </Button>
@@ -160,7 +168,11 @@ export default function AttendancePage() {
           {/* Exports the full date range server-side; the search/status filters
               above are client-side only and are not applied to the file. */}
           <ReportExportButtons
-            params={{ report_type: 'attendance', date_from: dateFrom, date_to: dateTo }}
+            params={{
+              report_type: 'attendance',
+              date_from: dateFrom || undefined,
+              date_to: dateTo || undefined,
+            }}
           />
         </div>
       </div>

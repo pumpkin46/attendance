@@ -4,18 +4,19 @@ import { clearOrg, selectOrgId, setOrg } from '@/features/tenant/tenantSlice'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Card } from '@/shared/ui/Card'
-import { DataTable } from '@/shared/ui/DataTable'
-import { Input } from '@/shared/ui/Input'
+import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
-import { Label } from '@/shared/ui/Label'
+import { Combobox } from '@/shared/ui/Combobox'
 import { cn } from '@/shared/lib/cn'
+import { TenancyDirectory } from '@/features/security/components/TenancyDirectory'
 import {
   useBranches,
-  useCreateOrganization,
   useDepartments,
   useOrganizations,
   useSecurityConfig,
 } from '@/features/security/api/queries'
+
+// ── Icons ────────────────────────────────────────────────────────────────────
 
 const LockIcon = (
   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -35,6 +36,14 @@ const UsersIcon = (
     <path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 5a3.5 3.5 0 0 1 0 7M21 20c0-3-1.8-4.6-4-4.9" />
   </svg>
 )
+const ShieldIcon = (
+  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3 4.5 6v5.5c0 4.6 3.2 8 7.5 9.5 4.3-1.5 7.5-4.9 7.5-9.5V6L12 3Z" />
+    <path d="m9 12 2 2 4-4" />
+  </svg>
+)
+
+// ── Building blocks ──────────────────────────────────────────────────────────
 
 function OnOffPill({ on, onText = 'Enabled', offText = 'Off' }: { on: boolean; onText?: string; offText?: string }) {
   return (
@@ -52,7 +61,7 @@ function OnOffPill({ on, onText = 'Enabled', offText = 'Off' }: { on: boolean; o
 
 function ConfigRow({ label, on, value }: { label: string; on?: boolean; value?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-800 py-2.5 last:border-0">
+    <div className="flex items-center justify-between gap-4 border-b border-slate-800 py-2.5 last:border-0">
       <span className="text-sm text-slate-400">{label}</span>
       {value !== undefined ? (
         <span className="text-sm font-medium text-slate-200">{value}</span>
@@ -63,51 +72,56 @@ function ConfigRow({ label, on, value }: { label: string; on?: boolean; value?: 
   )
 }
 
-function SectionCard({
+function PostureCard({
   icon,
+  iconTone,
   title,
+  badge,
   children,
-  className,
 }: {
   icon: ReactNode
+  iconTone: string
   title: string
+  badge?: ReactNode
   children: ReactNode
-  className?: string
 }) {
   return (
-    <Card className={className}>
+    <Card>
       <div className="mb-3 flex items-center gap-3">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-500/15 text-blue-400">
+        <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-lg', iconTone)}>
           {icon}
         </span>
-        <h2 className="text-base font-semibold text-slate-100">{title}</h2>
+        <h2 className="flex-1 text-base font-semibold text-slate-100">{title}</h2>
+        {badge}
       </div>
       {children}
     </Card>
   )
 }
 
-function TableSection({
-  title,
-  count,
-  children,
+function StatTile({
+  label,
+  value,
+  dot,
+  accent,
 }: {
-  title: string
-  count: number
-  children: ReactNode
+  label: string
+  value: number
+  dot: string
+  accent: string
 }) {
   return (
-    <Card padding={false} className="overflow-hidden">
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-        <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
-        <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-slate-400">
-          {count}
-        </span>
-      </div>
-      {children}
-    </Card>
+    <div className={cn('rounded-xl border border-slate-700 border-l-4 bg-slate-900 p-4', accent)}>
+      <span className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+        <span className={cn('h-2 w-2 rounded-full', dot)} />
+        {label}
+      </span>
+      <span className="mt-2 block text-3xl font-semibold text-slate-100">{value}</span>
+    </div>
   )
 }
+
+// ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SecurityTenancyPage() {
   const { isSuperAdmin, hasPermission } = useAuth()
@@ -117,12 +131,16 @@ export default function SecurityTenancyPage() {
   const { data: organizations } = useOrganizations()
   const { data: branches } = useBranches()
   const { data: departments } = useDepartments()
-  const createOrganization = useCreateOrganization()
 
   const [tenantOrgId, setTenantOrgId] = useState(() => currentOrgId ?? '')
-  const [newOrg, setNewOrg] = useState({ name: '', code: '', timezone: 'UTC' })
 
-  const applyTenantHeader = () => {
+  const orgs = organizations ?? []
+  const employeesTotal = orgs.reduce((total, o) => total + (o.employees_count ?? 0), 0)
+  const contextOrgName = currentOrgId
+    ? orgs.find((o) => String(o.id) === currentOrgId)?.name ?? `Organization #${currentOrgId}`
+    : null
+
+  const applyTenantContext = () => {
     if (tenantOrgId) {
       dispatch(setOrg(tenantOrgId))
     } else {
@@ -132,56 +150,73 @@ export default function SecurityTenancyPage() {
     window.location.reload()
   }
 
-  const handleCreateOrganization = () => {
-    createOrganization.mutate(newOrg, {
-      onSuccess: () => setNewOrg({ name: '', code: '', timezone: 'UTC' }),
-    })
-  }
-
-  const orgs = organizations ?? []
-  const branchList = branches ?? []
-  const deptList = departments ?? []
-
   return (
     <div className="space-y-6">
       <PageHeader
         title="Security & Multi-Tenancy"
-        description="Authentication methods, RBAC roles, encryption posture, and tenant isolation (§16–§17)."
+        description="Platform security posture, role-based access, and the tenant directory of organizations, branches, and departments."
       />
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatTile label="Organizations" value={orgs.length} dot="bg-blue-400" accent="border-l-blue-500" />
+        <StatTile label="Branches" value={(branches ?? []).length} dot="bg-violet-400" accent="border-l-violet-500" />
+        <StatTile label="Departments" value={(departments ?? []).length} dot="bg-cyan-400" accent="border-l-cyan-500" />
+        <StatTile label="Employees" value={employeesTotal} dot="bg-emerald-400" accent="border-l-emerald-500" />
+      </div>
 
       {isSuperAdmin() && (
         <Card className="border-blue-800/40 bg-blue-500/[0.03]">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-400">
-              Super Admin
-            </span>
-            <h2 className="text-sm font-semibold text-slate-200">Tenant context</h2>
-          </div>
-          <p className="mb-3 text-xs text-slate-400">
-            Set <code className="rounded bg-slate-800 px-1 text-slate-300">X-Organization-Id</code> for
-            scoped API calls across organizations.
-          </p>
-          <div className="flex flex-wrap items-end gap-3">
-            <Label className="flex-1 min-w-[200px]">
-              Organization ID
-              <Input
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="min-w-[16rem] flex-1">
+              <div className="mb-1 flex items-center gap-2">
+                <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-400">
+                  Super Admin
+                </span>
+                <h2 className="text-sm font-semibold text-slate-200">Tenant context</h2>
+                {contextOrgName ? (
+                  <Badge tone="warn">Scoped to {contextOrgName}</Badge>
+                ) : (
+                  <Badge tone="neutral">All organizations</Badge>
+                )}
+              </div>
+              <p className="text-xs text-slate-400">
+                Act inside a single organization — every API call carries{' '}
+                <code className="rounded bg-slate-800 px-1 text-slate-300">X-Organization-Id</code>{' '}
+                until the context is cleared.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Combobox
                 value={tenantOrgId}
-                onChange={(e) => setTenantOrgId(e.target.value)}
-                placeholder="e.g. 1"
+                onChange={setTenantOrgId}
+                className="w-64"
+                aria-label="Tenant context organization"
+                options={[
+                  { value: '', label: 'All organizations (no scope)' },
+                  ...orgs.map((o) => ({ value: String(o.id), label: o.name })),
+                ]}
               />
-            </Label>
-            <Button type="button" onClick={applyTenantHeader}>
-              Apply &amp; reload
-            </Button>
+              <Button
+                type="button"
+                onClick={applyTenantContext}
+                disabled={tenantOrgId === (currentOrgId ?? '')}
+              >
+                Apply &amp; reload
+              </Button>
+            </div>
           </div>
         </Card>
       )}
 
       {security && (
         <div className="grid gap-4 md:grid-cols-2">
-          <SectionCard icon={KeyIcon} title="Authentication">
+          <PostureCard
+            icon={KeyIcon}
+            iconTone="bg-blue-500/15 text-blue-400"
+            title="Authentication"
+          >
             <div className="-mt-1">
-              <ConfigRow label="JWT (Sanctum Bearer)" on={security.authentication?.jwt?.enabled} />
+              <ConfigRow label="JWT (Bearer tokens)" on={security.authentication?.jwt?.enabled} />
               <ConfigRow
                 label={`OAuth2${
                   security.authentication?.oauth2?.providers?.length
@@ -193,9 +228,13 @@ export default function SecurityTenancyPage() {
               <ConfigRow label="SAML" on={security.authentication?.saml?.enabled} />
               <ConfigRow label="LDAP / Active Directory" on={security.authentication?.ldap?.enabled} />
             </div>
-          </SectionCard>
+          </PostureCard>
 
-          <SectionCard icon={LockIcon} title="Encryption & secrets">
+          <PostureCard
+            icon={LockIcon}
+            iconTone="bg-emerald-500/15 text-emerald-400"
+            title="Encryption & secrets"
+          >
             <div className="-mt-1">
               <ConfigRow label="In transit" value={`TLS ${security.encryption?.in_transit?.protocol ?? '—'}`} />
               <ConfigRow label="At rest" value={security.encryption?.at_rest?.cipher ?? '—'} />
@@ -214,19 +253,21 @@ export default function SecurityTenancyPage() {
                 }
               />
               <ConfigRow
-                label="Tenant isolation"
-                value={
-                  <OnOffPill
-                    on={!!security.tenancy?.isolation_enabled}
-                    onText="Mandatory"
-                    offText="Disabled"
-                  />
-                }
+                label="Forced HTTPS"
+                on={!!security.encryption?.in_transit?.force_https}
               />
             </div>
-          </SectionCard>
+          </PostureCard>
 
-          <SectionCard icon={UsersIcon} title="RBAC roles" className="md:col-span-2">
+          <PostureCard
+            icon={UsersIcon}
+            iconTone="bg-violet-500/15 text-violet-400"
+            title="Access control"
+            badge={<Badge tone="ok">{(security.authorization?.model ?? 'rbac').toUpperCase()}</Badge>}
+          >
+            <p className="mb-3 text-xs text-slate-500">
+              Every route and API endpoint is gated by per-role permissions.
+            </p>
             <div className="flex flex-wrap gap-2">
               {Object.entries(security.authorization?.roles ?? {}).map(([key, label]) => (
                 <span
@@ -237,83 +278,40 @@ export default function SecurityTenancyPage() {
                 </span>
               ))}
             </div>
-          </SectionCard>
+          </PostureCard>
+
+          <PostureCard
+            icon={ShieldIcon}
+            iconTone="bg-cyan-500/15 text-cyan-400"
+            title="Tenant isolation"
+            badge={
+              <OnOffPill
+                on={!!security.tenancy?.isolation_enabled}
+                onText="Mandatory"
+                offText="Disabled"
+              />
+            }
+          >
+            <p className="mb-1 text-xs text-slate-500">
+              All tenant data is partitioned by organization; queries are scoped server-side.
+            </p>
+            <div className="-mt-1">
+              <ConfigRow label="Unlimited organizations" on={!!security.tenancy?.supports?.unlimited_organizations} />
+              <ConfigRow label="Unlimited branches" on={!!security.tenancy?.supports?.unlimited_branches} />
+              <ConfigRow label="Unlimited departments" on={!!security.tenancy?.supports?.unlimited_departments} />
+            </div>
+          </PostureCard>
         </div>
       )}
 
-      {isSuperAdmin() && (
-        <Card>
-          <h2 className="mb-3 text-sm font-semibold text-slate-200">Create organization</h2>
-          <div className="flex flex-wrap items-end gap-3">
-            <Label className="min-w-[180px] flex-1">
-              Name
-              <Input
-                placeholder="Acme Corp"
-                value={newOrg.name}
-                onChange={(e) => setNewOrg({ ...newOrg, name: e.target.value })}
-              />
-            </Label>
-            <Label className="min-w-[140px]">
-              Code
-              <Input
-                placeholder="ACME"
-                value={newOrg.code}
-                onChange={(e) => setNewOrg({ ...newOrg, code: e.target.value })}
-              />
-            </Label>
-            <Button
-              type="button"
-              onClick={handleCreateOrganization}
-              disabled={!newOrg.name || !newOrg.code}
-              isLoading={createOrganization.isPending}
-            >
-              Create
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      <div className="space-y-6">
-        <TableSection title="Organizations" count={orgs.length}>
-          <DataTable
-            data={orgs}
-            rowKey={(o) => o.id}
-            empty="No organizations"
-            columns={[
-              { key: 'name', header: 'Name', cell: (o) => <span className="font-medium text-slate-100">{o.name}</span> },
-              { key: 'code', header: 'Code', className: 'font-mono text-xs', cell: (o) => o.code },
-              { key: 'branches', header: 'Branches', cell: (o) => o.branches_count ?? '—' },
-              { key: 'departments', header: 'Departments', cell: (o) => o.departments_count ?? '—' },
-              { key: 'employees', header: 'Employees', cell: (o) => o.employees_count ?? '—' },
-            ]}
-          />
-        </TableSection>
-
-        <TableSection title="Branches" count={branchList.length}>
-          <DataTable
-            data={branchList}
-            rowKey={(b) => b.id}
-            empty="No branches"
-            columns={[
-              { key: 'name', header: 'Name', cell: (b) => <span className="font-medium text-slate-100">{b.name}</span> },
-              { key: 'code', header: 'Code', className: 'font-mono text-xs', cell: (b) => b.code },
-              { key: 'org', header: 'Org ID', cell: (b) => b.organization_id },
-            ]}
-          />
-        </TableSection>
-
-        <TableSection title="Departments" count={deptList.length}>
-          <DataTable
-            data={deptList}
-            rowKey={(d) => d.id}
-            empty="No departments"
-            columns={[
-              { key: 'name', header: 'Name', cell: (d) => <span className="font-medium text-slate-100">{d.name}</span> },
-              { key: 'code', header: 'Code', className: 'font-mono text-xs', cell: (d) => d.code },
-              { key: 'branch', header: 'Branch', cell: (d) => d.branch?.name ?? '—' },
-            ]}
-          />
-        </TableSection>
+      <div>
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold text-slate-100">Tenant directory</h2>
+          <p className="mt-0.5 text-sm text-slate-400">
+            Manage organizations and their branches and departments.
+          </p>
+        </div>
+        <TenancyDirectory />
       </div>
     </div>
   )

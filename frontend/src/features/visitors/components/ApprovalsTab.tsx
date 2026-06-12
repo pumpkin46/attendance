@@ -25,7 +25,7 @@ export function ApprovalsTab({ onSelect }: { onSelect: (id: number) => void }) {
             key: 'visitor',
             header: 'Visitor',
             cell: (v) => (
-              <VisitorCell name={v.name} seed={v.id} sub={v.visitor_category?.replace(/_/g, ' ')} />
+              <VisitorCell name={v.name} seed={v.id} photoUrl={v.photo_url} sub={v.visitor_category?.replace(/_/g, ' ')} />
             ),
           },
           { key: 'company', header: 'Company', cell: (v) => v.company ?? '—' },

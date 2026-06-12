@@ -69,7 +69,7 @@ export function VisitorDashboardTab() {
               {
                 key: 'visitor',
                 header: 'Visitor',
-                cell: (v) => <VisitorCell name={v.name} seed={v.id} sub={v.company ?? '—'} />,
+                cell: (v) => <VisitorCell name={v.name} seed={v.id} photoUrl={v.photo_url} sub={v.company ?? '—'} />,
               },
               { key: 'host', header: 'Host', cell: (v) => (v.host ? `${v.host.first_name} ${v.host.last_name}` : '—') },
               { key: 'zone', header: 'Zone', cell: (v) => v.current_zone ?? 'Reception' },

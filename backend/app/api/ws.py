@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import async_session_factory
+from app.core.dependencies import get_single_org_id
 from app.core.security import decode_access_token
 from app.models.user import Role, User
 from app.realtime.hub import Connection, get_hub
@@ -75,6 +76,12 @@ async def _resolve_identity(
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
+        # Mirror get_tenant_org_id: a super admin without an explicit ?org=
+        # falls back to the lone active organization (single-org deployments).
+        default_org: int | None = None
+        if user is not None and user.has_role(settings.super_admin_role) and not org_param:
+            default_org = await get_single_org_id(db)
+
     if user is None:
         return None
     if user.has_role(settings.super_admin_role):
@@ -83,7 +90,7 @@ async def _resolve_identity(
                 return user.id, int(org_param)
             except ValueError:
                 return user.id, None
-        return user.id, None
+        return user.id, default_org
     return user.id, user.organization_id
 
 

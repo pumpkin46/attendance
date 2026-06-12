@@ -74,7 +74,7 @@ export function AllVisitorsTab({ onSelect }: { onSelect: (id: number) => void })
             key: 'visitor',
             header: 'Visitor',
             cell: (v) => (
-              <VisitorCell name={v.name} seed={v.id} sub={v.company ?? '—'} code={v.visitor_code} />
+              <VisitorCell name={v.name} seed={v.id} photoUrl={v.photo_url} sub={v.company ?? '—'} code={v.visitor_code} />
             ),
           },
           {

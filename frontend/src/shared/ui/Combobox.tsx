@@ -18,6 +18,8 @@ interface ComboboxProps {
   placeholder?: string
   /** Force the search box on/off. Defaults to on when there are more than 7 options. */
   searchable?: boolean
+  /** Trigger height/typography — `sm` (h-8, text-xs) lines up with `size="sm"` buttons in toolbars. */
+  size?: 'md' | 'sm'
   disabled?: boolean
   required?: boolean
   name?: string
@@ -47,7 +49,7 @@ function optionsFromChildren(children: React.ReactNode): ComboboxOption[] {
   return out
 }
 
-const ChevronIcon = ({ open }: { open: boolean }) => (
+const ChevronIcon = ({ open, small }: { open: boolean; small?: boolean }) => (
   <svg
     viewBox="0 0 24 24"
     fill="none"
@@ -55,7 +57,11 @@ const ChevronIcon = ({ open }: { open: boolean }) => (
     strokeWidth={2}
     strokeLinecap="round"
     strokeLinejoin="round"
-    className={cn('h-4 w-4 shrink-0 text-slate-400 transition-transform', open && 'rotate-180')}
+    className={cn(
+      'shrink-0 text-slate-400 transition-transform',
+      small ? 'h-3.5 w-3.5' : 'h-4 w-4',
+      open && 'rotate-180'
+    )}
   >
     <polyline points="6 9 12 15 18 9" />
   </svg>
@@ -73,6 +79,7 @@ export function Combobox({
   children,
   placeholder = 'Select…',
   searchable,
+  size = 'md',
   disabled,
   required,
   name,
@@ -163,7 +170,8 @@ export function Combobox({
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={onKeyDown}
         className={cn(
-          'flex w-full items-center justify-between gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-left text-sm',
+          'flex w-full items-center justify-between rounded-lg border border-slate-600 bg-slate-800 text-left',
+          size === 'sm' ? 'h-8 gap-1.5 px-2.5 text-xs' : 'gap-2 px-3 py-2 text-sm',
           'focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500',
           open && 'border-blue-500 ring-1 ring-blue-500',
           disabled && 'cursor-not-allowed opacity-60'
@@ -172,7 +180,7 @@ export function Combobox({
         <span className={cn('truncate', selected ? 'text-slate-100' : 'text-slate-500')}>
           {selected ? selected.label : placeholder}
         </span>
-        <ChevronIcon open={open} />
+        <ChevronIcon open={open} small={size === 'sm'} />
       </button>
 
       {/* Mirror value into a hidden field so HTML5 `required` validation works. */}

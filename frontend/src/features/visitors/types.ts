@@ -22,6 +22,7 @@ export interface Visitor {
   approval_status?: string
   visitor_category?: string
   visit_type?: string
+  visit_description?: string
   face_registered: boolean
   check_in_code?: string
   badge_number?: string
@@ -30,7 +31,49 @@ export interface Visitor {
   checked_in_at?: string
   checked_out_at?: string
   current_zone?: string
+  photo_url?: string
+  nationality?: string
+  id_number?: string
+  vehicle_number?: string
+  parking_zone?: string
+  created_at?: string
   host?: Host
+}
+
+export interface VisitorPhoto {
+  id: number
+  visitor_id: number
+  url: string
+  is_primary: boolean
+  caption?: string
+  created_at?: string
+}
+
+export interface VisitorDocument {
+  id: number
+  visitor_id: number
+  document_type: string
+  url: string
+  filename?: string
+  notes?: string
+  created_at?: string
+}
+
+export interface VisitorAccessPermission {
+  id: number
+  visitor_id: number
+  zone_name: string
+  granted: boolean
+  expires_at?: string
+}
+
+export interface VisitorLogEntry {
+  id: number
+  visitor_id: number
+  event_type: string
+  description?: string
+  user_id?: number
+  created_at?: string
 }
 
 export interface DashboardStats {

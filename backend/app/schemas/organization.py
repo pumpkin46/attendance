@@ -21,10 +21,20 @@ class OrganizationOut(BaseModel):
 
 
 class OrganizationCreate(BaseModel):
-    name: str
-    code: str
+    name: str = Field(min_length=1, max_length=255)
+    code: str = Field(min_length=1, max_length=255)
     timezone: str = "UTC"
     settings: dict[str, Any] | None = None
+
+
+class OrganizationUpdate(BaseModel):
+    """Partial update — only fields present in the request body are applied."""
+
+    name: str | None = Field(None, min_length=1, max_length=255)
+    code: str | None = Field(None, min_length=1, max_length=255)
+    timezone: str | None = None
+    settings: dict[str, Any] | None = None
+    is_active: bool | None = None
 
 
 class OrganizationWithCounts(OrganizationOut):
@@ -53,10 +63,23 @@ class BranchOut(BaseModel):
 
 
 class BranchCreate(BaseModel):
-    name: str
-    code: str
+    name: str = Field(min_length=1, max_length=255)
+    code: str = Field(min_length=1, max_length=255)
     address: str | None = None
     timezone: str = "UTC"
+    # Super admins operating without a tenant header pick the target org here;
+    # for tenant-scoped users the header/org context always wins.
+    organization_id: int | None = None
+
+
+class BranchUpdate(BaseModel):
+    """Partial update — only fields present in the request body are applied."""
+
+    name: str | None = Field(None, min_length=1, max_length=255)
+    code: str | None = Field(None, min_length=1, max_length=255)
+    address: str | None = None
+    timezone: str | None = None
+    is_active: bool | None = None
 
 
 # ── Department ──────────────────────────────────────────────────────────────
@@ -76,9 +99,21 @@ class DepartmentOut(BaseModel):
 
 
 class DepartmentCreate(BaseModel):
-    name: str
-    code: str
+    name: str = Field(min_length=1, max_length=255)
+    code: str = Field(min_length=1, max_length=255)
     branch_id: int | None = None
+    # Super admins operating without a tenant header pick the target org here;
+    # for tenant-scoped users the header/org context always wins.
+    organization_id: int | None = None
+
+
+class DepartmentUpdate(BaseModel):
+    """Partial update — only fields present in the request body are applied."""
+
+    name: str | None = Field(None, min_length=1, max_length=255)
+    code: str | None = Field(None, min_length=1, max_length=255)
+    branch_id: int | None = None
+    is_active: bool | None = None
 
 
 class BranchBrief(BaseModel):

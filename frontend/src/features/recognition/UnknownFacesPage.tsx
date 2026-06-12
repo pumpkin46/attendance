@@ -8,7 +8,7 @@ import { Card } from '@/shared/ui/Card'
 import { Checkbox } from '@/shared/ui/Checkbox'
 import { Combobox } from '@/shared/ui/Combobox'
 import { DataTable } from '@/shared/ui/DataTable'
-import { DatePicker } from '@/shared/ui/DatePicker'
+import { DateRangePicker } from '@/shared/ui/DateRangePicker'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Pagination } from '@/shared/ui/Pagination'
 import { Skeleton } from '@/shared/ui/Skeleton'
@@ -54,12 +54,9 @@ export default function UnknownFacesPage() {
   const [page, setPage] = useState(1)
 
   // Filter/date changes redefine the result set, so navigation restarts at page 1.
-  const changeDateFrom = (v: string) => {
-    setDateFrom(v)
-    setPage(1)
-  }
-  const changeDateTo = (v: string) => {
-    setDateTo(v)
+  const changeDateRange = (from: string, to: string) => {
+    setDateFrom(from)
+    setDateTo(to)
     setPage(1)
   }
   const changeCameraFilter = (v: string) => {
@@ -116,11 +113,13 @@ export default function UnknownFacesPage() {
         title="Unknown Faces"
         description="Review unrecognized persons captured by cameras — snapshots, liveness, and alert status."
         actions={
-          <div className="flex items-center gap-2">
-            <DatePicker className="w-40" value={dateFrom} onChange={changeDateFrom} max={dateTo} />
-            <span className="text-sm text-slate-500">to</span>
-            <DatePicker className="w-40" value={dateTo} onChange={changeDateTo} min={dateFrom} />
-          </div>
+          <DateRangePicker
+            className="w-60"
+            aria-label="Filter by date range"
+            from={dateFrom}
+            to={dateTo}
+            onChange={({ from, to }) => changeDateRange(from, to)}
+          />
         }
       />
 

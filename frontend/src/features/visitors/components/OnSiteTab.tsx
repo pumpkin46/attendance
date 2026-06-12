@@ -19,7 +19,7 @@ export function OnSiteTab() {
         {
           key: 'visitor',
           header: 'Visitor',
-          cell: (v) => <VisitorCell name={v.name} seed={v.id} sub={v.badge_number ? `Badge ${v.badge_number}` : '—'} />,
+          cell: (v) => <VisitorCell name={v.name} seed={v.id} photoUrl={v.photo_url} sub={v.badge_number ? `Badge ${v.badge_number}` : '—'} />,
         },
         { key: 'host', header: 'Host', cell: (v) => (v.host ? `${v.host.first_name} ${v.host.last_name}` : '—') },
         { key: 'zone', header: 'Zone', cell: (v) => v.current_zone ?? 'Reception' },

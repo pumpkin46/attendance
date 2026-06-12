@@ -76,9 +76,13 @@ class SecurityAlert(Base, TimestampMixin):
     acknowledged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    resolved_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    snapshot_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     camera: Mapped["Camera | None"] = relationship(lazy="selectin")
@@ -86,3 +90,14 @@ class SecurityAlert(Base, TimestampMixin):
     visitor: Mapped["Visitor | None"] = relationship(lazy="selectin")
     recognition_event: Mapped["RecognitionEvent | None"] = relationship(lazy="selectin")
     access_point: Mapped["AccessPoint | None"] = relationship(lazy="selectin")
+
+    # The API exposes `description` / `metadata_json`; the table predates those
+    # names (`message` / `metadata`). Properties bridge the two so Pydantic's
+    # from_attributes validation reads them directly.
+    @property
+    def description(self) -> str | None:
+        return self.message
+
+    @property
+    def metadata_json(self) -> dict | None:
+        return self.meta

@@ -7,12 +7,15 @@ from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_p
 from app.schemas.organization import (
     BranchCreate,
     BranchOut,
+    BranchUpdate,
     DepartmentCreate,
     DepartmentOut,
+    DepartmentUpdate,
     DepartmentWithBranch,
     LocationBrief,
     OrganizationCreate,
     OrganizationOut,
+    OrganizationUpdate,
     OrganizationWithCounts,
     SecurityConfigResponse,
 )
@@ -57,6 +60,34 @@ async def get_organization(org_id: int, db: DbSession, user: CurrentUser):
     return OrganizationOut.model_validate(org, from_attributes=True)
 
 
+@router.patch("/organizations/{org_id}", response_model=OrganizationOut)
+async def update_organization(
+    org_id: int,
+    body: OrganizationUpdate,
+    db: DbSession,
+    user: require_permission("organizations.manage"),
+):
+    org = await service.update_organization(
+        db,
+        org_id,
+        body,
+        is_super_admin=user.has_role(settings.super_admin_role),
+        user_org_id=user.organization_id,
+    )
+    return OrganizationOut.model_validate(org, from_attributes=True)
+
+
+@router.delete("/organizations/{org_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_organization(
+    org_id: int,
+    db: DbSession,
+    user: require_permission("organizations.manage"),
+):
+    await service.delete_organization(
+        db, org_id, is_super_admin=user.has_role(settings.super_admin_role)
+    )
+
+
 # ── Branches ────────────────────────────────────────────────────────────────
 
 
@@ -82,6 +113,28 @@ async def create_branch(
     return BranchOut.model_validate(branch, from_attributes=True)
 
 
+@router.patch("/branches/{branch_id}", response_model=BranchOut)
+async def update_branch(
+    branch_id: int,
+    body: BranchUpdate,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: require_permission("branches.manage"),
+):
+    branch = await service.update_branch(db, org_id, branch_id, body)
+    return BranchOut.model_validate(branch, from_attributes=True)
+
+
+@router.delete("/branches/{branch_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_branch(
+    branch_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: require_permission("branches.manage"),
+):
+    await service.delete_branch(db, org_id, branch_id)
+
+
 # ── Departments ─────────────────────────────────────────────────────────────
 
 
@@ -105,6 +158,28 @@ async def create_department(
 ):
     dept = await service.create_department(db, org_id, body)
     return DepartmentOut.model_validate(dept, from_attributes=True)
+
+
+@router.patch("/departments/{department_id}", response_model=DepartmentOut)
+async def update_department(
+    department_id: int,
+    body: DepartmentUpdate,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: require_permission("departments.manage"),
+):
+    dept = await service.update_department(db, org_id, department_id, body)
+    return DepartmentOut.model_validate(dept, from_attributes=True)
+
+
+@router.delete("/departments/{department_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_department(
+    department_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: require_permission("departments.manage"),
+):
+    await service.delete_department(db, org_id, department_id)
 
 
 # ── Locations ───────────────────────────────────────────────────────────────

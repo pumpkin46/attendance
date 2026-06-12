@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -9,8 +10,8 @@ import { Combobox } from '@/shared/ui/Combobox'
 import { Label } from '@/shared/ui/Label'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { Pagination } from '@/shared/ui/Pagination'
+import { SearchBox } from '@/shared/ui/SearchBox'
 import { SidePanel } from '@/shared/ui/SidePanel'
-import { StatCard } from '@/shared/ui/StatCard'
 import { Skeleton } from '@/shared/ui/Skeleton'
 import { cn } from '@/shared/lib/cn'
 import type { Camera } from '@/shared/types'
@@ -25,8 +26,12 @@ import {
 } from '@/features/cameras/api/queries'
 import {
   CAMERA_TYPE_FALLBACK,
+  DEFAULT_STREAM_FIELD,
+  DIRECTION_LABELS,
   STATUS_LABELS,
+  STREAM_FIELD_BY_TYPE,
   ZONE_FALLBACK,
+  streamUrlProblem,
   type CaptureResult,
 } from '@/features/cameras/types'
 
@@ -42,7 +47,6 @@ const emptyForm = {
   resolution_height: '1080',
   status: 'active' as Camera['status'],
   direction: 'both',
-  deployment_mode: 'cloud' as Camera['deployment_mode'],
 }
 
 const CameraGlyph = (
@@ -55,9 +59,21 @@ const CameraGlyph = (
 const isOnline = (c: Camera) => c.health?.online ?? c.online ?? false
 const eventsToday = (c: Camera) => c.health?.recognition_events_today ?? c.recognition_count_today ?? 0
 
+function timeAgo(iso?: string | null): string | null {
+  if (!iso) return null
+  const ms = Date.now() - new Date(iso).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  const min = Math.floor(ms / 60_000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  const hours = Math.floor(min / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+
 function MetricCell({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="px-3 py-2">
+    <div className="bg-slate-900 px-3 py-2">
       <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
       <div className="font-mono text-sm font-medium text-slate-200">{value}</div>
     </div>
@@ -88,9 +104,18 @@ function CameraTile({
       ? `${camera.resolution_width}×${camera.resolution_height}`
       : null)
   const fps = camera.health?.fps != null ? camera.health.fps.toFixed(1) : camera.frame_rate_fps ?? '—'
+  const lastSeen = timeAgo(camera.health?.updated_at ?? camera.last_heartbeat_at)
+  const footerMeta = [
+    resolution,
+    DIRECTION_LABELS[camera.direction] ?? null,
+    lastSeen && `Seen ${lastSeen}`,
+  ].filter(Boolean)
 
   return (
-    <Card padding={false} className="flex flex-col overflow-hidden">
+    <Card
+      padding={false}
+      className="group flex flex-col overflow-hidden transition-colors hover:border-slate-600"
+    >
       {/* Preview band */}
       <div
         className={cn(
@@ -107,8 +132,13 @@ function CameraTile({
             online ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-900/70 text-slate-400'
           )}
         >
-          <span className={cn('h-1.5 w-1.5 rounded-full', online ? 'bg-emerald-400' : 'bg-slate-500')} />
-          {online ? 'Online' : 'Offline'}
+          <span
+            className={cn(
+              'h-1.5 w-1.5 rounded-full',
+              online ? 'animate-pulse bg-emerald-400' : 'bg-slate-500'
+            )}
+          />
+          {online ? 'Live' : 'Offline'}
         </span>
 
         {/* Top-right: type */}
@@ -132,7 +162,7 @@ function CameraTile({
       </div>
 
       {/* Health metrics */}
-      <div className="grid grid-cols-3 gap-px bg-slate-800">
+      <div className="grid grid-cols-3 gap-px border-t border-slate-800 bg-slate-800">
         <MetricCell label="FPS" value={fps} />
         <MetricCell label="Latency" value={camera.health?.latency_ms != null ? `${camera.health.latency_ms}ms` : '—'} />
         <MetricCell label="Events" value={eventsToday(camera)} />
@@ -144,7 +174,11 @@ function CameraTile({
       {/* Footer */}
       <div className="flex items-center justify-between gap-2 border-t border-slate-800 px-3 py-2.5">
         <span className="truncate text-xs text-slate-500">
-          {resolution ?? (camera.target_fps ? `${camera.target_fps} fps target` : '—')}
+          {footerMeta.length > 0
+            ? footerMeta.join(' · ')
+            : camera.target_fps
+              ? `${camera.target_fps} fps target`
+              : '—'}
         </span>
         <div className="flex shrink-0 gap-1">
           <Button size="sm" variant="ghost" onClick={onEdit}>
@@ -170,16 +204,66 @@ function CameraTile({
   )
 }
 
-const FILTERS = [
-  { key: 'all', label: 'All' },
-  { key: 'online', label: 'Online' },
-  { key: 'offline', label: 'Offline' },
-] as const
-type FilterKey = (typeof FILTERS)[number]['key']
+/** Clickable fleet summary tile, mirrors the anomalies page severity tiles. */
+function FleetTile({
+  label,
+  value,
+  dot,
+  accent,
+  active,
+  onClick,
+}: {
+  label: string
+  value: number
+  dot: string
+  accent: string
+  active?: boolean
+  onClick?: () => void
+}) {
+  const body = (
+    <>
+      <span className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+        <span className={cn('h-2 w-2 rounded-full', dot)} />
+        {label}
+      </span>
+      <span className="mt-2 block text-3xl font-semibold text-slate-100">{value}</span>
+    </>
+  )
+  const base = cn('rounded-xl border border-slate-700 border-l-4 bg-slate-900 p-4 text-left', accent)
+  if (!onClick) return <div className={base}>{body}</div>
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        base,
+        'transition-colors hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+        active && 'bg-slate-800 ring-1 ring-blue-500/70'
+      )}
+    >
+      {body}
+    </button>
+  )
+}
+
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <fieldset className="mb-2">
+      <legend className="mb-3 flex w-full items-center gap-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {title}
+        <span className="h-px flex-1 bg-slate-800" />
+      </legend>
+      <div className="grid gap-x-4 sm:grid-cols-2">{children}</div>
+    </fieldset>
+  )
+}
+
+type FilterKey = 'all' | 'online' | 'offline'
 
 // The camera list is small and capped server-side (max_cameras), so the full
 // set is always loaded in one request; the grid paginates client-side to keep
-// the stat cards and online/offline chips counting the whole fleet.
+// the fleet tiles counting the whole fleet.
 const CAMERAS_PER_PAGE = 12
 
 export default function CamerasPage() {
@@ -197,6 +281,8 @@ export default function CamerasPage() {
   const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
 
   // The online/offline filter lives in the URL so the dashboard can deep-link
   // to it (e.g. /cameras?filter=online) and views stay shareable.
@@ -210,12 +296,26 @@ export default function CamerasPage() {
   const cameraTypes = config?.camera_types ?? CAMERA_TYPE_FALLBACK
   const zones = config?.zones ?? ZONE_FALLBACK
 
+  // The stream source field adapts to the selected camera type: RTSP cameras
+  // take an rtsp:// URL, IP/mobile cameras an http(s) endpoint, USB cameras a
+  // bare device index, NVR/CCTV a channel URL.
+  const streamSpec = STREAM_FIELD_BY_TYPE[form.camera_type] ?? DEFAULT_STREAM_FIELD
+  const streamUrlError = streamUrlProblem(form.camera_type, form.stream_url)
+
   const onlineCount = cameras.filter(isOnline).length
   const filtered = useMemo(() => {
-    if (filter === 'online') return cameras.filter(isOnline)
-    if (filter === 'offline') return cameras.filter((c) => !isOnline(c))
-    return cameras
-  }, [cameras, filter])
+    const q = search.trim().toLowerCase()
+    return cameras.filter((c) => {
+      if (filter === 'online' && !isOnline(c)) return false
+      if (filter === 'offline' && isOnline(c)) return false
+      if (typeFilter && (c.camera_type ?? 'rtsp') !== typeFilter) return false
+      if (!q) return true
+      const typeKey = c.camera_type ?? 'rtsp'
+      return [c.name, c.location?.name, c.zone, c.floor, typeKey, cameraTypes[typeKey]].some(
+        (field) => field?.toLowerCase().includes(q)
+      )
+    })
+  }, [cameras, filter, typeFilter, search, cameraTypes])
 
   // Clamp so deletes or filter changes never strand the view on an empty page.
   // Render-phase sync (not an effect): persist the clamped value, otherwise a
@@ -249,7 +349,6 @@ export default function CamerasPage() {
       resolution_height: String(camera.resolution_height ?? 1080),
       status: camera.status,
       direction: camera.direction ?? 'both',
-      deployment_mode: camera.deployment_mode ?? 'cloud',
     })
   }
 
@@ -264,19 +363,22 @@ export default function CamerasPage() {
 
   const saveCamera = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (streamUrlError) {
+      toast.error(`Invalid ${streamSpec.label.toLowerCase()}: ${streamUrlError}`)
+      return
+    }
     const payload = {
       location_id: Number(form.location_id),
       name: form.name,
       camera_type: form.camera_type,
       zone: form.zone || null,
       floor: form.floor || null,
-      stream_url: form.stream_url || null,
+      stream_url: form.stream_url.trim() || null,
       target_fps: form.target_fps ? Number(form.target_fps) : null,
       resolution_width: form.resolution_width ? Number(form.resolution_width) : null,
       resolution_height: form.resolution_height ? Number(form.resolution_height) : null,
       status: form.status,
       direction: form.direction,
-      deployment_mode: form.deployment_mode,
     }
 
     if (editingId) {
@@ -342,140 +444,148 @@ export default function CamerasPage() {
           </>
         }
       >
-        <form id="camera-form" className="grid gap-4 sm:grid-cols-2" onSubmit={saveCamera}>
-          <Label>
-            Camera name *
-            <Input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="Main entrance"
-              required
-            />
-          </Label>
-          <Label>
-            Camera type *
-            <Combobox
-              value={form.camera_type}
-              onChange={(value) => setForm({ ...form, camera_type: value })}
-            >
-              {Object.entries(cameraTypes).map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </Combobox>
-          </Label>
-          <Label>
-            Location *
-            <Combobox
-              value={form.location_id}
-              onChange={(value) => setForm({ ...form, location_id: value })}
-              required
-            >
-              <option value="">Select location</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </Combobox>
-          </Label>
-          <Label>
-            Zone
-            <Combobox
-              value={form.zone}
-              onChange={(value) => setForm({ ...form, zone: value })}
-            >
-              <option value="">—</option>
-              {Object.entries(zones).map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </Combobox>
-          </Label>
-          <Label>
-            Floor
-            <Input
-              value={form.floor}
-              onChange={(e) => setForm({ ...form, floor: e.target.value })}
-              placeholder="Ground, L1, …"
-            />
-          </Label>
-          <Label className="sm:col-span-2">
-            RTSP URL
-            <Input
-              placeholder="rtsp://user:pass@192.168.1.100:554/stream"
-              value={form.stream_url}
-              onChange={(e) => setForm({ ...form, stream_url: e.target.value })}
-            />
-          </Label>
-          <Label>
-            Target FPS
-            <Input
-              type="number"
-              min={1}
-              max={120}
-              value={form.target_fps}
-              onChange={(e) => setForm({ ...form, target_fps: e.target.value })}
-            />
-          </Label>
-          <Label>
-            Resolution width
-            <Input
-              type="number"
-              value={form.resolution_width}
-              onChange={(e) => setForm({ ...form, resolution_width: e.target.value })}
-            />
-          </Label>
-          <Label>
-            Resolution height
-            <Input
-              type="number"
-              value={form.resolution_height}
-              onChange={(e) => setForm({ ...form, resolution_height: e.target.value })}
-            />
-          </Label>
-          <Label>
-            Direction
-            <Combobox
-              value={form.direction}
-              onChange={(value) => setForm({ ...form, direction: value })}
-            >
-              <option value="in">Entry (check-in)</option>
-              <option value="out">Exit (check-out)</option>
-              <option value="both">Both</option>
-            </Combobox>
-          </Label>
-          <Label>
-            Status *
-            <Combobox
-              value={form.status}
-              onChange={(value) => setForm({ ...form, status: value as Camera['status'] })}
-            >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="maintenance">Maintenance</option>
-            </Combobox>
-          </Label>
-          <Label>
-            Deployment
-            <Combobox
-              value={form.deployment_mode}
-              onChange={(value) =>
-                setForm({ ...form, deployment_mode: value as Camera['deployment_mode'] })
-              }
-            >
-              <option value="cloud">Cloud (central AI)</option>
-              <option value="edge">Edge (on-device AI)</option>
-            </Combobox>
-          </Label>
+        <form id="camera-form" onSubmit={saveCamera}>
+          <FormSection title="Identity">
+            <Label>
+              Camera name *
+              <Input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Main entrance"
+                required
+              />
+            </Label>
+            <Label>
+              Camera type *
+              <Combobox
+                value={form.camera_type}
+                onChange={(value) => setForm({ ...form, camera_type: value })}
+              >
+                {Object.entries(cameraTypes).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </Combobox>
+            </Label>
+          </FormSection>
+
+          <FormSection title="Placement">
+            <Label>
+              Location *
+              <Combobox
+                value={form.location_id}
+                onChange={(value) => setForm({ ...form, location_id: value })}
+                required
+              >
+                <option value="">Select location</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </Combobox>
+            </Label>
+            <Label>
+              Zone
+              <Combobox
+                value={form.zone}
+                onChange={(value) => setForm({ ...form, zone: value })}
+              >
+                <option value="">—</option>
+                {Object.entries(zones).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </Combobox>
+            </Label>
+            <Label>
+              Floor
+              <Input
+                value={form.floor}
+                onChange={(e) => setForm({ ...form, floor: e.target.value })}
+                placeholder="Ground, L1, …"
+              />
+            </Label>
+            <Label>
+              Direction
+              <Combobox
+                value={form.direction}
+                onChange={(value) => setForm({ ...form, direction: value })}
+              >
+                <option value="in">Entry (check-in)</option>
+                <option value="out">Exit (check-out)</option>
+                <option value="both">Both</option>
+              </Combobox>
+            </Label>
+          </FormSection>
+
+          <FormSection title="Video stream">
+            <Label className="sm:col-span-2">
+              {streamSpec.label}
+              <Input
+                placeholder={streamSpec.placeholder}
+                value={form.stream_url}
+                inputMode={streamSpec.numeric ? 'numeric' : 'url'}
+                onChange={(e) => setForm({ ...form, stream_url: e.target.value })}
+                className={cn(
+                  streamUrlError &&
+                    'border-red-500/70 focus:border-red-500 focus:ring-red-500'
+                )}
+              />
+              <span className={cn('text-xs', streamUrlError ? 'text-red-400' : 'text-slate-500')}>
+                {streamUrlError ?? streamSpec.hint}
+              </span>
+            </Label>
+            <Label>
+              Target FPS
+              <Input
+                type="number"
+                min={1}
+                max={120}
+                value={form.target_fps}
+                onChange={(e) => setForm({ ...form, target_fps: e.target.value })}
+              />
+            </Label>
+            <Label>
+              Status *
+              <Combobox
+                value={form.status}
+                onChange={(value) => setForm({ ...form, status: value as Camera['status'] })}
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="maintenance">Maintenance</option>
+              </Combobox>
+            </Label>
+            <Label>
+              Resolution width
+              <Input
+                type="number"
+                value={form.resolution_width}
+                onChange={(e) => setForm({ ...form, resolution_width: e.target.value })}
+              />
+            </Label>
+            <Label>
+              Resolution height
+              <Input
+                type="number"
+                value={form.resolution_height}
+                onChange={(e) => setForm({ ...form, resolution_height: e.target.value })}
+              />
+            </Label>
+          </FormSection>
         </form>
       </SidePanel>
 
       {captureResult && (
-        <Card className="mb-6 flex items-start justify-between gap-3 border-l-4 border-l-blue-500">
-          <div className="text-sm text-slate-200">
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-slate-200">
+          <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v4M12 16h.01" />
+          </svg>
+          <div className="flex-1">
             <p>
               <span className="font-medium">Stream test:</span> {captureResult.face_count} face(s) in{' '}
               {captureResult.detect_ms}ms
@@ -494,47 +604,81 @@ export default function CamerasPage() {
           <button
             type="button"
             onClick={() => setCaptureResult(null)}
-            className="shrink-0 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+            aria-label="Dismiss"
+            className="shrink-0 rounded-md px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
           >
             Dismiss
           </button>
-        </Card>
+        </div>
       )}
 
-      <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
-        <StatCard label="Total cameras" value={cameras.length} />
-        <StatCard label="Online" value={onlineCount} tone="ok" />
-        <StatCard
+      {/* Fleet summary — Total/Online/Offline double as the status filter. */}
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <FleetTile
+          label="Total cameras"
+          value={cameras.length}
+          dot="bg-blue-400"
+          accent="border-l-blue-500"
+          active={filter === 'all'}
+          onClick={() => changeFilter('all')}
+        />
+        <FleetTile
+          label="Online"
+          value={onlineCount}
+          dot="bg-emerald-400"
+          accent="border-l-emerald-500"
+          active={filter === 'online'}
+          onClick={() => changeFilter('online')}
+        />
+        <FleetTile
           label="Offline"
           value={cameras.length - onlineCount}
-          tone={cameras.length - onlineCount > 0 ? 'warn' : undefined}
+          dot={cameras.length - onlineCount > 0 ? 'bg-amber-400' : 'bg-slate-500'}
+          accent={cameras.length - onlineCount > 0 ? 'border-l-amber-500' : 'border-l-slate-600'}
+          active={filter === 'offline'}
+          onClick={() => changeFilter('offline')}
         />
-        <StatCard
+        <FleetTile
           label="Recognitions today"
           value={cameras.reduce((n, c) => n + eventsToday(c), 0)}
+          dot="bg-violet-400"
+          accent="border-l-violet-500"
         />
       </div>
 
-      {/* Filter chips */}
+      {/* Toolbar: search + type filter */}
       {!isPending && !isError && cameras.length > 0 && (
-        <div className="mb-4 inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1">
-          {FILTERS.map((f) => {
-            const count = f.key === 'all' ? cameras.length : f.key === 'online' ? onlineCount : cameras.length - onlineCount
-            return (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => changeFilter(f.key)}
-                className={cn(
-                  'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                  filter === f.key ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                )}
-              >
-                {f.label}
-                <span className="ml-1.5 text-xs text-slate-500">{count}</span>
-              </button>
-            )
-          })}
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <SearchBox
+            value={search}
+            onChange={(v) => {
+              setSearch(v)
+              setPage(1)
+            }}
+            placeholder="Search name, location, zone…"
+            className="w-full sm:max-w-xs"
+          />
+          <div className="flex items-center gap-3">
+            <Combobox
+              value={typeFilter}
+              onChange={(v) => {
+                setTypeFilter(v)
+                setPage(1)
+              }}
+              className="w-48"
+              aria-label="Filter by camera type"
+            >
+              <option value="">All types</option>
+              {Object.entries(cameraTypes).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </Combobox>
+            <span className="hidden whitespace-nowrap text-xs text-slate-500 sm:block">
+              {filtered.length} of {cameras.length} cameras
+            </span>
+          </div>
         </div>
       )}
 
@@ -546,7 +690,7 @@ export default function CamerasPage() {
               <Skeleton className="aspect-video w-full rounded-none" />
               <div className="grid grid-cols-3 gap-px bg-slate-800">
                 {Array.from({ length: 6 }).map((_, j) => (
-                  <div key={j} className="px-3 py-2">
+                  <div key={j} className="bg-slate-900 px-3 py-2">
                     <Skeleton className="h-3 w-10" />
                     <Skeleton className="mt-1 h-4 w-8" />
                   </div>
@@ -567,12 +711,14 @@ export default function CamerasPage() {
           </span>
           <p className="text-sm font-medium text-slate-300">No cameras registered yet</p>
           <p className="text-xs text-slate-500">Register your first camera to start monitoring streams.</p>
-          <Button className="mt-2" onClick={() => setShowForm(true)}>
+          <Button className="mt-2" onClick={openCreate}>
             + Register camera
           </Button>
         </Card>
       ) : filtered.length === 0 ? (
-        <Card className="py-10 text-center text-sm text-slate-500">No {filter} cameras</Card>
+        <Card className="py-10 text-center text-sm text-slate-500">
+          No cameras match the current filters
+        </Card>
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

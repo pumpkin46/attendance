@@ -8,7 +8,7 @@ import { AllVisitorsTab } from '@/features/visitors/components/AllVisitorsTab'
 import { ApprovalsTab } from '@/features/visitors/components/ApprovalsTab'
 import { BlacklistTab } from '@/features/visitors/components/BlacklistTab'
 import { OnSiteTab } from '@/features/visitors/components/OnSiteTab'
-import { useInvalidateVisitors, useVisitorStats } from '@/features/visitors/api/queries'
+import { useVisitorStats } from '@/features/visitors/api/queries'
 import { VisitorDashboardTab } from '@/features/visitors/components/VisitorDashboardTab'
 import { VisitorRegisterPanel } from '@/features/visitors/components/VisitorRegisterPanel'
 import type { VisitorTab } from '@/features/visitors/types'
@@ -26,7 +26,6 @@ export default function VisitorsPage() {
   const [detailVisitorId, setDetailVisitorId] = useState<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [showRegister, setShowRegister] = useState(false)
-  const invalidate = useInvalidateVisitors()
   const { data: stats } = useVisitorStats()
 
   const openDetail = (id: number) => {
@@ -76,7 +75,6 @@ export default function VisitorsPage() {
           open={detailOpen}
           visitorId={detailVisitorId}
           onClose={() => setDetailOpen(false)}
-          onUpdated={invalidate}
         />
       )}
     </div>

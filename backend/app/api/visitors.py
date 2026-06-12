@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 
 from app.core.dependencies import (
     CurrentUser,
@@ -20,6 +20,7 @@ from app.models.visitor import (
     Visitor,
     VisitorBlacklist,
     VisitorDocument,
+    VisitorLog,
     VisitorPhoto,
     VisitorStatus,
 )
@@ -37,11 +38,17 @@ from app.schemas.visitor import (
     VisitorDashboard,
     VisitorDocumentOut,
     VisitorFaceEnrollResult,
+    VisitorLogOut,
     VisitorOut,
     VisitorPhotoOut,
     VisitorUpdate,
 )
-from app.services.upload_storage import ALLOWED_DOC_EXT, save_visitor_base64, save_visitor_upload
+from app.services.upload_storage import (
+    ALLOWED_DOC_EXT,
+    delete_visitor_file,
+    save_visitor_base64,
+    save_visitor_upload,
+)
 from app.services import face_service
 from app.services.audit_service import log_action
 from app.services import visitor_service
@@ -435,6 +442,22 @@ async def reject_visitor(
 # ── Photos & Documents ──────────────────────────────────────────────────────
 
 
+async def _make_photo_primary(db, visitor: Visitor, photo: VisitorPhoto) -> None:
+    """Mark a photo as the visitor's single primary photo.
+
+    `visitor.photo_url` mirrors the primary photo's URL (used as the avatar);
+    keeping exactly one row flagged prevents the same image from being listed
+    twice in clients.
+    """
+    await db.execute(
+        update(VisitorPhoto)
+        .where(VisitorPhoto.visitor_id == visitor.id, VisitorPhoto.id != photo.id)
+        .values(is_primary=False)
+    )
+    photo.is_primary = True
+    visitor.photo_url = photo.url
+
+
 @router.get("/visitors/{visitor_id}/photos", response_model=list[VisitorPhotoOut])
 async def list_visitor_photos(
     visitor_id: int,
@@ -443,7 +466,11 @@ async def list_visitor_photos(
     user: CurrentUser,
 ):
     await _get_visitor_or_404(db, visitor_id, org_id)
-    stmt = select(VisitorPhoto).where(VisitorPhoto.visitor_id == visitor_id)
+    stmt = (
+        select(VisitorPhoto)
+        .where(VisitorPhoto.visitor_id == visitor_id)
+        .order_by(VisitorPhoto.is_primary.desc(), VisitorPhoto.id.desc())
+    )
     photos = list((await db.execute(stmt)).scalars().all())
     return [VisitorPhotoOut.model_validate(p, from_attributes=True) for p in photos]
 
@@ -468,15 +495,12 @@ async def upload_visitor_photo(
     else:
         raise ValidationError("File or image required")
 
-    if is_primary:
-        visitor.photo_url = url
-    photo = VisitorPhoto(
-        visitor_id=visitor.id,
-        url=url,
-        is_primary=is_primary,
-        caption=caption,
-    )
+    photo = VisitorPhoto(visitor_id=visitor.id, url=url, is_primary=False, caption=caption)
     db.add(photo)
+    await db.flush()
+    # The first photo always becomes primary so the visitor gets an avatar.
+    if is_primary or not visitor.photo_url:
+        await _make_photo_primary(db, visitor, photo)
     await visitor_service.log_visitor_event(
         db, visitor.id, "photo_uploaded", caption or "Photo uploaded", user.id
     )
@@ -495,10 +519,32 @@ async def upload_visitor_photo_base64(
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     _, url = save_visitor_base64(visitor.organization_id, visitor_id, "photos", body.image)
-    if body.is_primary:
-        visitor.photo_url = url
-    photo = VisitorPhoto(visitor_id=visitor.id, url=url, is_primary=body.is_primary, caption=body.caption)
+    photo = VisitorPhoto(visitor_id=visitor.id, url=url, is_primary=False, caption=body.caption)
     db.add(photo)
+    await db.flush()
+    if body.is_primary or not visitor.photo_url:
+        await _make_photo_primary(db, visitor, photo)
+    await visitor_service.log_visitor_event(
+        db, visitor.id, "photo_uploaded", body.caption or "Photo uploaded", user.id
+    )
+    await db.flush()
+    await db.refresh(photo)
+    return VisitorPhotoOut.model_validate(photo, from_attributes=True)
+
+
+@router.post("/visitors/{visitor_id}/photos/{photo_id}/primary", response_model=VisitorPhotoOut)
+async def set_primary_visitor_photo(
+    visitor_id: int,
+    photo_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+):
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
+    photo = await db.get(VisitorPhoto, photo_id)
+    if not photo or photo.visitor_id != visitor_id:
+        raise NotFoundError("Photo not found")
+    await _make_photo_primary(db, visitor, photo)
     await db.flush()
     await db.refresh(photo)
     return VisitorPhotoOut.model_validate(photo, from_attributes=True)
@@ -512,12 +558,34 @@ async def delete_visitor_photo(
     org_id: TenantOrgId,
     user: CurrentUser,
 ):
-    await _get_visitor_or_404(db, visitor_id, org_id)
+    visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     photo = await db.get(VisitorPhoto, photo_id)
     if not photo or photo.visitor_id != visitor_id:
         raise NotFoundError("Photo not found")
+    url = photo.url
+    was_primary = photo.is_primary or visitor.photo_url == url
     await db.delete(photo)
     await db.flush()
+    if was_primary:
+        # Promote the newest remaining photo so the avatar never goes stale.
+        remaining = (
+            (
+                await db.execute(
+                    select(VisitorPhoto)
+                    .where(VisitorPhoto.visitor_id == visitor_id)
+                    .order_by(VisitorPhoto.id.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if remaining:
+            await _make_photo_primary(db, visitor, remaining)
+        else:
+            visitor.photo_url = None
+    await visitor_service.log_visitor_event(db, visitor_id, "photo_deleted", "Photo deleted", user.id)
+    await db.flush()
+    delete_visitor_file(url)
 
 
 @router.get("/visitors/{visitor_id}/documents", response_model=list[VisitorDocumentOut])
@@ -597,8 +665,33 @@ async def delete_visitor_document(
     doc = await db.get(VisitorDocument, doc_id)
     if not doc or doc.visitor_id != visitor_id:
         raise NotFoundError("Document not found")
+    url = doc.url
+    doc_type = doc.document_type.value
     await db.delete(doc)
+    await visitor_service.log_visitor_event(
+        db, visitor_id, "document_deleted", f"{doc_type} deleted", user.id
+    )
     await db.flush()
+    delete_visitor_file(url)
+
+
+@router.get("/visitors/{visitor_id}/timeline", response_model=list[VisitorLogOut])
+async def get_visitor_timeline(
+    visitor_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: CurrentUser,
+    limit: int = Query(50, ge=1, le=200),
+):
+    await _get_visitor_or_404(db, visitor_id, org_id)
+    stmt = (
+        select(VisitorLog)
+        .where(VisitorLog.visitor_id == visitor_id)
+        .order_by(VisitorLog.created_at.desc(), VisitorLog.id.desc())
+        .limit(limit)
+    )
+    logs = list((await db.execute(stmt)).scalars().all())
+    return [VisitorLogOut.model_validate(entry, from_attributes=True) for entry in logs]
 
 
 # ── Access permissions ────────────────────────────────────────────────────────

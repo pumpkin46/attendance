@@ -24,7 +24,7 @@ from app.models.employee import Employee
 from app.models.recognition import RecognitionEvent
 from app.models.visitor import Visitor
 from app.schemas.recognition_api import RecognitionMetrics, UnknownSummary
-from app.services import attendance_service
+from app.services import attendance_service, security_monitoring_service
 from app.services.live_event_service import create_live_event
 
 logger = logging.getLogger(__name__)
@@ -192,6 +192,20 @@ async def record_identification(
             event.snapshot_path = snapshot
             await db.flush()
 
+        # AI security checks (after-hours, tailgating). Best effort — an alert
+        # failure must never break the attendance write it follows.
+        try:
+            await security_monitoring_service.evaluate_matched(
+                db,
+                employee=employee,
+                event=event,
+                org_id=event_org_id,
+                camera_id=camera_id,
+                snapshot_path=snapshot,
+            )
+        except Exception as exc:
+            logger.warning("[security-monitoring] matched-event checks failed: %s", exc)
+
         if employee is not None:
             await create_live_event(
                 db=db,
@@ -260,6 +274,24 @@ async def record_identification(
         event.snapshot_path = snapshot
         await db.flush()
     rejected = reason not in _GENUINE_UNKNOWN_REASONS
+
+    # AI security checks (spoof attempt, unknown person). Best effort: never
+    # let alerting break the event write. `liveness_passed is False` is only
+    # set when the liveness gate itself rejected the frame.
+    try:
+        await security_monitoring_service.evaluate_unmatched(
+            db,
+            org_id=org_id,
+            camera_id=camera_id,
+            event=event,
+            spoof=result.get("liveness_passed") is False,
+            genuine_unknown=not rejected,
+            reason=reason,
+            snapshot_path=snapshot,
+        )
+    except Exception as exc:
+        logger.warning("[security-monitoring] unmatched-event checks failed: %s", exc)
+
     await create_live_event(
         db=db,
         organization_id=org_id,

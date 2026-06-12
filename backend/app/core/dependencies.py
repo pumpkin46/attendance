@@ -81,15 +81,36 @@ def require_any_permission(*permission_names: str):
     return Annotated[User, Depends(checker)]
 
 
+async def get_single_org_id(db: AsyncSession) -> int | None:
+    """Id of the only active organization, or None when there are 0 or 2+.
+
+    Single-organization deployments keep the organizations table purely as a
+    label; super admins should act on that org without selecting a tenant.
+    With multiple orgs the explicit header stays required, so requests can
+    never silently mix tenants.
+    """
+    from app.models.organization import Organization
+
+    stmt = (
+        select(Organization.id)
+        .where(Organization.is_active == True)  # noqa: E712
+        .order_by(Organization.id)
+        .limit(2)
+    )
+    ids = list((await db.execute(stmt)).scalars().all())
+    return ids[0] if len(ids) == 1 else None
+
+
 async def get_tenant_org_id(
     request: Request,
     user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ) -> int | None:
     if user.has_role(settings.super_admin_role):
         header_val = request.headers.get(settings.tenant_header)
         if header_val:
             return int(header_val)
-        return None
+        return await get_single_org_id(db)
     return user.organization_id
 
 

@@ -30,8 +30,9 @@ export function useUnknownFaces(
     ['unknown-faces', 'list', { dateFrom, dateTo, page, cameraId, alertsOnly }],
     '/reports/unknown-persons',
     {
-      date_from: dateFrom,
-      date_to: dateTo,
+      // Empty bounds (open-ended range) are omitted — the API expects a date or no param.
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
       page,
       per_page: UNKNOWN_FACES_PER_PAGE,
       camera_id: cameraId || undefined,
@@ -53,7 +54,7 @@ export function useUnknownFacesSummary(dateFrom: string, dateTo: string) {
   return useApiQuery<UnknownFacesSummary>(
     ['unknown-faces', 'summary', { dateFrom, dateTo }],
     '/reports/unknown-persons/summary',
-    { date_from: dateFrom, date_to: dateTo },
+    { date_from: dateFrom || undefined, date_to: dateTo || undefined },
     { silent: true }
   )
 }

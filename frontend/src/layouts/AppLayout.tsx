@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { AppLogo } from '@/shared/components/AppLogo'
 import SidebarNav from '@/shared/components/SidebarNav'
+import { OrgSwitcher } from '@/shared/components/OrgSwitcher'
 import { RealtimeIndicator } from '@/shared/components/RealtimeIndicator'
 import { UserMenu } from '@/shared/components/UserMenu'
 import { Loading } from '@/shared/ui/Loading'
@@ -24,10 +25,14 @@ export default function AppLayout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-slate-950">
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-slate-800 bg-slate-900/95 px-6 backdrop-blur">
           <div className="min-w-0">
-            {user?.organization?.name && (
-              <span className="truncate text-sm font-medium text-slate-300">
-                {user.organization.name}
-              </span>
+            {isSuperAdmin() ? (
+              <OrgSwitcher />
+            ) : (
+              user?.organization?.name && (
+                <span className="truncate text-sm font-medium text-slate-300">
+                  {user.organization.name}
+                </span>
+              )
             )}
           </div>
           <div className="flex items-center gap-3">

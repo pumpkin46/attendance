@@ -60,10 +60,59 @@ _STATUS_COLORS = {
     "half_day": "6D28D9",
 }
 
-# Column alignment codes used by both rich renderers: L(eft), C(enter), R(ight).
-_DAILY_ALIGNS = "LLCCCRR"
-_MONTHLY_ALIGNS = "LLLRRRRRRR"
-_ATTENDANCE_ALIGNS = "LLLCCCRR"
+@dataclass(frozen=True)
+class _ReportTable:
+    """Single source of truth for a report's table shape, shared by the Excel
+    and PDF renderers so columns can't drift between formats.
+
+    Widths stay per-format only because the units differ (Excel character
+    widths vs PDF relative column weights) — keeping both in the same spec
+    makes a mismatch visible at a glance.
+    """
+
+    title: str
+    sheet_name: str
+    headers: tuple[str, ...]
+    aligns: str  # per-column: L(eft) / C(enter) / R(ight)
+    xlsx_widths: tuple[float, ...]
+    pdf_widths: tuple[float, ...]
+    status_col: int | None  # 0-based index of the status column (for colors)
+    landscape: bool = False
+
+
+_DAILY_TABLE = _ReportTable(
+    title="Daily Attendance Report",
+    sheet_name="Daily Attendance",
+    headers=("Code", "Employee", "Status", "Check in", "Check out", "Worked", "Overtime"),
+    aligns="LLCCCRR",
+    xlsx_widths=(12, 30, 13, 11, 11, 11, 11),
+    pdf_widths=(12, 30, 13, 11, 11, 11, 11),
+    status_col=2,
+)
+
+_MONTHLY_TABLE = _ReportTable(
+    title="Monthly Attendance Report",
+    sheet_name="Monthly Attendance",
+    headers=(
+        "Code", "Employee", "Department", "Working days", "Present",
+        "Attendance %", "Overtime", "Absent", "Late", "On leave",
+    ),
+    aligns="LLLRRRRRRR",
+    xlsx_widths=(12, 28, 18, 13, 10, 13, 11, 9, 8, 10),
+    pdf_widths=(11, 26, 17, 12, 9, 12, 10, 8, 7, 9),
+    status_col=None,
+    landscape=True,
+)
+
+_ATTENDANCE_TABLE = _ReportTable(
+    title="Attendance Report",
+    sheet_name="Attendance",
+    headers=("Date", "Code", "Employee", "Status", "Check in", "Check out", "Worked", "Overtime"),
+    aligns="LLLCCCRR",
+    xlsx_widths=(13, 12, 28, 13, 11, 11, 11, 11),
+    pdf_widths=(13, 10.5, 23, 13, 11.5, 12.5, 10, 11.5),
+    status_col=3,
+)
 
 
 @dataclass(frozen=True)
@@ -468,101 +517,41 @@ def _xlsx_bytes(wb: "Workbook") -> bytes:
     return out.getvalue()
 
 
-def _daily_xlsx(report: DailyReport, ctx: ExportContext) -> bytes:
+def _render_xlsx(
+    spec: _ReportTable,
+    subtitle: str,
+    ctx: ExportContext,
+    kpis: list[tuple[str, str]],
+    rows: list[list[object]],
+    totals: list[object] | None,
+    status_keys: list[str] | None = None,
+    percent_col: int | None = None,
+) -> bytes:
+    """Render one report worksheet from its shared table spec."""
     from openpyxl import Workbook
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Daily Attendance"
+    ws.title = spec.sheet_name
     ws.sheet_view.showGridLines = False
-    ws.page_setup.orientation = "portrait"
+    ws.page_setup.orientation = "landscape" if spec.landscape else "portrait"
 
-    headers = ["Code", "Employee", "Status", "Check in", "Check out", "Worked", "Overtime"]
-    widths = [12, 30, 13, 11, 11, 11, 11]
-    start = _xlsx_scaffold(
-        ws, len(headers), "Daily Attendance Report", _daily_subtitle(report), ctx,
-        _daily_kpis(report),
-    )
+    start = _xlsx_scaffold(ws, len(spec.headers), spec.title, subtitle, ctx, kpis)
     _xlsx_table(
-        ws, start, headers, _daily_rows(report, ctx), _DAILY_ALIGNS, widths,
-        status_col=3, totals=_daily_totals(report),
-        status_keys=[e.status for e in report.employees],
+        ws,
+        start,
+        list(spec.headers),
+        rows,
+        spec.aligns,
+        list(spec.xlsx_widths),
+        status_col=None if spec.status_col is None else spec.status_col + 1,
+        totals=totals,
+        status_keys=status_keys,
     )
-    return _xlsx_bytes(wb)
-
-
-def _monthly_xlsx(report: MonthlyReport, ctx: ExportContext) -> bytes:
-    from openpyxl import Workbook
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Monthly Attendance"
-    ws.sheet_view.showGridLines = False
-    ws.page_setup.orientation = "landscape"
-
-    headers = [
-        "Code", "Employee", "Department", "Working days", "Present",
-        "Attendance %", "Overtime", "Absent", "Late", "On leave",
-    ]
-    widths = [12, 28, 18, 13, 10, 13, 11, 9, 8, 10]
-    rows: list[list[object]] = [
-        [
-            e.employee_code,
-            e.employee_name,
-            e.department or "-",
-            e.total_working_days,
-            e.present_days,
-            e.attendance_percent / 100,
-            _fmt_minutes(e.overtime_minutes),
-            e.absence_count,
-            e.late_count,
-            e.on_leave_count,
-        ]
-        for e in report.employees
-    ]
-    totals: list[object] = [
-        "",
-        _monthly_totals_label(report),
-        "",
-        report.total_working_days,
-        sum(e.present_days for e in report.employees),
-        report.summary.attendance_percent / 100,
-        _fmt_minutes(report.summary.overtime_minutes),
-        report.summary.absence_count,
-        sum(e.late_count for e in report.employees),
-        sum(e.on_leave_count for e in report.employees),
-    ]
-
-    start = _xlsx_scaffold(
-        ws, len(headers), "Monthly Attendance Report", _monthly_subtitle(report), ctx,
-        _monthly_kpis(report),
-    )
-    _xlsx_table(ws, start, headers, rows, _MONTHLY_ALIGNS, widths, status_col=None, totals=totals)
-    for r in range(len(rows) + 1):  # +1 covers the totals row
-        ws.cell(row=start + 1 + r, column=6).number_format = "0.0%"
-    return _xlsx_bytes(wb)
-
-
-def _attendance_xlsx(report: AttendanceRangeReport, ctx: ExportContext) -> bytes:
-    from openpyxl import Workbook
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Attendance"
-    ws.sheet_view.showGridLines = False
-    ws.page_setup.orientation = "portrait"
-
-    headers = ["Date", "Code", "Employee", "Status", "Check in", "Check out", "Worked", "Overtime"]
-    widths = [13, 12, 28, 13, 11, 11, 11, 11]
-    start = _xlsx_scaffold(
-        ws, len(headers), "Attendance Report", _attendance_subtitle(report), ctx,
-        _attendance_kpis(report),
-    )
-    _xlsx_table(
-        ws, start, headers, _attendance_rows(report, ctx), _ATTENDANCE_ALIGNS, widths,
-        status_col=4, totals=_attendance_totals(report),
-        status_keys=[e.status for e in report.entries],
-    )
+    if percent_col is not None:
+        total_rows = len(rows) + (1 if totals is not None and rows else 0)
+        for r in range(total_rows):
+            ws.cell(row=start + 1 + r, column=percent_col + 1).number_format = "0.0%"
     return _xlsx_bytes(wb)
 
 
@@ -824,91 +813,129 @@ def _pdf_bytes(
     return buf.getvalue()
 
 
-def _daily_pdf(report: DailyReport, ctx: ExportContext) -> bytes:
-    from reportlab.lib.pagesizes import A4
+def _render_pdf(
+    spec: _ReportTable,
+    subtitle: str,
+    ctx: ExportContext,
+    kpis: list[tuple[str, str]],
+    rows: list[list[str]],
+    totals: list[str] | None,
+    status_keys: list[str] | None = None,
+) -> bytes:
+    """Render one report PDF from its shared table spec."""
+    from reportlab.lib.pagesizes import A4, landscape
 
-    headers = ["Code", "Employee", "Status", "Check in", "Check out", "Worked", "Overtime"]
     return _pdf_bytes(
-        "Daily Attendance Report",
-        _daily_subtitle(report),
+        spec.title,
+        subtitle,
         ctx,
-        _daily_kpis(report),
-        headers,
-        _daily_rows(report, ctx),
-        col_widths=[12, 30, 13, 11, 11, 11, 11],
-        aligns=_DAILY_ALIGNS,
-        status_col=2,
-        totals=_daily_totals(report),
-        pagesize=A4,
+        kpis,
+        list(spec.headers),
+        rows,
+        col_widths=list(spec.pdf_widths),
+        aligns=spec.aligns,
+        status_col=spec.status_col,
+        totals=totals,
+        pagesize=landscape(A4) if spec.landscape else A4,
+        status_keys=status_keys,
+    )
+
+
+# ── Report assemblies ────────────────────────────────────────────────────────
+# Each report wires its spec + row builders into both renderers side by side.
+
+
+def _daily_xlsx(report: DailyReport, ctx: ExportContext) -> bytes:
+    return _render_xlsx(
+        _DAILY_TABLE, _daily_subtitle(report), ctx, _daily_kpis(report),
+        _daily_rows(report, ctx), _daily_totals(report),
         status_keys=[e.status for e in report.employees],
     )
 
 
-def _monthly_pdf(report: MonthlyReport, ctx: ExportContext) -> bytes:
-    from reportlab.lib.pagesizes import A4, landscape
+def _daily_pdf(report: DailyReport, ctx: ExportContext) -> bytes:
+    return _render_pdf(
+        _DAILY_TABLE, _daily_subtitle(report), ctx, _daily_kpis(report),
+        _daily_rows(report, ctx), _daily_totals(report),
+        status_keys=[e.status for e in report.employees],
+    )
 
-    headers = [
-        "Code", "Employee", "Department", "Working days", "Present",
-        "Attendance %", "Overtime", "Absent", "Late", "On leave",
-    ]
-    rows = [
+
+# Monthly rows differ per format on purpose: Excel gets real numbers (sortable,
+# 0.0% number format on the attendance column), the PDF gets display strings.
+def _monthly_rows(report: MonthlyReport, *, for_xlsx: bool) -> list[list[object]]:
+    def percent(value: float) -> object:
+        return value / 100 if for_xlsx else f"{value}%"
+
+    def num(value: int) -> object:
+        return value if for_xlsx else str(value)
+
+    return [
         [
             e.employee_code,
             e.employee_name,
             e.department or "-",
-            str(e.total_working_days),
-            str(e.present_days),
-            f"{e.attendance_percent}%",
+            num(e.total_working_days),
+            num(e.present_days),
+            percent(e.attendance_percent),
             _fmt_minutes(e.overtime_minutes),
-            str(e.absence_count),
-            str(e.late_count),
-            str(e.on_leave_count),
+            num(e.absence_count),
+            num(e.late_count),
+            num(e.on_leave_count),
         ]
         for e in report.employees
     ]
-    totals = [
+
+
+def _monthly_totals(report: MonthlyReport, *, for_xlsx: bool) -> list[object]:
+    def percent(value: float) -> object:
+        return value / 100 if for_xlsx else f"{value}%"
+
+    def num(value: int) -> object:
+        return value if for_xlsx else str(value)
+
+    return [
         "",
         _monthly_totals_label(report),
         "",
-        str(report.total_working_days),
-        str(sum(e.present_days for e in report.employees)),
-        f"{report.summary.attendance_percent}%",
+        num(report.total_working_days),
+        num(sum(e.present_days for e in report.employees)),
+        percent(report.summary.attendance_percent),
         _fmt_minutes(report.summary.overtime_minutes),
-        str(report.summary.absence_count),
-        str(sum(e.late_count for e in report.employees)),
-        str(sum(e.on_leave_count for e in report.employees)),
+        num(report.summary.absence_count),
+        num(sum(e.late_count for e in report.employees)),
+        num(sum(e.on_leave_count for e in report.employees)),
     ]
-    return _pdf_bytes(
-        "Monthly Attendance Report",
-        _monthly_subtitle(report),
-        ctx,
-        _monthly_kpis(report),
-        headers,
-        rows,
-        col_widths=[11, 26, 17, 12, 9, 12, 10, 8, 7, 9],
-        aligns=_MONTHLY_ALIGNS,
-        status_col=None,
-        totals=totals,
-        pagesize=landscape(A4),
+
+
+def _monthly_xlsx(report: MonthlyReport, ctx: ExportContext) -> bytes:
+    return _render_xlsx(
+        _MONTHLY_TABLE, _monthly_subtitle(report), ctx, _monthly_kpis(report),
+        _monthly_rows(report, for_xlsx=True), _monthly_totals(report, for_xlsx=True),
+        percent_col=5,
+    )
+
+
+def _monthly_pdf(report: MonthlyReport, ctx: ExportContext) -> bytes:
+    return _render_pdf(
+        _MONTHLY_TABLE, _monthly_subtitle(report), ctx, _monthly_kpis(report),
+        [[str(v) for v in row] for row in _monthly_rows(report, for_xlsx=False)],
+        [str(v) for v in _monthly_totals(report, for_xlsx=False)],
+    )
+
+
+def _attendance_xlsx(report: AttendanceRangeReport, ctx: ExportContext) -> bytes:
+    return _render_xlsx(
+        _ATTENDANCE_TABLE, _attendance_subtitle(report), ctx, _attendance_kpis(report),
+        _attendance_rows(report, ctx), _attendance_totals(report),
+        status_keys=[e.status for e in report.entries],
     )
 
 
 def _attendance_pdf(report: AttendanceRangeReport, ctx: ExportContext) -> bytes:
-    from reportlab.lib.pagesizes import A4
-
-    headers = ["Date", "Code", "Employee", "Status", "Check in", "Check out", "Worked", "Overtime"]
-    return _pdf_bytes(
-        "Attendance Report",
-        _attendance_subtitle(report),
-        ctx,
-        _attendance_kpis(report),
-        headers,
-        _attendance_rows(report, ctx),
-        col_widths=[13, 10.5, 23, 13, 11.5, 12.5, 10, 11.5],
-        aligns=_ATTENDANCE_ALIGNS,
-        status_col=3,
-        totals=_attendance_totals(report),
-        pagesize=A4,
+    return _render_pdf(
+        _ATTENDANCE_TABLE, _attendance_subtitle(report), ctx, _attendance_kpis(report),
+        _attendance_rows(report, ctx), _attendance_totals(report),
         status_keys=[e.status for e in report.entries],
     )
 

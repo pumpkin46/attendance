@@ -4,7 +4,15 @@ import { removeRowFromPaginated } from '@/shared/api/cache'
 import { api } from '@/shared/api/client'
 import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import type { Employee, Paginated } from '@/shared/types'
-import type { BlacklistEntry, DashboardStats, Visitor } from '@/features/visitors/types'
+import type {
+  BlacklistEntry,
+  DashboardStats,
+  Visitor,
+  VisitorAccessPermission,
+  VisitorDocument,
+  VisitorLogEntry,
+  VisitorPhoto,
+} from '@/features/visitors/types'
 
 export const visitorKeys = {
   all: ['visitors'] as const,
@@ -12,6 +20,12 @@ export const visitorKeys = {
   active: ['visitors', 'active'] as const,
   stats: ['visitors', 'stats'] as const,
   pending: ['visitors', 'pending'] as const,
+  // Detail scope nests under `all` so lifecycle mutations refresh open panels too.
+  detail: (id: number) => ['visitors', 'detail', id] as const,
+  photos: (id: number) => ['visitors', 'detail', id, 'photos'] as const,
+  documents: (id: number) => ['visitors', 'detail', id, 'documents'] as const,
+  permissions: (id: number) => ['visitors', 'detail', id, 'permissions'] as const,
+  timeline: (id: number) => ['visitors', 'detail', id, 'timeline'] as const,
 }
 
 // The blacklist is its own resource (/visitor-blacklist) and is unaffected by
@@ -55,6 +69,162 @@ export function useBlacklist() {
 
 export function useEmployeeOptions() {
   return useApiQuery<Paginated<Employee>>(['employees', 'options'], '/employees', { per_page: 100 })
+}
+
+// ── Detail panel queries ─────────────────────────────────────────────────────
+
+export function useVisitorDetail(id: number) {
+  return useApiQuery<Visitor>(visitorKeys.detail(id), `/visitors/${id}`)
+}
+
+export function useVisitorPhotos(id: number) {
+  return useApiQuery<VisitorPhoto[]>(visitorKeys.photos(id), `/visitors/${id}/photos`, undefined, {
+    silent: true,
+  })
+}
+
+export function useVisitorDocuments(id: number) {
+  return useApiQuery<VisitorDocument[]>(visitorKeys.documents(id), `/visitors/${id}/documents`, undefined, {
+    silent: true,
+  })
+}
+
+export function useVisitorPermissions(id: number) {
+  return useApiQuery<VisitorAccessPermission[]>(
+    visitorKeys.permissions(id),
+    `/visitors/${id}/access-permissions`,
+    undefined,
+    { silent: true }
+  )
+}
+
+export function useVisitorTimeline(id: number) {
+  return useApiQuery<VisitorLogEntry[]>(visitorKeys.timeline(id), `/visitors/${id}/timeline`, undefined, {
+    silent: true,
+  })
+}
+
+// ── Detail panel mutations ───────────────────────────────────────────────────
+
+/** Refetches the open detail scope plus the lists/stats that mirror it. */
+function useInvalidateVisitorDetail(id: number) {
+  const qc = useQueryClient()
+  return () => {
+    qc.invalidateQueries({ queryKey: visitorKeys.detail(id) })
+    qc.invalidateQueries({ queryKey: visitorKeys.all, refetchType: 'active' })
+  }
+}
+
+export function useUpdateVisitor(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: (payload: Record<string, unknown>) => api.patch(`/visitors/${id}`, payload),
+    onSuccess: () => {
+      toast.success('Visitor updated')
+      invalidate()
+    },
+  })
+}
+
+export function useApproveVisitor(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: (stage: string) => api.post(`/visitors/${id}/approve`, { stage }),
+    onSuccess: () => {
+      toast.success('Approval recorded')
+      invalidate()
+    },
+  })
+}
+
+export function useRejectVisitor(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: (notes?: string) => api.post(`/visitors/${id}/reject`, { notes }),
+    onSuccess: () => {
+      toast.success('Visitor rejected')
+      invalidate()
+    },
+  })
+}
+
+export function useUploadVisitorPhoto(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData()
+      form.append('file', file)
+      return api.post(`/visitors/${id}/photos`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    onSuccess: () => {
+      toast.success('Photo uploaded')
+      invalidate()
+    },
+  })
+}
+
+export function useDeleteVisitorPhoto(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: (photoId: number) => api.delete(`/visitors/${id}/photos/${photoId}`),
+    onSuccess: () => {
+      toast.success('Photo removed')
+      invalidate()
+    },
+  })
+}
+
+export function useSetPrimaryVisitorPhoto(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: (photoId: number) => api.post(`/visitors/${id}/photos/${photoId}/primary`),
+    onSuccess: () => {
+      toast.success('Primary photo updated')
+      invalidate()
+    },
+  })
+}
+
+export function useUploadVisitorDocument(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: ({ file, documentType }: { file: File; documentType: string }) => {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('document_type', documentType)
+      return api.post(`/visitors/${id}/documents`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    },
+    onSuccess: () => {
+      toast.success('Document uploaded')
+      invalidate()
+    },
+  })
+}
+
+export function useDeleteVisitorDocument(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: (docId: number) => api.delete(`/visitors/${id}/documents/${docId}`),
+    onSuccess: () => {
+      toast.success('Document removed')
+      invalidate()
+    },
+  })
+}
+
+export function useSaveVisitorZones(id: number) {
+  const invalidate = useInvalidateVisitorDetail(id)
+  return useMutation({
+    mutationFn: (zones: string[]) => api.put(`/visitors/${id}/access-permissions`, { zones }),
+    onSuccess: () => {
+      toast.success('Access zones saved')
+      invalidate()
+    },
+  })
 }
 
 /**

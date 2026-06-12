@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
+import { AuthImage } from '@/shared/components/AuthImage'
 import { Card } from '@/shared/ui/Card'
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'neutral'
@@ -29,7 +30,19 @@ const AVATAR_TONES = [
   'bg-cyan-500/15 text-cyan-300',
 ]
 
-export function VisitorAvatar({ name, seed }: { name: string; seed: number }) {
+export function VisitorAvatar({ name, seed, photoUrl }: { name: string; seed: number; photoUrl?: string }) {
+  if (photoUrl) {
+    return (
+      <AuthImage
+        src={photoUrl}
+        alt={name}
+        lazy
+        cache
+        className="h-9 w-9 shrink-0 rounded-full object-cover"
+        fallback={initials(name)}
+      />
+    )
+  }
   const tone = AVATAR_TONES[Math.abs(seed) % AVATAR_TONES.length]
   return (
     <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold', tone)}>
@@ -42,17 +55,19 @@ export function VisitorAvatar({ name, seed }: { name: string; seed: number }) {
 export function VisitorCell({
   name,
   seed,
+  photoUrl,
   sub,
   code,
 }: {
   name: string
   seed: number
+  photoUrl?: string
   sub?: ReactNode
   code?: ReactNode
 }) {
   return (
     <div className="flex items-center gap-3">
-      <VisitorAvatar name={name} seed={seed} />
+      <VisitorAvatar name={name} seed={seed} photoUrl={photoUrl} />
       <div className="min-w-0">
         <div className="truncate font-medium text-slate-100">{name}</div>
         {sub && <div className="truncate text-xs text-slate-500">{sub}</div>}

@@ -195,6 +195,17 @@ class VisitorDocumentOut(BaseModel):
     created_at: datetime | None = None
 
 
+class VisitorLogOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: int
+    visitor_id: int
+    event_type: str
+    description: str | None = None
+    user_id: int | None = None
+    created_at: datetime | None = None
+
+
 class VisitorAccessPermissionOut(BaseModel):
     model_config = {"from_attributes": True}
 

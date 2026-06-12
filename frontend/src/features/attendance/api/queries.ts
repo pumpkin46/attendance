@@ -21,7 +21,8 @@ export function useAttendanceRecords(dateFrom: string, dateTo: string) {
   return useApiQuery<Paginated<AttendanceRecord>>(
     attendanceKeys.list(dateFrom, dateTo),
     '/attendance',
-    { date_from: dateFrom, date_to: dateTo, per_page: 100 }
+    // Empty bounds (open-ended range) are omitted — the API expects a date or no param.
+    { date_from: dateFrom || undefined, date_to: dateTo || undefined, per_page: 100 }
   )
 }
 

@@ -110,6 +110,25 @@ def save_visitor_base64(
     return str(dest_path), public_url
 
 
+def delete_visitor_file(public_url: str) -> None:
+    """Best-effort removal of a stored upload given its public URL.
+
+    Silently ignores URLs that don't point inside the upload root (external
+    URLs, already-deleted files) so DB cleanup never fails on disk state.
+    """
+    prefix = "/api/v1/uploads/"
+    if not public_url or not public_url.startswith(prefix):
+        return
+    root = _upload_root().resolve()
+    path = (_upload_root() / public_url[len(prefix):]).resolve()
+    if not str(path).startswith(str(root)):
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def resolve_upload_path(org_id: int, visitor_id: int, category: str, filename: str) -> Path:
     safe = _safe_filename(filename)
     path = _upload_root() / "visitors" / str(org_id) / str(visitor_id) / category / safe

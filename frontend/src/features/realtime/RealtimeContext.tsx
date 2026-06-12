@@ -10,6 +10,8 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { getOrgId, getToken } from '@/shared/lib/session'
 import { useAuth } from '@/features/auth/AuthProvider'
+import { selectOrgId } from '@/features/tenant/tenantSlice'
+import { useAppSelector } from '@/store/hooks'
 
 export type RealtimeStatus = 'connecting' | 'open' | 'closed'
 
@@ -105,6 +107,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const { user } = useAuth()
   const userId = user?.id ?? null
+  // Super-admin tenant switches change the ws query string (buildWsTarget reads
+  // the session), so the socket must reconnect to receive the new org's events.
+  const tenantOrgId = useAppSelector(selectOrgId)
   const [status, setStatus] = useState<RealtimeStatus>('closed')
   const attemptRef = useRef(0)
 
@@ -169,7 +174,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       if (heartbeatTimer) clearInterval(heartbeatTimer)
       ws?.close()
     }
-  }, [userId, queryClient])
+  }, [userId, tenantOrgId, queryClient])
 
   return <RealtimeContext.Provider value={{ status }}>{children}</RealtimeContext.Provider>
 }
