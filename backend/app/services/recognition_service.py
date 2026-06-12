@@ -127,6 +127,81 @@ def _save_event_snapshot(image_b64: str | None, event_id: int) -> str | None:
         return None
 
 
+async def _resolve_identity(
+    db: AsyncSession, identity: str
+) -> Employee | Visitor | None:
+    """Map a FAISS identity string to its ORM row, without any gating.
+
+    Employees are enrolled under their numeric primary key, visitors under
+    "visitor-<id>"; anything else resolves to None.
+    """
+    if identity.startswith("visitor-"):
+        try:
+            return await db.get(Visitor, int(identity.removeprefix("visitor-")))
+        except ValueError:
+            return None
+    try:
+        return await db.get(Employee, int(identity))
+    except (TypeError, ValueError):
+        return None
+
+
+async def authorize_match(
+    db: AsyncSession, identity: str | None, org_id: int | None
+) -> Employee | Visitor | None:
+    """Gate a global-index FAISS match to the caller's tenant.
+
+    Returns the matched Employee/Visitor row only when it still exists, is
+    active (employees), and belongs to ``org_id``. The index is global, so
+    every consumer of a raw match must pass it through here before exposing
+    the identity or writing attendance. ``org_id`` None only reaches here for
+    validated super-admin scope (get_tenant_org_id rejects tenant users
+    without an organization), so None means any org is allowed.
+    """
+    if not identity:
+        return None
+    identity = str(identity)
+    row = await _resolve_identity(db, identity)
+    if row is None:
+        return None
+    if not identity.startswith("visitor-") and not row.is_active:
+        return None
+    if org_id is not None and row.organization_id != org_id:
+        return None
+    return row
+
+
+async def _strip_rejected_identity(
+    db: AsyncSession, result: dict, identity: str, org_id: int | None
+) -> None:
+    """Erase a vetoed FAISS identity so the caller sees a plain non-match.
+
+    Mutates ``result`` in place: the API layer spreads this same dict into its
+    response, so the identity must be stripped here, not just in the outcome
+    dict. The caller gets nothing distinguishable from a miss; the server log
+    carries the real cause. The re-resolve only picks stale-vector vs
+    cross-tenant for the log/reason (identity-map hit when the row exists).
+    """
+    row = await _resolve_identity(db, identity)
+    if row is None or (not identity.startswith("visitor-") and not row.is_active):
+        logger.warning(
+            "Face matched identity %s but no active row exists; "
+            "treating as unknown (stale FAISS vectors?)",
+            identity,
+        )
+        result["reason"] = "stale_identity"
+    else:
+        logger.warning(
+            "Cross-tenant face match suppressed: identity %s belongs to "
+            "org %s, caller org %s",
+            identity,
+            row.organization_id,
+            org_id,
+        )
+        result["reason"] = "low_confidence"
+    result["employee_id"] = None
+
+
 async def record_identification(
     db: AsyncSession,
     result: dict,
@@ -144,57 +219,27 @@ async def record_identification(
     what attendance action (check-in/out/duplicate) it produced.
     """
     if result.get("success") and result.get("employee_id"):
-        emp_id_str = str(result["employee_id"])
-        if emp_id_str.startswith("visitor-"):
-            visitor_id = int(emp_id_str.replace("visitor-", ""))
-            visitor = await db.get(Visitor, visitor_id)
-            if visitor and (org_id is None or visitor.organization_id == org_id):
-                await create_live_event(
-                    db=db,
-                    organization_id=visitor.organization_id,
-                    event_type="recognition.visitor",
-                    message=f"Visitor {visitor.name} recognized",
-                    visitor_id=visitor.id,
-                    payload={"confidence": result.get("confidence")},
-                )
+        identity = str(result["employee_id"])
+        row = await authorize_match(db, identity, org_id)
+        if row is None:
+            # Stale vectors or another tenant's row: strip the identity and
+            # fall through to the unknown path under the caller's org.
+            await _strip_rejected_identity(db, result, identity, org_id)
+        elif identity.startswith("visitor-"):
+            await create_live_event(
+                db=db,
+                organization_id=row.organization_id,
+                event_type="recognition.visitor",
+                message=f"Visitor {row.name} recognized",
+                visitor_id=row.id,
+                payload={"confidence": result.get("confidence")},
+            )
             return {"matched": True, "employee": None, "attendance": None}
-
-        employee_id = int(emp_id_str)
-        employee = await db.get(Employee, employee_id)
-
-        # A FAISS hit only counts as a match when the employee row still
-        # exists, is active, and belongs to the caller's tenant. The index is
-        # global, so without these gates a deleted employee's stale vectors
-        # keep matching, and a user in org B could identify (and write
-        # attendance for) org A's employees. Mirrors the visitor gate above.
-        # Mutates `result` in place: the API layer spreads this same dict into
-        # its response, so the identity must be stripped here, not just in the
-        # outcome dict.
-        if employee is None or not employee.is_active:
-            logger.warning(
-                "Face matched employee %s but no active employee row exists; "
-                "treating as unknown (stale FAISS vectors?)",
-                employee_id,
-            )
-            result["employee_id"] = None
-            result["reason"] = "stale_identity"
-        elif org_id is not None and employee.organization_id != org_id:
-            # Indistinguishable from a plain non-match for the caller; the
-            # server log carries the real cause.
-            logger.warning(
-                "Cross-tenant face match suppressed: employee %s belongs to "
-                "org %s, caller org %s",
-                employee_id,
-                employee.organization_id,
-                org_id,
-            )
-            result["employee_id"] = None
-            result["reason"] = "low_confidence"
         else:
             return await _record_employee_match(
                 db,
                 result,
-                employee=employee,
+                employee=row,
                 org_id=org_id,
                 image_b64=image_b64,
                 camera_id=camera_id,

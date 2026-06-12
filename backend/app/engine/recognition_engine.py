@@ -182,8 +182,19 @@ class RecognitionEngine:
     ) -> None:
         """Run the full recognition pipeline on a tracked face."""
         try:
+            # The registered stream carries the camera's configured direction,
+            # location and zone (hydrated from the cameras table), so entry/exit
+            # cameras emit correctly-typed CHECK_IN/CHECK_OUT events instead of
+            # every live event defaulting to CHECK_IN.
+            stream = self._stream_manager.get_stream(camera_id)
             result = await asyncio.to_thread(
-                self.recognize_face, frame, face, camera_id=camera_id
+                self.recognize_face,
+                frame,
+                face,
+                camera_id=camera_id,
+                location_id=stream.location_id if stream else None,
+                zone=stream.zone if stream else None,
+                direction=stream.direction if stream else None,
             )
 
             self._tracker.mark_recognized(
@@ -212,8 +223,14 @@ class RecognitionEngine:
         direction: str | None = None,
         rfid_employee_id: str | None = None,
         liveness_frames: list[np.ndarray] | None = None,
+        enqueue: bool = True,
     ) -> RecognitionResult:
-        """Run full recognition pipeline on a single detected face."""
+        """Run full recognition pipeline on a single detected face.
+
+        enqueue=False (API-initiated calls only) keeps the generated event
+        out of the background consumer's queue; the API handler persists it
+        inline. The live tracked path always queues (enqueue=True).
+        """
         wall_start = time.perf_counter()
         pipeline: list[dict] = []
 
@@ -336,6 +353,7 @@ class RecognitionEngine:
                 direction=direction,
                 verification_level=verification.level.value,
                 processing_ms=int((time.perf_counter() - wall_start) * 1000),
+                enqueue=enqueue,
             )
             if attendance_event:
                 self._metrics.record_attendance_event()
@@ -414,6 +432,7 @@ class RecognitionEngine:
         direction: str | None = None,
         rfid_employee_id: str | None = None,
         liveness_frames_b64: list[str] | None = None,
+        enqueue: bool = True,
     ) -> RecognitionResult:
         """Recognize from a base64-encoded image (for API calls and photo uploads)."""
         wall_start = time.perf_counter()
@@ -478,6 +497,7 @@ class RecognitionEngine:
             direction=direction,
             rfid_employee_id=rfid_employee_id,
             liveness_frames=liveness_frames,
+            enqueue=enqueue,
         )
 
         result.track_id = track_id
@@ -493,6 +513,7 @@ class RecognitionEngine:
         location_id: int | None = None,
         zone: str | None = None,
         direction: str | None = None,
+        enqueue: bool = True,
     ) -> RecognitionResult:
         """Capture a frame from a stream and run recognition."""
         capture = self._stream_manager.capture_frame(stream_url)
@@ -519,6 +540,7 @@ class RecognitionEngine:
             location_id=location_id,
             zone=zone,
             direction=direction,
+            enqueue=enqueue,
         )
 
     def detect_faces(self, image_b64: str) -> dict:

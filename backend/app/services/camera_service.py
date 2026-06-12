@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.core.cache import invalidate_prefix
 from app.core.config import settings
@@ -18,7 +18,7 @@ from app.models.location import Location
 from app.realtime.hub import emit
 from app.schemas.camera import CameraCreate, CameraMonitoringSummary, CameraUpdate, CaptureResult
 from app.services.monitoring_service import _camera_is_online, _format_camera
-from app.services.stream_capture import capture_stream_frame
+from app.services.stream_capture import capture_stream_frame, validate_stream_url
 
 
 def _online_threshold() -> datetime:
@@ -88,8 +88,30 @@ def format_monitoring_camera(camera: Camera) -> dict:
     )
 
 
+async def _validate_stream_url_or_raise(stream_url: str | None) -> None:
+    """Reject SSRF-prone stream URLs before they are persisted.
+
+    The engine later opens stored stream_urls via cv2, so the CRUD path must
+    enforce the same allowlist as the gated capture endpoints. Clearing the
+    URL (None/empty) stays allowed.
+    """
+    if not stream_url:
+        return
+    # USB cameras store a bare device index ("0") as stream_url; stream_sync
+    # maps digit URLs to USB and the engine opens int(url) directly. A digit
+    # string is a local device index, not a URL - no SSRF surface, so it
+    # bypasses URL validation.
+    if stream_url.isdigit():
+        return
+    # validate_stream_url does blocking DNS resolution.
+    error = await run_in_threadpool(validate_stream_url, stream_url)
+    if error is not None:
+        raise ValidationError(error)
+
+
 async def create_camera(db: AsyncSession, body: CameraCreate) -> Camera:
     data = body.model_dump()
+    await _validate_stream_url_or_raise(data.get("stream_url"))
     data["device_id"] = data.get("device_id") or await _generate_device_id(db, body.name)
     camera = Camera(**data)
     db.add(camera)
@@ -107,7 +129,9 @@ async def update_camera(
     db: AsyncSession, camera_id: int, org_id: int | None, body: CameraUpdate
 ) -> Camera:
     camera = await _get_camera_or_404(db, camera_id, org_id)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    data = body.model_dump(exclude_unset=True)
+    await _validate_stream_url_or_raise(data.get("stream_url"))
+    for field, value in data.items():
         setattr(camera, field, value)
     await db.flush()
     await db.refresh(camera)

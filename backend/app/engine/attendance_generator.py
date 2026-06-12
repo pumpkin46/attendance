@@ -111,7 +111,7 @@ class AttendanceGenerator:
     def __init__(self) -> None:
         self._duplicate_tracker = DuplicateTracker()
         # Producers run on threadpool threads while the consumer drains from
-        # the event loop; deque append/popleft/remove are atomic under the GIL.
+        # the event loop; deque append/popleft are atomic under the GIL.
         self._event_queue: deque[AttendanceEvent] = deque(maxlen=MAX_PENDING_EVENTS)
         self._total_events = 0
         self._duplicates_prevented = 0
@@ -139,8 +139,14 @@ class AttendanceGenerator:
         verification_level: str | None = None,
         processing_ms: int = 0,
         meta: dict | None = None,
+        enqueue: bool = True,
     ) -> AttendanceEvent | None:
-        """Generate an attendance event with duplicate prevention."""
+        """Generate an attendance event with duplicate prevention.
+
+        enqueue=False builds and returns the event without queueing it for
+        the background consumer: API-initiated recognitions persist inline
+        and must never be double-written by the consumer.
+        """
         resolved_type = self._resolve_event_type(event_type, direction)
 
         if self._duplicate_tracker.is_duplicate(employee_id, resolved_type):
@@ -165,7 +171,8 @@ class AttendanceGenerator:
             meta=meta or {},
         )
 
-        self._event_queue.append(event)
+        if enqueue:
+            self._event_queue.append(event)
         self._total_events += 1
         logger.info(
             "Attendance event: %s %s @ camera %s (conf=%.2f)",
@@ -185,18 +192,6 @@ class AttendanceGenerator:
                 events.append(self._event_queue.popleft())
             except IndexError:
                 return events
-
-    def consume(self, event: AttendanceEvent) -> bool:
-        """Claim a specific event for inline persistence.
-
-        Returns True if the event was still queued (the caller now owns
-        persisting it); False if the background consumer already drained it.
-        """
-        try:
-            self._event_queue.remove(event)
-            return True
-        except ValueError:
-            return False
 
     def _resolve_event_type(
         self, event_type: AttendanceEventType, direction: str | None

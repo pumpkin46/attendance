@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession
+from app.core.dependencies import CurrentUser, DbSession, get_single_org_id
 from app.core.errors import AuthError, ConflictError, PermissionDeniedError, ValidationError
 from app.core.rate_limit import login_rate_limit, register_rate_limit
 from app.core.security import (
@@ -123,6 +123,11 @@ async def register(body: RegisterRequest, request: Request, db: DbSession):
     # New accounts start with the default role (no elevated permissions);
     # admins grant access later through user management.
     user.roles = [default_role] if default_role else []
+    # Single-org deployments: bind the account to the only active organization
+    # so tenant-scoped endpoints work out of the box. With 0 or 2+ orgs this
+    # stays None and the account 403s on tenant endpoints until an admin
+    # assigns one (see get_tenant_org_id).
+    user.organization_id = await get_single_org_id(db)
     db.add(user)
     await db.flush()
     await db.refresh(user)

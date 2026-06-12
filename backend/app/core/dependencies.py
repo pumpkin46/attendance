@@ -165,6 +165,15 @@ async def get_tenant_org_id(
                 )
             return org_id
         return await get_single_org_id(db)
+    if user.organization_id is None:
+        # None means validated global scope (super admin only). A tenant user
+        # without an org (self-registered, or their org was deleted) must not
+        # inherit it: apply_tenant_filter is a no-op on None, so returning it
+        # would expose every tenant's data.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is not assigned to an organization",
+        )
     return user.organization_id
 
 

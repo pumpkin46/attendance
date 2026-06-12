@@ -1,16 +1,71 @@
-"""Capture a single JPEG frame from an RTSP/HTTP IP camera stream."""
+"""Capture a single JPEG frame from an RTSP/RTMP/HTTP IP camera stream."""
 
 from __future__ import annotations
 
 import base64
 import ipaddress
+import logging
 import socket
 import time
 from urllib.parse import urlparse
 
 import cv2
 
-ALLOWED_STREAM_SCHEMES = frozenset({"rtsp", "rtsps", "http", "https"})
+logger = logging.getLogger(__name__)
+
+ALLOWED_STREAM_SCHEMES = frozenset({"rtsp", "rtsps", "rtmp", "rtmps", "http", "https"})
+
+# URL prefixes cv2 opens over the network (via FFmpeg). These captures must
+# get explicit open/read timeouts: a dead host otherwise blocks
+# VideoCapture.read() indefinitely in a worker thread.
+NETWORK_STREAM_PREFIXES = (
+    "rtsp://",
+    "rtsps://",
+    "rtmp://",
+    "rtmps://",
+    "http://",
+    "https://",
+)
+
+# Default FFmpeg open/read timeouts (ms) for standalone captures. The engine
+# passes its configured StreamConfig values instead of these.
+DEFAULT_OPEN_TIMEOUT_MS = 5000
+DEFAULT_READ_TIMEOUT_MS = 5000
+
+
+def is_network_stream_url(url: object) -> bool:
+    """True when url is a string with a network stream scheme."""
+    return isinstance(url, str) and url.lower().startswith(NETWORK_STREAM_PREFIXES)
+
+
+def open_network_capture(
+    url: str,
+    open_timeout_ms: int = DEFAULT_OPEN_TIMEOUT_MS,
+    read_timeout_ms: int = DEFAULT_READ_TIMEOUT_MS,
+):
+    """Open a network stream URL with FFmpeg open/read timeouts.
+
+    The timeouts are open-time parameters: cap.set() after construction
+    returns False and leaves no timeout in effect, so they must be passed to
+    the constructor. An untimed open is attempted only when this OpenCV build
+    rejects the params constructor itself; a timed capture that merely fails
+    to open is returned as-is (isOpened() False) for the caller to handle --
+    retrying it untimed would just hang on the same dead host.
+    """
+    params = [
+        cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, open_timeout_ms,
+        cv2.CAP_PROP_READ_TIMEOUT_MSEC, read_timeout_ms,
+    ]
+    try:
+        return cv2.VideoCapture(url, cv2.CAP_FFMPEG, params)
+    except (TypeError, cv2.error, SystemError):
+        # Scheme only: stream URLs may embed credentials.
+        logger.warning(
+            "OpenCV build rejects the timeout-params VideoCapture constructor; "
+            "opening %s stream without timeouts",
+            url.split("://", 1)[0],
+        )
+        return cv2.VideoCapture(url)
 
 
 def validate_stream_url(stream_url: str) -> str | None:
@@ -18,16 +73,22 @@ def validate_stream_url(stream_url: str) -> str | None:
 
     cv2.VideoCapture happily opens file paths and arbitrary URLs, which turns
     a raw ``stream_url`` parameter into a blind SSRF/file-read primitive.
-    Cameras legitimately live on private (RFC1918) LAN addresses, so those
-    stay allowed; loopback, link-local (incl. the 169.254.169.254 cloud
-    metadata endpoint), multicast and reserved ranges are rejected. DNS is
-    resolved here at validation time — combine with permission gating (these
-    endpoints require cameras.manage), not as the sole control.
+    Cameras legitimately live on private (RFC1918) IPv4 LAN addresses, so
+    those stay allowed; loopback, link-local (incl. the 169.254.169.254 cloud
+    metadata endpoint), multicast, reserved ranges and non-global private
+    IPv6 (ULA fc00::/7, incl. the fd00:ec2::254 AWS IPv6 metadata endpoint)
+    are rejected. DNS is resolved here at validation time — combine with
+    permission gating (these endpoints require cameras.manage), not as the
+    sole control.
     """
-    parsed = urlparse(stream_url)
+    try:
+        parsed = urlparse(stream_url)
+        host = parsed.hostname
+    except ValueError:
+        # e.g. unmatched bracket ("http://[::1") or bad IPv6 literal.
+        return "Invalid stream URL"
     if parsed.scheme.lower() not in ALLOWED_STREAM_SCHEMES:
-        return "Unsupported stream scheme - use rtsp(s):// or http(s)://"
-    host = parsed.hostname
+        return "Unsupported stream scheme - use rtsp(s)://, rtmp(s):// or http(s)://"
     if not host:
         return "Stream URL must include a host"
     try:
@@ -42,6 +103,7 @@ def validate_stream_url(stream_url: str) -> str | None:
             or ip.is_multicast
             or ip.is_unspecified
             or ip.is_reserved
+            or (ip.version == 6 and ip.is_private and not ip.is_global)
         ):
             return "Stream host resolves to a disallowed address"
     return None
@@ -61,7 +123,8 @@ def capture_stream_frame(stream_url: str, warmup_frames: int = 5) -> dict:
             "processing_ms": int((time.perf_counter() - started) * 1000),
         }
 
-    cap = cv2.VideoCapture(stream_url)
+    # Validation guarantees a network scheme, so the capture is always timed.
+    cap = open_network_capture(stream_url)
 
     if not cap.isOpened():
         return {

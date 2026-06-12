@@ -46,6 +46,33 @@ def upgrade() -> None:
     op.drop_constraint(
         "holidays_organization_id_date_location_id_key", "holidays", type_="unique"
     )
+    # De-duplicate BEFORE building the unique partial indexes: the old
+    # constraint treated NULL location_id rows as always-distinct, so a live
+    # database may already contain duplicate org-wide holidays (and, less
+    # likely, per-location duplicates) — building the indexes over them would
+    # abort the upgrade with a unique violation. Keep the lowest id per group.
+    op.execute(
+        """
+        DELETE FROM holidays
+        WHERE location_id IS NULL
+          AND id NOT IN (
+              SELECT MIN(id) FROM holidays
+              WHERE location_id IS NULL
+              GROUP BY organization_id, date
+          )
+        """
+    )
+    op.execute(
+        """
+        DELETE FROM holidays
+        WHERE location_id IS NOT NULL
+          AND id NOT IN (
+              SELECT MIN(id) FROM holidays
+              WHERE location_id IS NOT NULL
+              GROUP BY organization_id, date, location_id
+          )
+        """
+    )
     op.create_index(
         "uq_holidays_org_date_location",
         "holidays",

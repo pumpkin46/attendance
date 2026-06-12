@@ -56,7 +56,7 @@ def _origin_allowed(origin: str | None) -> bool:
 async def _resolve_identity(
     token: str | None, org_param: str | None
 ) -> tuple[int, int | None] | None:
-    """Validate the token and return (user_id, org_id), or None if unauthenticated."""
+    """Validate the token and return (user_id, org_id), or None to reject."""
     if not token:
         return None
     payload = decode_access_token(token)
@@ -91,6 +91,11 @@ async def _resolve_identity(
             except ValueError:
                 return user.id, None
         return user.id, default_org
+    if user.organization_id is None:
+        # Mirror get_tenant_org_id: org_id=None is validated global scope,
+        # reserved for super admins -- the hub fans every tenant's events to
+        # such a connection. Reject an org-less tenant user like a bad token.
+        return None
     return user.id, user.organization_id
 
 

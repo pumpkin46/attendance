@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from redis.exceptions import RedisError
@@ -20,6 +21,8 @@ from app.models.attendance import (
 )
 from app.models.employee import Employee
 
+logger = logging.getLogger(__name__)
+
 # In-memory fast-path cache for duplicate suppression. This is a best-effort
 # optimisation only — it is per-process and so cannot be relied on for
 # correctness across multiple workers/nodes. The authoritative duplicate guard
@@ -30,32 +33,64 @@ _dup_cache: dict[str, datetime] = {}
 _DUP_CACHE_MAX = 10_000
 
 
-def _is_duplicate(key: str, window_seconds: int) -> bool:
+def _check_duplicate_local(key: str, window_seconds: int) -> bool:
+    last = _dup_cache.get(key)
+    if last is None:
+        return False
+    return (datetime.now(timezone.utc) - last).total_seconds() < window_seconds
+
+
+def _arm_duplicate_local(key: str) -> None:
     now = datetime.now(timezone.utc)
     _prune_dup_cache(now)
-    last = _dup_cache.get(key)
-    if last and (now - last).total_seconds() < window_seconds:
-        return True
     _dup_cache[key] = now
-    return False
 
 
-async def _is_duplicate_shared(key: str, window_seconds: int) -> bool:
-    """Cross-worker duplicate fast-path.
+async def _check_duplicate_shared(key: str, window_seconds: int) -> bool:
+    """Cross-worker duplicate fast-path: read-only, no side effects.
 
-    Uses an atomic Redis ``SET key 1 NX EX window`` when Redis is enabled — the
-    key is created only on the first call within the window, so a second call
-    (from any worker) sees it already present and is flagged as a duplicate. Falls
-    back to the in-process cache when Redis is disabled or unreachable.
+    Arming is a separate explicit step (``_arm_duplicate_shared``) taken only
+    after a successful write. Arming on read meant a failed commit kept the
+    key armed (the retried event read as duplicate_ignored for the whole
+    window), and a no-op sighting (e.g. an exit camera seeing someone not
+    yet checked in) suppressed a later genuine punch. Falls back to the
+    in-process cache when Redis is disabled or unreachable.
     """
     redis = get_redis()
     if redis is not None:
         try:
-            created = await redis.set(f"dupwin:{key}", "1", nx=True, ex=window_seconds)
-            return not created
+            return await redis.get(f"dupwin:{key}") is not None
         except RedisError:
             pass  # fall through to the local cache
-    return _is_duplicate(key, window_seconds)
+    return _check_duplicate_local(key, window_seconds)
+
+
+async def _arm_duplicate_shared(key: str, window_seconds: int) -> None:
+    """Open the duplicate window after a check-in/out actually flushed."""
+    redis = get_redis()
+    if redis is not None:
+        try:
+            await redis.set(f"dupwin:{key}", "1", nx=True, ex=window_seconds)
+            return
+        except RedisError:
+            pass  # fall through to the local cache
+    _arm_duplicate_local(key)
+
+
+async def clear_duplicate_marker(employee_id: int, method: str = "face") -> None:
+    """Best-effort unarm of the duplicate fast-path for one employee.
+
+    Called by the engine consumer when a commit fails after the marker was
+    armed, so the retried event is not misread as a duplicate.
+    """
+    key = f"{method}:{employee_id}"
+    _dup_cache.pop(key, None)
+    redis = get_redis()
+    if redis is not None:
+        try:
+            await redis.delete(f"dupwin:{key}")
+        except RedisError:
+            pass
 
 
 def _prune_dup_cache(now: datetime) -> None:
@@ -237,6 +272,39 @@ def _resolve_checkout_status(
     return "present"
 
 
+def _apply_check_in(
+    record: AttendanceRecord,
+    now: datetime,
+    *,
+    method: str,
+    camera_id: int | None,
+    shift: Shift | None,
+    policy: AttendancePolicy | None,
+) -> None:
+    record.check_in_at = now
+    record.check_in_method = method
+    record.camera_id = camera_id or record.camera_id
+    record.shift_id = shift.id if shift else record.shift_id
+    record.status = _resolve_status(now, shift, policy)
+    record.attendance_type = record.status
+
+
+def _apply_check_out(
+    record: AttendanceRecord,
+    now: datetime,
+    *,
+    method: str,
+    policy: AttendancePolicy | None,
+) -> None:
+    record.check_out_at = now
+    record.check_out_method = method
+    worked, overtime = _calc_worked(record.check_in_at, now, policy)
+    record.worked_minutes = worked
+    record.overtime_minutes = overtime
+    record.status = _resolve_checkout_status(worked, policy, record.status)
+    record.attendance_type = record.status
+
+
 async def process_recognition(
     db: AsyncSession,
     employee_id: int,
@@ -247,10 +315,15 @@ async def process_recognition(
     processing_ms: int | None = None,
     organization_id: int | None = None,
     method: str = "face",
+    intent: str | None = None,
 ) -> AttendanceRecord | None:
     # Note: confidence / liveness_passed / processing_ms describe the recognition
     # event, not the attendance row (which has no columns for them), so they are
     # accepted for a uniform caller interface but not persisted here.
+    #
+    # intent carries the camera's configured purpose ("check_in" for entry
+    # cameras, "check_out" for exit cameras); None keeps the historical kiosk
+    # toggle (first sighting checks in, the next checks out).
     window = settings.face_duplicate_window_seconds
     dup_key = f"face:{employee_id}"
 
@@ -261,15 +334,34 @@ async def process_recognition(
         # Stale FAISS vector (deleted/deactivated employee): writing a record
         # would violate the FK / resurrect attendance for a removed person.
         return None
+    if organization_id is not None and employee.organization_id != organization_id:
+        # Caller-supplied tenant context (e.g. the camera's org) must match the
+        # matched employee: a cross-org recognition writes nothing.
+        logger.warning(
+            "suppressing recognition for employee %s: organization mismatch",
+            employee_id,
+        )
+        return None
     org_id = employee.organization_id
 
     now = datetime.now(timezone.utc)
     today = local_date(now)
 
+    if intent == "check_out":
+        # No row for today means nothing to close out: short-circuit before
+        # _get_or_create_today_record, which would otherwise pollute the day
+        # with a bare status='absent' row on every exit-camera sighting.
+        existing_stmt = select(AttendanceRecord).where(
+            AttendanceRecord.employee_id == employee_id,
+            AttendanceRecord.work_date == today,
+        )
+        if (await db.execute(existing_stmt)).scalar_one_or_none() is None:
+            return None
+
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None
 
-    fast_dup = await _is_duplicate_shared(dup_key, window)
+    fast_dup = await _check_duplicate_shared(dup_key, window)
     record = await _get_or_create_today_record(
         db,
         employee_id,
@@ -286,22 +378,32 @@ async def process_recognition(
         record.last_action = "duplicate_ignored"
         return record
 
-    if not record.check_in_at:
-        record.check_in_at = now
-        record.check_in_method = method
-        record.camera_id = camera_id or record.camera_id
-        record.shift_id = shift.id if shift else record.shift_id
-        record.status = _resolve_status(now, shift, policy)
-        record.attendance_type = record.status
+    if intent == "check_in":
+        if not record.check_in_at:
+            _apply_check_in(
+                record, now, method=method, camera_id=camera_id, shift=shift, policy=policy
+            )
+            action = "check_in"
+        else:
+            # An entry camera re-sighting someone already checked in must
+            # never toggle them into a check-out.
+            action = "already_checked_in"
+    elif intent == "check_out":
+        if record.check_in_at and not record.check_out_at:
+            _apply_check_out(record, now, method=method, policy=policy)
+            action = "check_out"
+        elif not record.check_in_at:
+            # Cannot check out a day that never checked in.
+            action = "none"
+        else:
+            action = "already_complete"
+    elif not record.check_in_at:
+        _apply_check_in(
+            record, now, method=method, camera_id=camera_id, shift=shift, policy=policy
+        )
         action = "check_in"
     elif not record.check_out_at:
-        record.check_out_at = now
-        record.check_out_method = method
-        worked, overtime = _calc_worked(record.check_in_at, now, policy)
-        record.worked_minutes = worked
-        record.overtime_minutes = overtime
-        record.status = _resolve_checkout_status(worked, policy, record.status)
-        record.attendance_type = record.status
+        _apply_check_out(record, now, method=method, policy=policy)
         action = "check_out"
     else:
         action = "already_complete"
@@ -312,6 +414,10 @@ async def process_recognition(
     # this hot recognition path (three extra queries per recognition) for
     # relationships no caller reads here.
     await db.refresh(record, attribute_names=["created_at", "updated_at"])
+    if action in ("check_in", "check_out"):
+        # Arm only after the write flushed: a failed write or a no-op outcome
+        # must not open the duplicate window (see _check_duplicate_shared).
+        await _arm_duplicate_shared(dup_key, window)
     record.last_action = action
     return record
 
@@ -337,7 +443,7 @@ async def process_rfid_tap(
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None
 
-    fast_dup = await _is_duplicate_shared(dup_key, window)
+    fast_dup = await _check_duplicate_shared(dup_key, window)
     record = await _get_or_create_today_record(
         db,
         employee_id,
@@ -377,5 +483,7 @@ async def process_rfid_tap(
 
     await db.flush()
     await db.refresh(record, attribute_names=["created_at", "updated_at"])
+    if action in ("check_in", "check_out"):
+        await _arm_duplicate_shared(dup_key, window)
     record.last_action = action
     return record

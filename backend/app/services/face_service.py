@@ -1,3 +1,4 @@
+import threading
 import time
 
 import numpy as np
@@ -10,12 +11,23 @@ from app.services.faiss_index import FaissIndex
 from app.services.liveness import verify_liveness
 
 _index: FaissIndex | None = None
+_index_lock = threading.Lock()
 
 
 def get_index() -> FaissIndex:
+    """Process-wide FaissIndex singleton.
+
+    Double-checked locking so concurrent first calls cannot build two
+    instances. The instance identity never changes after construction; every
+    cached reference (engine, enrollment service) stays valid for the process
+    lifetime - refreshing from disk goes through FaissIndex.reload(), never
+    through swapping this singleton.
+    """
     global _index
     if _index is None:
-        _index = FaissIndex()
+        with _index_lock:
+            if _index is None:
+                _index = FaissIndex()
     return _index
 
 
@@ -590,10 +602,8 @@ def export_embeddings() -> dict:
 
 
 def import_embeddings(index_b64: str, metadata: dict) -> dict:
-    global _index
     idx = get_index()
     idx.import_bundle(index_b64, metadata)
-    _index = idx
     return {
         "success": True,
         "embedding_count": idx.count(),
@@ -602,9 +612,10 @@ def import_embeddings(index_b64: str, metadata: dict) -> dict:
 
 
 def reload_embeddings() -> dict:
-    global _index
-    _index = None
+    # Refresh the singleton in place (locked) - never swap the instance, or
+    # callers holding the old reference would write to a dead index.
     idx = get_index()
+    idx.reload()
     return {
         "success": True,
         "embedding_count": idx.count(),

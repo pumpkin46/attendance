@@ -32,11 +32,20 @@ class FakeSession:
         self.event = None
         # Override what db.get() returns (None = employee row missing)
         self.employee = self._DEFAULT
+        # Ids returned by execute().scalars().all() (single-org lookup)
+        self.org_ids = []
 
     def add(self, obj):
         self.added.append(obj)
 
     async def flush(self):
+        # Mimic primary-key assignment so handlers reading obj.id after a
+        # flush (e.g. issue_token on register) keep working.
+        for i, obj in enumerate(self.added, start=1):
+            if getattr(obj, "id", None) is None:
+                obj.id = i
+
+    async def refresh(self, obj, attribute_names=None):
         pass
 
     async def get(self, model, pk):
@@ -51,7 +60,10 @@ class FakeSession:
         )
 
     async def execute(self, stmt):
-        return SimpleNamespace(scalar_one_or_none=lambda: self.event)
+        return SimpleNamespace(
+            scalar_one_or_none=lambda: self.event,
+            scalars=lambda: SimpleNamespace(all=lambda: list(self.org_ids)),
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -222,6 +234,269 @@ def test_match_on_inactive_employee_is_unknown(client, fake_session, monkeypatch
 
     assert body["matched"] is False
     assert body["reason"] == "stale_identity"
+
+
+def _identify_returns_visitor_3(monkeypatch):
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": "visitor-3",
+            "confidence": 0.93,
+            "liveness_passed": True,
+            "processing_ms": 100,
+        },
+    )
+
+
+def test_same_org_visitor_match_passes(client, fake_session, monkeypatch):
+    _identify_returns_visitor_3(monkeypatch)
+    fake_session.employee = SimpleNamespace(id=3, name="Guest", organization_id=1)
+
+    body = client.post("/api/v1/recognition/identify", json={"image": "x"}).json()
+
+    assert body["matched"] is True
+    assert body["employee_id"] == "visitor-3"
+    live = [o for o in fake_session.added if isinstance(o, LiveEvent)]
+    assert [e.event_type for e in live] == ["recognition.visitor"]
+    assert live[0].visitor_id == 3
+
+
+def test_cross_tenant_visitor_match_is_suppressed(client, fake_session, monkeypatch):
+    """A FAISS hit on another org's visitor must read as a plain non-match:
+    no visitor identity leak, event logged as unknown under the caller's org.
+    """
+    _identify_returns_visitor_3(monkeypatch)
+    fake_session.employee = SimpleNamespace(id=3, name="Guest", organization_id=2)
+
+    body = client.post("/api/v1/recognition/identify", json={"image": "x"}).json()
+
+    assert body["matched"] is False
+    assert body["employee_id"] is None  # raw "visitor-N" identity must not leak
+    events = [o for o in fake_session.added if isinstance(o, RecognitionEvent)]
+    assert len(events) == 1
+    assert events[0].result == "unknown"
+    assert events[0].organization_id == 1  # caller org, not the victim's
+    live = [o for o in fake_session.added if isinstance(o, LiveEvent)]
+    assert all(e.event_type != "recognition.visitor" for e in live)
+
+
+def test_missing_visitor_row_is_unknown(client, fake_session, monkeypatch):
+    _identify_returns_visitor_3(monkeypatch)
+    fake_session.employee = None
+
+    body = client.post("/api/v1/recognition/identify", json={"image": "x"}).json()
+
+    assert body["matched"] is False
+    assert body["employee_id"] is None
+    assert body["reason"] == "stale_identity"
+
+
+def test_raw_recognize_cross_org_match_is_stripped(client, fake_session, monkeypatch):
+    """/recognition/recognize must not return another tenant's FAISS identity."""
+    monkeypatch.setattr(
+        face_service,
+        "recognize",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": "7",
+            "matched": True,
+            "confidence": 0.95,
+            "processing_ms": 100,
+        },
+    )
+    fake_session.employee = SimpleNamespace(id=7, organization_id=2, is_active=True)
+
+    body = client.post("/api/v1/recognition/recognize", json={"image": "x"}).json()
+
+    assert body["employee_id"] is None
+    assert body["matched"] is False
+
+
+def test_raw_recognize_same_org_match_passes(client, fake_session, monkeypatch):
+    monkeypatch.setattr(
+        face_service,
+        "recognize",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": "7",
+            "matched": True,
+            "confidence": 0.95,
+            "processing_ms": 100,
+        },
+    )
+
+    body = client.post("/api/v1/recognition/recognize", json={"image": "x"}).json()
+
+    assert body["employee_id"] == "7"
+    assert body["matched"] is True
+
+
+def _engine_result(identity, attendance_event=None):
+    payload = {
+        "success": True,
+        "employee_id": identity,
+        "employee_name": "Ada Lovelace",
+        "confidence": 0.91,
+        "matched": True,
+        "is_unknown": False,
+        "event_type": "check_in",
+        "processing_ms": 50,
+    }
+    return SimpleNamespace(
+        employee_id=identity,
+        attendance_event=attendance_event,
+        confidence=0.91,
+        liveness_passed=True,
+        to_dict=lambda: dict(payload),
+    )
+
+
+def _mock_engine_pipeline(monkeypatch, result):
+    monkeypatch.setattr(
+        "app.api.engine.get_recognition_engine",
+        lambda: SimpleNamespace(
+            recognize_image=lambda *a, **k: result,
+            recognize_stream=lambda *a, **k: result,
+        ),
+    )
+
+
+def _pending_engine_events() -> int:
+    from app.engine.attendance_generator import get_attendance_generator
+
+    return get_attendance_generator().stats["pending_events"]
+
+
+def test_engine_recognize_same_org_match_writes_attendance(
+    client, fake_session, monkeypatch
+):
+    calls = []
+
+    async def fake_process_recognition(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(last_action="check_in")
+
+    monkeypatch.setattr(
+        attendance_service, "process_recognition", fake_process_recognition
+    )
+    _mock_engine_pipeline(monkeypatch, _engine_result("7", object()))
+
+    resp = client.post(
+        "/api/v1/engine/recognize", json={"image": "x", "direction": "in"}
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["employee_id"] == "7"
+    assert body["matched"] is True
+    assert len(calls) == 1
+    assert calls[0]["employee_id"] == 7
+    assert calls[0]["organization_id"] == 1
+    assert calls[0]["intent"] == "check_in"
+    # enqueue=False: the inline write is the only writer; nothing is queued
+    # for the background consumer.
+    assert _pending_engine_events() == 0
+
+
+def test_engine_recognize_stream_persists_inline(client, fake_session, monkeypatch):
+    """/engine/recognize-stream persists inline too (it used to leave its
+    event to the background consumer, which bypassed the tenancy veto)."""
+    calls = []
+
+    async def fake_process_recognition(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(last_action="check_out")
+
+    monkeypatch.setattr(
+        attendance_service, "process_recognition", fake_process_recognition
+    )
+    monkeypatch.setattr(
+        "app.services.stream_capture.validate_stream_url", lambda url: None
+    )
+    _mock_engine_pipeline(monkeypatch, _engine_result("7", object()))
+
+    resp = client.post(
+        "/api/v1/engine/recognize-stream",
+        json={"stream_url": "rtsp://cam.example/1", "direction": "out"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["employee_id"] == "7"
+    assert len(calls) == 1
+    assert calls[0]["employee_id"] == 7
+    assert calls[0]["organization_id"] == 1
+    assert calls[0]["intent"] == "check_out"
+    assert _pending_engine_events() == 0
+
+
+def test_engine_recognize_cross_org_match_is_stripped(
+    client, fake_session, monkeypatch
+):
+    """A cross-org engine match leaks neither identity nor attendance; with
+    enqueue=False nothing is queued for the background consumer to persist.
+    """
+    fake_session.employee = SimpleNamespace(
+        id=7, first_name="Eve", last_name="Other", organization_id=2, is_active=True
+    )
+    calls = []
+
+    async def fake_process_recognition(**kwargs):
+        calls.append(kwargs)
+        return None
+
+    monkeypatch.setattr(
+        attendance_service, "process_recognition", fake_process_recognition
+    )
+    _mock_engine_pipeline(monkeypatch, _engine_result("7", object()))
+
+    resp = client.post(
+        "/api/v1/engine/recognize", json={"image": "x", "direction": "in"}
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["employee_id"] is None
+    assert body["employee_name"] is None
+    assert body["matched"] is False
+    assert body["is_unknown"] is True
+    assert calls == []
+    assert _pending_engine_events() == 0
+
+
+def test_register_assigns_single_active_org(client, fake_session, monkeypatch):
+    """Self-registration on a single-org box binds the account to that org so
+    it is not bricked by the tenant 403 in get_tenant_org_id."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "registration_enabled", True)
+    fake_session.org_ids = [42]
+
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"name": "New User", "email": "new@example.com", "password": "password123"},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["user"]["organization_id"] == 42
+
+
+def test_register_with_multiple_orgs_leaves_unassigned(
+    client, fake_session, monkeypatch
+):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "registration_enabled", True)
+    fake_session.org_ids = [1, 2]
+
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"name": "New User", "email": "new2@example.com", "password": "password123"},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["user"]["organization_id"] is None
 
 
 def test_unknown_identify_records_unknown_event(client, fake_session, monkeypatch):

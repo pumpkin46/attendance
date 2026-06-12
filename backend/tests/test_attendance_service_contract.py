@@ -14,14 +14,16 @@ from app.services.attendance_service import process_recognition, process_rfid_ta
 
 
 def test_process_recognition_accepts_engine_api_call():
-    # Mirrors app/api/engine.py
+    # Mirrors app/api/engine.py (_persist_inline_attendance)
     inspect.signature(process_recognition).bind(
         db="db",
         employee_id=1,
         camera_id=2,
         confidence=0.9,
         liveness_passed=True,
+        organization_id=5,
         method="face",
+        intent="check_in",
     )
 
 

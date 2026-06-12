@@ -59,6 +59,23 @@ class TestProductionSecretGuard:
         s = _settings(app_env="local")
         assert s.secret_key == DEFAULT_SECRET_KEY
 
+    def test_app_env_case_variants_enforced(self):
+        # APP_ENV=PRODUCTION / Production / prod / padded whitespace used to
+        # bypass the exact-lowercase-string guard entirely.
+        for env in ("PRODUCTION", "Production", "prod", " production "):
+            with pytest.raises(ValueError):
+                _settings(app_env=env, SECRET_KEY=DEFAULT_SECRET_KEY)
+
+    def test_app_env_variants_keep_stored_value_and_force_debug_off(self):
+        s = _settings(app_env="PRODUCTION", SECRET_KEY=STRONG_SECRET, app_debug=True)
+        assert s.app_env == "PRODUCTION"  # field value is not normalized
+        assert s.is_production is True
+        assert s.app_debug is False
+
+    def test_is_production_false_outside_production(self):
+        assert _settings(app_env="local").is_production is False
+        assert _settings(app_env="staging").is_production is False
+
 
 class TestSelfRegistrationDefault:
     def test_registration_disabled_by_default(self):

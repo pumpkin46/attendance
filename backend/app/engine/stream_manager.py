@@ -25,8 +25,21 @@ import cv2
 import numpy as np
 
 from app.engine.config import engine_config
+from app.services.stream_capture import is_network_stream_url, open_network_capture
 
 logger = logging.getLogger(__name__)
+
+# Reads that return False this many times in a row are treated as a lost
+# connection and routed through the reconnect/backoff path.
+_READ_FAILURE_STREAK = 5
+
+# A looping local-file source re-opens at EOF after this fixed delay: long
+# enough not to spin on a corrupt/unreadable file, short enough that the loop
+# restarts without a visible gap (no offline alert, no exponential backoff).
+_FILE_REOPEN_DELAY_SECONDS = 0.5
+
+# Cap on health.errors so a flapping camera cannot grow the list unboundedly.
+_MAX_HEALTH_ERRORS = 50
 
 
 class StreamProtocol(enum.Enum):
@@ -128,6 +141,36 @@ class CameraStream:
 FrameCallback = Callable[[int, np.ndarray, float], Coroutine[Any, Any, None]]
 
 
+def _safe_release(capture: Any) -> None:
+    try:
+        if capture is not None:
+            capture.release()
+    except Exception:
+        pass
+
+
+def _drain_and_release(fut: "asyncio.Future", capture: Any) -> None:
+    """Done-callback for an abandoned read: consume the outcome (so asyncio
+    does not log 'exception was never retrieved') and release the capture.
+    By the time this runs the thread call has returned, so release cannot
+    race an in-flight read."""
+    try:
+        fut.result()
+    except (asyncio.CancelledError, Exception):
+        pass
+    _safe_release(capture)
+
+
+def _release_open_result(fut: "asyncio.Future") -> None:
+    """Done-callback for an abandoned open: release the constructed capture
+    (if any) instead of orphaning its RTSP session."""
+    try:
+        cap = fut.result()
+    except (asyncio.CancelledError, Exception):
+        return
+    _safe_release(cap)
+
+
 class StreamManager:
     """Manages multiple camera streams with health monitoring and auto-reconnect."""
 
@@ -146,6 +189,12 @@ class StreamManager:
         return len(self._streams)
 
     def register_callback(self, callback: FrameCallback) -> None:
+        # Equality (not identity) check: bound methods are recreated on each
+        # attribute access, so `is` would never catch a re-registration of
+        # engine._process_frame on a double start.
+        if callback in self._frame_callbacks:
+            logger.debug("Frame callback already registered; skipping")
+            return
         self._frame_callbacks.append(callback)
 
     def get_stream(self, camera_id: int) -> CameraStream | None:
@@ -202,9 +251,17 @@ class StreamManager:
     async def start(self) -> None:
         self._running = True
         for camera_id, stream in self._streams.items():
-            if stream.mode == StreamMode.LIVE_STREAM:
-                stream._task = asyncio.create_task(self._stream_loop(camera_id))
-        self._monitor_task = asyncio.create_task(self._health_monitor())
+            if stream.mode != StreamMode.LIVE_STREAM:
+                continue
+            # Never spawn a second loop over a live one: two loops would share
+            # one capture (the release-vs-read race) and double-process frames.
+            if stream._task and not stream._task.done():
+                logger.debug("Camera %d: stream loop already running; not respawning", camera_id)
+                continue
+            stream.reconnect_attempts = 0
+            stream._task = asyncio.create_task(self._stream_loop(camera_id))
+        if self._monitor_task is None or self._monitor_task.done():
+            self._monitor_task = asyncio.create_task(self._health_monitor())
         logger.info("Stream manager started with %d streams", len(self._streams))
 
     async def stop(self) -> None:
@@ -231,6 +288,7 @@ class StreamManager:
             return False
         if stream._task and not stream._task.done():
             return True
+        stream.reconnect_attempts = 0
         stream._task = asyncio.create_task(self._stream_loop(camera_id))
         return True
 
@@ -290,7 +348,14 @@ class StreamManager:
     def capture_frame(self, stream_url: str, warmup_frames: int = 5) -> dict:
         """Capture a single frame from a stream URL (for photo upload mode)."""
         started = time.perf_counter()
-        cap = cv2.VideoCapture(stream_url)
+        if is_network_stream_url(stream_url):
+            cfg = engine_config.stream
+            cap = open_network_capture(
+                stream_url, cfg.open_timeout_ms, cfg.read_timeout_ms
+            )
+        else:
+            # Device index or local file: default backend, no timeouts needed.
+            cap = cv2.VideoCapture(stream_url)
         if not cap.isOpened():
             return {
                 "success": False,
@@ -366,48 +431,59 @@ class StreamManager:
         stream._running = True
         stream.status = StreamStatus.CONNECTING
         cfg = engine_config.stream
+        read_failures = 0
 
         try:
             while stream._running and self._running:
                 try:
                     if not stream._capture or not stream._capture.isOpened():
                         if not await self._connect_stream(stream):
-                            # Capped exponential backoff, retrying indefinitely:
-                            # a routine NVR reboot / network blip must self-heal
-                            # instead of stopping attendance until a manual
-                            # restart.
-                            stream.reconnect_attempts += 1
-                            if stream.reconnect_attempts == 1:
-                                self._record_camera_offline(camera_id)
-                            stream.status = StreamStatus.INTERRUPTED
-                            backoff = min(
-                                cfg.reconnect_interval_seconds
-                                * (2 ** (stream.reconnect_attempts - 1)),
-                                cfg.max_reconnect_interval_seconds,
-                            )
-                            logger.warning(
-                                "Camera %d: reconnect attempt %d failed; retrying in %ds",
-                                camera_id,
-                                stream.reconnect_attempts,
-                                backoff,
-                            )
-                            await asyncio.sleep(backoff)
+                            await self._reconnect_backoff(stream)
                             continue
+                        read_failures = 0
 
                     t0 = time.perf_counter()
-                    ok, frame = await asyncio.to_thread(stream._capture.read)
+                    capture = stream._capture
+                    read_fut = asyncio.ensure_future(asyncio.to_thread(capture.read))
+                    try:
+                        # Shield so a force-cancel does not mark read_fut done
+                        # while the worker thread is still inside read().
+                        ok, frame = await asyncio.shield(read_fut)
+                    except asyncio.CancelledError:
+                        # The thread may still be mid-read(); releasing now
+                        # would race it (cv2 is not thread-safe). Defer the
+                        # release to when the read actually returns, and null
+                        # the capture so the finally below skips it.
+                        stream._capture = None
+                        read_fut.add_done_callback(
+                            lambda fut, cap=capture: _drain_and_release(fut, cap)
+                        )
+                        raise
                     latency = int((time.perf_counter() - t0) * 1000)
 
                     if not ok or frame is None:
                         stream.health.dropped_frames += 1
                         stream.status = StreamStatus.INTERRUPTED
-                        # Release here is safe: this read has already returned,
-                        # so no read is in flight on a worker thread.
-                        if stream._capture:
-                            stream._capture.release()
-                            stream._capture = None
+                        read_failures += 1
+                        if read_failures < _READ_FAILURE_STREAK:
+                            continue
+                        # Persistent read failure. Release is safe: this read
+                        # has returned, so no call is in flight on a worker
+                        # thread.
+                        read_failures = 0
+                        self._release_capture(stream)
+                        if self._is_file_source(stream):
+                            # EOF on a looping local file is routine, not an
+                            # outage: re-open without the offline alert or
+                            # exponential backoff.
+                            await asyncio.sleep(_FILE_REOPEN_DELAY_SECONDS)
+                            continue
+                        # Treat like a failed open so backoff, the attempt
+                        # counter, and the offline alert all apply.
+                        await self._reconnect_backoff(stream)
                         continue
 
+                    read_failures = 0
                     stream.health.total_frames += 1
                     stream.health.latency_ms = latency
                     stream.health.last_frame_at = datetime.now(timezone.utc)
@@ -444,17 +520,78 @@ class StreamManager:
                     logger.error("Stream loop error for camera %d: %s", camera_id, e)
                     stream.status = StreamStatus.ERROR
                     stream.health.errors.append(str(e))
-                    await asyncio.sleep(cfg.reconnect_interval_seconds)
+                    del stream.health.errors[:-_MAX_HEALTH_ERRORS]
+                    # A read exception means the thread call has returned, so
+                    # release is safe; route into the same backoff/alert path
+                    # as a failed open.
+                    read_failures = 0
+                    self._release_capture(stream)
+                    await self._reconnect_backoff(stream)
         finally:
             # The loop exclusively owns release() of its own capture, so stop
-            # paths only signal _running=False and never race this.
-            if stream._capture:
-                try:
-                    stream._capture.release()
-                except Exception:
-                    pass
-                stream._capture = None
+            # paths only signal _running=False and never race this. (After a
+            # cancelled read the capture is already nulled and its release is
+            # owned by the read's done-callback.)
+            self._release_capture(stream)
             stream.status = StreamStatus.OFFLINE
+            stream.health.fps = 0.0
+            stream.health.latency_ms = 0
+
+    def _release_capture(self, stream: CameraStream) -> None:
+        """Release a stream's capture. Only safe when no thread call is in
+        flight on it."""
+        _safe_release(stream._capture)
+        stream._capture = None
+
+    def _is_file_source(self, stream: CameraStream) -> bool:
+        """True for local video files, which hit EOF as a matter of course.
+
+        The FILE protocol is decisive, and device/network protocols that are
+        only ever set explicitly are never files. RTSP, however, is also the
+        fallback protocol for unrecognized URLs (stream_sync.protocol_for_url),
+        so otherwise the URL shape decides: not a network scheme and not a
+        digit device index means a local path.
+        """
+        if stream.protocol == StreamProtocol.FILE:
+            return True
+        if stream.protocol in (
+            StreamProtocol.ONVIF,
+            StreamProtocol.USB,
+            StreamProtocol.WEBCAM,
+            StreamProtocol.MOBILE,
+        ):
+            return False
+        url = stream.stream_url.strip()
+        return not url.isdigit() and not is_network_stream_url(url)
+
+    async def _reconnect_backoff(self, stream: CameraStream) -> None:
+        """Shared reconnect branch for open failures, read-failure streaks,
+        and read exceptions.
+
+        Capped exponential backoff, retrying indefinitely: a routine NVR
+        reboot / network blip must self-heal instead of stopping attendance
+        until a manual restart. Fires the CAMERA_OFFLINE alert on the first
+        attempt of an outage and zeroes live health numbers so the monitor
+        stops reporting stale-good fps/latency for a dead camera.
+        """
+        cfg = engine_config.stream
+        stream.reconnect_attempts += 1
+        if stream.reconnect_attempts == 1:
+            self._record_camera_offline(stream.camera_id)
+        stream.status = StreamStatus.INTERRUPTED
+        stream.health.fps = 0.0
+        stream.health.latency_ms = 0
+        backoff = min(
+            cfg.reconnect_interval_seconds * (2 ** (stream.reconnect_attempts - 1)),
+            cfg.max_reconnect_interval_seconds,
+        )
+        logger.warning(
+            "Camera %d: reconnect attempt %d failed; retrying in %ds",
+            stream.camera_id,
+            stream.reconnect_attempts,
+            backoff,
+        )
+        await asyncio.sleep(backoff)
 
     def _record_camera_offline(self, camera_id: int) -> None:
         """Emit a CAMERA_OFFLINE alert (best effort)."""
@@ -476,22 +613,28 @@ class StreamManager:
             cfg = engine_config.stream
 
             def _open():
-                # FFmpeg open/read timeouts (ms) so a dead RTSP source can't
+                # FFmpeg open/read timeouts so a dead network source can't
                 # block read() forever in a worker thread (which would also
-                # make clean shutdown impossible). These props apply to the
-                # FFmpeg backend used for network streams; harmless for USB.
-                cap = cv2.VideoCapture(url)
-                try:
-                    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, cfg.open_timeout_ms)
-                    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, cfg.read_timeout_ms)
-                except (AttributeError, cv2.error):
-                    # Older OpenCV without these constants — fall back to no
-                    # explicit timeout.
-                    pass
-                return cap
+                # make clean shutdown impossible). A timed open that fails is
+                # an offline camera: it falls straight into backoff below --
+                # never retried untimed, which would hang on the same host.
+                if is_network_stream_url(url):
+                    return open_network_capture(
+                        url, cfg.open_timeout_ms, cfg.read_timeout_ms
+                    )
+                # Local device index or non-network source: default backend.
+                return cv2.VideoCapture(url)
 
-            cap = await asyncio.to_thread(_open)
+            open_fut = asyncio.ensure_future(asyncio.to_thread(_open))
+            try:
+                cap = await asyncio.shield(open_fut)
+            except asyncio.CancelledError:
+                # Force-cancel landed mid-open: release whatever capture the
+                # thread constructs instead of orphaning the RTSP session.
+                open_fut.add_done_callback(_release_open_result)
+                raise
             if not cap.isOpened():
+                _safe_release(cap)
                 stream.status = StreamStatus.ERROR
                 return False
 

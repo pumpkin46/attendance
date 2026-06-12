@@ -310,10 +310,17 @@ class Settings(BaseSettings):
     def upload_dir(self) -> str:
         return self.visitor_upload_dir
 
+    @property
+    def is_production(self) -> bool:
+        # Normalize so APP_ENV=PRODUCTION / Production / prod / " production"
+        # cannot bypass the fail-closed guard below. The stored field value is
+        # left untouched.
+        return self.app_env.strip().lower() in {"production", "prod"}
+
     @model_validator(mode="after")
     def _enforce_production_security(self) -> "Settings":
         """Fail closed on insecure defaults when running in production."""
-        if self.app_env == "production":
+        if self.is_production:
             # Reject the default, any "change-me*" placeholder variant (the
             # exact-string check was bypassed by a placeholder that merely
             # differed from the default), and anything too short to be a real

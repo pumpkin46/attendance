@@ -185,14 +185,28 @@ def test_patch_engine_config(client):
 
 
 def test_engine_recognize_with_mocks(client, monkeypatch):
+    """An authorized identity round-trips, and the API path queues nothing."""
+    from app.core.database import get_db
+    from app.core.dependencies import get_tenant_org_id
+    from app.engine.attendance_generator import get_attendance_generator
+
+    class FakeDb:
+        async def get(self, model, pk):
+            # Employees are enrolled under their numeric PK; same org as the
+            # caller and active, so the tenancy gate authorizes the match.
+            return SimpleNamespace(id=pk, organization_id=1, is_active=True)
+
+    app.dependency_overrides[get_db] = lambda: FakeDb()
+    app.dependency_overrides[get_tenant_org_id] = lambda: 1
+
     mock_result = MagicMock()
     mock_result.to_dict.return_value = {
         "success": True,
         "matched": True,
-        "employee_id": "EMP001",
+        "employee_id": "7",
         "confidence": 0.97,
-        "attendance_event": None,
     }
+    mock_result.employee_id = "7"
     mock_result.attendance_event = None
 
     mock_engine = MagicMock()
@@ -208,5 +222,9 @@ def test_engine_recognize_with_mocks(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["employee_id"] == "EMP001"
+    assert response.json()["employee_id"] == "7"
     mock_engine.recognize_image.assert_called_once()
+    # The API path runs with enqueue=False: its event must never reach the
+    # background consumer's queue.
+    assert mock_engine.recognize_image.call_args.kwargs["enqueue"] is False
+    assert get_attendance_generator().stats["pending_events"] == 0

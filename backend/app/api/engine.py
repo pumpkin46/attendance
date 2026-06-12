@@ -107,6 +107,66 @@ class EngineConfigUpdate(BaseModel):
 # ─── Recognition Endpoints ────────────────────────────────────────────────────
 
 
+async def _veto_unauthorized_match(db, payload: dict, org_id: int | None) -> bool:
+    """Strip an identity the caller's tenant may not see; True when vetoed.
+
+    The FAISS index is global: a match outside org_id is rewritten in place to
+    the pipeline's unknown representation so neither the employee_id nor the
+    name leaks across tenants.
+    """
+    from app.services.recognition_service import authorize_match
+
+    if payload.get("employee_id") is None:
+        return False
+    if await authorize_match(db, str(payload["employee_id"]), org_id) is not None:
+        return False
+    logger.warning(
+        "Engine match suppressed: identity %s not visible to org %s",
+        payload["employee_id"],
+        org_id,
+    )
+    payload.update(
+        employee_id=None,
+        employee_name=None,
+        matched=False,
+        event_type=None,
+        is_unknown=True,
+        reason="low_confidence",
+    )
+    return True
+
+
+async def _persist_inline_attendance(
+    db, result, org_id: int | None, camera_id: int | None, direction: str | None
+) -> None:
+    """Write the attendance row for an API-initiated recognition.
+
+    API recognitions run with enqueue=False, so their events never reach the
+    background consumer's queue: this inline write is the only writer (no
+    claim race, no replay of a kiosk toggle as a check-in). Callers must have
+    passed the tenancy veto first. "in"/"out" kiosks carry an explicit
+    intent; anything else keeps the kiosk toggle (intent=None).
+    """
+    from app.engine.attendance_sync import employee_pk_from_identity
+    from app.services import attendance_service
+
+    if result.attendance_event is None:
+        return
+    employee_pk = employee_pk_from_identity(result.employee_id)
+    if employee_pk is None:
+        return
+    await attendance_service.process_recognition(
+        db=db,
+        employee_id=employee_pk,
+        camera_id=camera_id,
+        confidence=result.confidence,
+        liveness_passed=result.liveness_passed,
+        organization_id=org_id,
+        method="face",
+        intent={"in": "check_in", "out": "check_out"}.get(direction),
+    )
+
+
 @router.post("/recognize", response_model=RecognitionResult)
 async def engine_recognize(
     body: EngineRecognizeRequest,
@@ -116,6 +176,10 @@ async def engine_recognize(
 ):
     """Run the full 9-stage recognition pipeline on an image."""
     engine = get_recognition_engine()
+    # enqueue=False: the event bypasses the background consumer's queue
+    # entirely, so this handler is its only writer. There is no claim race to
+    # lose: the consumer can neither replay a kiosk toggle punch with its
+    # check_in intent nor persist a match the tenancy veto strips below.
     result = await run_in_threadpool(
         engine.recognize_image,
         body.image,
@@ -125,38 +189,25 @@ async def engine_recognize(
         direction=body.direction,
         rfid_employee_id=body.rfid_employee_id,
         liveness_frames_b64=body.liveness_frames,
+        enqueue=False,
     )
 
-    if result.attendance_event:
-        from app.engine.attendance_generator import get_attendance_generator
-        from app.engine.attendance_sync import employee_pk_from_identity
-        from app.services import attendance_service
+    payload = result.to_dict()
+    if await _veto_unauthorized_match(db, payload, org_id):
+        return payload
 
-        employee_pk = employee_pk_from_identity(result.employee_id)
-        # Claim the event from the queue first: if the background consumer
-        # already drained it, it owns the write and we must not double-process
-        # (a second write outside the duplicate window would flip the record
-        # into a bogus check-out).
-        claimed = get_attendance_generator().consume(result.attendance_event)
-        if employee_pk is not None and claimed:
-            await attendance_service.process_recognition(
-                db=db,
-                employee_id=employee_pk,
-                camera_id=body.camera_id,
-                confidence=result.confidence,
-                liveness_passed=result.liveness_passed,
-                method="face",
-            )
-
-    return result.to_dict()
+    await _persist_inline_attendance(db, result, org_id, body.camera_id, body.direction)
+    return payload
 
 
 @router.post("/recognize-stream", response_model=RecognitionResult)
 async def engine_recognize_stream(
     body: EngineStreamRecognizeRequest,
+    db: DbSession,
     # cameras.manage + URL validation: a raw stream_url opened server-side is
     # an SSRF primitive (see services.stream_capture.validate_stream_url).
     user: require_permission("cameras.manage"),
+    org_id: TenantOrgId,
 ):
     """Capture a frame from a video stream and run recognition."""
     from app.services.stream_capture import validate_stream_url
@@ -166,6 +217,9 @@ async def engine_recognize_stream(
         raise ValidationError(error)
 
     engine = get_recognition_engine()
+    # enqueue=False for the same reason as /recognize: this handler is the
+    # event's only writer, so a vetoed cross-tenant match can never be
+    # persisted by the background consumer.
     result = await run_in_threadpool(
         engine.recognize_stream,
         body.stream_url,
@@ -173,8 +227,14 @@ async def engine_recognize_stream(
         location_id=body.location_id,
         zone=body.zone,
         direction=body.direction,
+        enqueue=False,
     )
-    return result.to_dict()
+    payload = result.to_dict()
+    if await _veto_unauthorized_match(db, payload, org_id):
+        return payload
+
+    await _persist_inline_attendance(db, result, org_id, body.camera_id, body.direction)
+    return payload
 
 
 @router.post("/detect", response_model=FaceDetectionResult)

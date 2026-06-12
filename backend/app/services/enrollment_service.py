@@ -138,10 +138,14 @@ class FaceEnrollmentService:
 
     @property
     def index(self) -> FaissIndex:
-        if self._index is None:
-            from app.services.face_service import get_index
-            self._index = get_index()
-        return self._index
+        # Resolve the singleton on every access (never cache it): a cached
+        # reference taken at construction time would go stale if the module
+        # singleton were ever rebuilt. Explicitly injected indexes (tests)
+        # still win.
+        if self._index is not None:
+            return self._index
+        from app.services.face_service import get_index
+        return get_index()
 
     def enroll(
         self,

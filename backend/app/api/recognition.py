@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
@@ -34,7 +36,30 @@ from app.schemas.recognition_api import (
 from app.services import face_service, recognition_evaluation, recognition_service
 from app.services.stream_capture import capture_stream_frame
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/v1", tags=["recognition"])
+
+
+async def _gate_raw_match(db, result: dict, org_id: int | None) -> dict:
+    """Strip a pipeline match the caller's tenant may not see.
+
+    The FAISS index is global; without this gate the raw recognize endpoints
+    return other tenants' (or deleted) identities verbatim.
+    """
+    identity = result.get("employee_id")
+    if identity is None:
+        return result
+    if await recognition_service.authorize_match(db, str(identity), org_id) is None:
+        logger.warning(
+            "Raw recognize match suppressed: identity %s not visible to org %s",
+            identity,
+            org_id,
+        )
+        result["employee_id"] = None
+        result["matched"] = False
+        result["reason"] = "low_confidence"
+    return result
 
 
 @router.get("/recognition/config", response_model=RecognitionConfigResponse)
@@ -92,7 +117,12 @@ async def identify_face(
     response_model=RecognizeResponse,
     dependencies=[recognition_rate_limit()],
 )
-async def recognize_face(body: RecognizeRequest, user: CurrentUser):
+async def recognize_face(
+    body: RecognizeRequest,
+    db: DbSession,
+    user: CurrentUser,
+    org_id: TenantOrgId,
+):
     result = await run_in_threadpool(
         face_service.recognize,
         image_b64=body.image,
@@ -101,16 +131,18 @@ async def recognize_face(body: RecognizeRequest, user: CurrentUser):
         session_id=body.session_id,
         source=body.source,
     )
-    return RecognizeResponse(**result)
+    return RecognizeResponse(**await _gate_raw_match(db, result, org_id))
 
 
 @router.post("/recognition/recognize-stream", response_model=RecognizeResponse)
 async def recognize_from_stream(
     body: RecognizeStreamRequest,
+    db: DbSession,
     # cameras.manage: opening an arbitrary client-supplied URL server-side is
     # an SSRF primitive; restrict to camera administrators (mirrors
     # /engine/streams/add) on top of validate_stream_url.
     user: require_permission("cameras.manage"),
+    org_id: TenantOrgId,
 ):
     capture = await run_in_threadpool(capture_stream_frame, body.stream_url)
     if not capture["success"]:
@@ -127,7 +159,7 @@ async def recognize_from_stream(
         session_id=body.session_id,
         source=body.source or "rtsp",
     )
-    return RecognizeResponse(**result)
+    return RecognizeResponse(**await _gate_raw_match(db, result, org_id))
 
 
 @router.post("/recognition/liveness/verify", response_model=LivenessVerifyResponse)
