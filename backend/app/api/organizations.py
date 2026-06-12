@@ -12,7 +12,9 @@ from app.schemas.organization import (
     DepartmentOut,
     DepartmentUpdate,
     DepartmentWithBranch,
-    LocationBrief,
+    LocationCreate,
+    LocationUpdate,
+    LocationWithBranch,
     OrganizationCreate,
     OrganizationOut,
     OrganizationUpdate,
@@ -185,10 +187,40 @@ async def delete_department(
 # ── Locations ───────────────────────────────────────────────────────────────
 
 
-@router.get("/locations", response_model=list[LocationBrief])
+@router.get("/locations", response_model=list[LocationWithBranch])
 async def list_locations(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
-    locations = await service.list_locations(db, org_id)
-    return [LocationBrief(id=loc.id, name=loc.name, address=loc.address) for loc in locations]
+    return await service.list_locations(db, org_id)
+
+
+@router.post("/locations", response_model=LocationWithBranch, status_code=status.HTTP_201_CREATED)
+async def create_location(
+    body: LocationCreate,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: require_permission("branches.manage"),
+):
+    return await service.create_location(db, org_id, body)
+
+
+@router.patch("/locations/{location_id}", response_model=LocationWithBranch)
+async def update_location(
+    location_id: int,
+    body: LocationUpdate,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: require_permission("branches.manage"),
+):
+    return await service.update_location(db, org_id, location_id, body)
+
+
+@router.delete("/locations/{location_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_location(
+    location_id: int,
+    db: DbSession,
+    org_id: TenantOrgId,
+    user: require_permission("branches.manage"),
+):
+    await service.delete_location(db, org_id, location_id)
 
 
 # ── Security config ─────────────────────────────────────────────────────────

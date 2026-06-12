@@ -27,8 +27,8 @@ from app.services.report_export import ExportContext, MEDIA_TYPES
 router = APIRouter(prefix="/api/v1/security-monitoring", tags=["security-monitoring"])
 
 # Export ceilings, mirroring the audit trail: CSV streams cheaply; Excel styles
-# every cell and gets a lower cap.
-MAX_EXPORT_ROWS = {"csv": 50_000, "xlsx": 10_000}
+# every cell and PDF lays out every row, so they get lower caps.
+MAX_EXPORT_ROWS = {"csv": 50_000, "xlsx": 10_000, "pdf": 5_000}
 
 TzOffsetQuery = Query(0, ge=-840, le=840, description="JS Date.getTimezoneOffset() of the viewer")
 
@@ -86,7 +86,7 @@ async def export_alerts(
     db: DbSession,
     org_id: TenantOrgId,
     _: require_permission("security.monitor"),
-    export_format: Literal["csv", "xlsx"] = Query("csv", alias="format"),
+    export_format: Literal["csv", "xlsx", "pdf"] = Query("csv", alias="format"),
     status: str | None = Query(None),
     severity: str | None = Query(None),
     alert_type: str | None = Query(None),
@@ -95,7 +95,7 @@ async def export_alerts(
     date_to: date | None = Query(None),
     tz_offset: int = TzOffsetQuery,
 ):
-    """Download the (filtered) security alerts as CSV or a styled Excel workbook."""
+    """Download the (filtered) security alerts as CSV, a styled Excel workbook, or a print-ready PDF."""
     stmt = service.alerts_query(
         org_id,
         status=status,

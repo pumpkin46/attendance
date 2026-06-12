@@ -133,6 +133,16 @@ def test_xlsx_export_renders():
     assert content[:2] == b"PK"
 
 
+def test_pdf_export_renders():
+    content = export_security_alerts([_alert()], "pdf", _ctx())
+    assert content[:5] == b"%PDF-"
+
+
+def test_pdf_export_renders_with_no_alerts():
+    content = export_security_alerts([], "pdf", _ctx())
+    assert content[:5] == b"%PDF-"
+
+
 def test_export_rejects_unknown_format():
     with pytest.raises(ValueError):
-        export_security_alerts([], "pdf", _ctx())
+        export_security_alerts([], "docx", _ctx())

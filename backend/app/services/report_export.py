@@ -1,9 +1,11 @@
-"""Styled report exports (CSV / Excel / PDF) for daily, monthly and attendance reports.
+"""Styled report exports (CSV / Excel / PDF) for the attendance range report,
+plus the shared scaffolding (title band, KPI cards, table styling) reused by
+the audit-trail and security-alert exports.
 
-The export endpoint reuses the exact payloads the dashboard renders
-(``report_service.daily_report`` / ``monthly_report`` / ``attendance_range_report``)
-so a downloaded file always matches what the user saw on screen. This module is
-pure presentation: it turns those payloads into bytes.
+The export endpoint reuses the exact payload the page renders
+(``report_service.attendance_range_report``) so a downloaded file always
+matches what the user saw on screen. This module is pure presentation: it
+turns those payloads into bytes.
 
 Format conventions:
 - CSV is machine-readable: raw minutes, ISO-8601 timestamps (localized to the
@@ -24,14 +26,13 @@ from __future__ import annotations
 import codecs
 import csv
 import io
-from calendar import month_name
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from app.schemas.report import AttendanceRangeReport, DailyReport, MonthlyReport
+from app.schemas.report import AttendanceRangeReport
 
 if TYPE_CHECKING:  # heavy deps are runtime-lazy; keep them type-only here
     from openpyxl import Workbook
@@ -58,6 +59,11 @@ _STATUS_COLORS = {
     "absent": "B91C1C",
     "on_leave": "1D4ED8",
     "half_day": "6D28D9",
+    # Security-alert severities (used by security_export's colored column).
+    "critical": "B91C1C",
+    "high": "C2410C",
+    "medium": "B45309",
+    "low": "64748B",
 }
 
 @dataclass(frozen=True)
@@ -79,30 +85,6 @@ class _ReportTable:
     status_col: int | None  # 0-based index of the status column (for colors)
     landscape: bool = False
 
-
-_DAILY_TABLE = _ReportTable(
-    title="Daily Attendance Report",
-    sheet_name="Daily Attendance",
-    headers=("Code", "Employee", "Status", "Check in", "Check out", "Worked", "Overtime"),
-    aligns="LLCCCRR",
-    xlsx_widths=(12, 30, 13, 11, 11, 11, 11),
-    pdf_widths=(12, 30, 13, 11, 11, 11, 11),
-    status_col=2,
-)
-
-_MONTHLY_TABLE = _ReportTable(
-    title="Monthly Attendance Report",
-    sheet_name="Monthly Attendance",
-    headers=(
-        "Code", "Employee", "Department", "Working days", "Present",
-        "Attendance %", "Overtime", "Absent", "Late", "On leave",
-    ),
-    aligns="LLLRRRRRRR",
-    xlsx_widths=(12, 28, 18, 13, 10, 13, 11, 9, 8, 10),
-    pdf_widths=(11, 26, 17, 12, 9, 12, 10, 8, 7, 9),
-    status_col=None,
-    landscape=True,
-)
 
 _ATTENDANCE_TABLE = _ReportTable(
     title="Attendance Report",
@@ -168,39 +150,10 @@ def _generated_line(ctx: ExportContext) -> str:
     return f"Generated {stamp} (UTC{sign}{off_h:02d}:{off_m:02d}) - Attendance Platform"
 
 
-def _daily_subtitle(report: DailyReport) -> str:
-    return report.date.strftime("%A, %B %d, %Y")
-
-
-def _monthly_subtitle(report: MonthlyReport) -> str:
-    return f"{month_name[report.month]} {report.year}"
-
-
 def _attendance_subtitle(report: AttendanceRangeReport) -> str:
     start = report.period_start.strftime("%b %d, %Y")
     end = report.period_end.strftime("%b %d, %Y")
     return start if start == end else f"{start} - {end}"
-
-
-def _daily_kpis(report: DailyReport) -> list[tuple[str, str]]:
-    return [
-        ("Present", str(report.present)),
-        ("Late", str(report.late)),
-        ("Absent", str(report.absent)),
-        ("On leave", str(report.on_leave)),
-        ("Total records", str(report.total_records)),
-    ]
-
-
-def _monthly_kpis(report: MonthlyReport) -> list[tuple[str, str]]:
-    s = report.summary
-    return [
-        ("Working days", str(s.total_working_days)),
-        ("Attendance", f"{s.attendance_percent}%"),
-        ("Overtime", _fmt_minutes(s.overtime_minutes)),
-        ("Absences", str(s.absence_count)),
-        ("Employees", str(report.employee_count)),
-    ]
 
 
 def _attendance_kpis(report: AttendanceRangeReport) -> list[tuple[str, str]]:
@@ -211,34 +164,6 @@ def _attendance_kpis(report: AttendanceRangeReport) -> list[tuple[str, str]]:
         ("Hours worked", _fmt_minutes(report.worked_minutes)),
         ("Overtime", _fmt_minutes(report.overtime_minutes)),
     ]
-
-
-def _daily_rows(report: DailyReport, ctx: ExportContext) -> list[list[str]]:
-    return [
-        [
-            e.employee_code,
-            e.employee_name,
-            _status_label(e.status),
-            _fmt_time(e.check_in_at, ctx),
-            _fmt_time(e.check_out_at, ctx),
-            _fmt_minutes(e.worked_minutes),
-            _fmt_minutes(e.overtime_minutes),
-        ]
-        for e in report.employees
-    ]
-
-
-def _daily_totals(report: DailyReport) -> list[str]:
-    worked = sum(e.worked_minutes for e in report.employees)
-    overtime = sum(e.overtime_minutes for e in report.employees)
-    n = len(report.employees)
-    label = f"Totals - {n} record" + ("s" if n != 1 else "")
-    return ["", label, "", "", "", _fmt_minutes(worked), _fmt_minutes(overtime)]
-
-
-def _monthly_totals_label(report: MonthlyReport) -> str:
-    n = len(report.employees)
-    return f"Totals - {n} employee" + ("s" if n != 1 else "")
 
 
 def _attendance_rows(report: AttendanceRangeReport, ctx: ExportContext) -> list[list[str]]:
@@ -280,53 +205,6 @@ def _csv_bytes(headers: list[str], rows: list[list[object]]) -> bytes:
     writer.writerows(rows)
     # BOM so Excel auto-detects UTF-8 (names may be non-ASCII).
     return codecs.BOM_UTF8 + out.getvalue().encode("utf-8")
-
-
-def _daily_csv(report: DailyReport, ctx: ExportContext) -> bytes:
-    headers = [
-        "Report Date", "Employee Code", "Employee Name", "Status",
-        "Check In", "Check Out", "Worked Minutes", "Overtime Minutes",
-    ]
-    rows = [
-        [
-            report.date.isoformat(),
-            e.employee_code,
-            e.employee_name,
-            e.status,
-            _iso_local(e.check_in_at, ctx),
-            _iso_local(e.check_out_at, ctx),
-            e.worked_minutes,
-            e.overtime_minutes,
-        ]
-        for e in report.employees
-    ]
-    return _csv_bytes(headers, rows)
-
-
-def _monthly_csv(report: MonthlyReport, ctx: ExportContext) -> bytes:
-    headers = [
-        "Year", "Month", "Employee Code", "Employee Name", "Department",
-        "Working Days", "Present Days", "Attendance Percent", "Overtime Hours",
-        "Absence Count", "Late Count", "On Leave Count",
-    ]
-    rows = [
-        [
-            report.year,
-            report.month,
-            e.employee_code,
-            e.employee_name,
-            e.department or "",
-            e.total_working_days,
-            e.present_days,
-            e.attendance_percent,
-            e.overtime_hours,
-            e.absence_count,
-            e.late_count,
-            e.on_leave_count,
-        ]
-        for e in report.employees
-    ]
-    return _csv_bytes(headers, rows)
 
 
 def _attendance_csv(report: AttendanceRangeReport, ctx: ExportContext) -> bytes:
@@ -842,86 +720,7 @@ def _render_pdf(
 
 
 # ── Report assemblies ────────────────────────────────────────────────────────
-# Each report wires its spec + row builders into both renderers side by side.
-
-
-def _daily_xlsx(report: DailyReport, ctx: ExportContext) -> bytes:
-    return _render_xlsx(
-        _DAILY_TABLE, _daily_subtitle(report), ctx, _daily_kpis(report),
-        _daily_rows(report, ctx), _daily_totals(report),
-        status_keys=[e.status for e in report.employees],
-    )
-
-
-def _daily_pdf(report: DailyReport, ctx: ExportContext) -> bytes:
-    return _render_pdf(
-        _DAILY_TABLE, _daily_subtitle(report), ctx, _daily_kpis(report),
-        _daily_rows(report, ctx), _daily_totals(report),
-        status_keys=[e.status for e in report.employees],
-    )
-
-
-# Monthly rows differ per format on purpose: Excel gets real numbers (sortable,
-# 0.0% number format on the attendance column), the PDF gets display strings.
-def _monthly_rows(report: MonthlyReport, *, for_xlsx: bool) -> list[list[object]]:
-    def percent(value: float) -> object:
-        return value / 100 if for_xlsx else f"{value}%"
-
-    def num(value: int) -> object:
-        return value if for_xlsx else str(value)
-
-    return [
-        [
-            e.employee_code,
-            e.employee_name,
-            e.department or "-",
-            num(e.total_working_days),
-            num(e.present_days),
-            percent(e.attendance_percent),
-            _fmt_minutes(e.overtime_minutes),
-            num(e.absence_count),
-            num(e.late_count),
-            num(e.on_leave_count),
-        ]
-        for e in report.employees
-    ]
-
-
-def _monthly_totals(report: MonthlyReport, *, for_xlsx: bool) -> list[object]:
-    def percent(value: float) -> object:
-        return value / 100 if for_xlsx else f"{value}%"
-
-    def num(value: int) -> object:
-        return value if for_xlsx else str(value)
-
-    return [
-        "",
-        _monthly_totals_label(report),
-        "",
-        num(report.total_working_days),
-        num(sum(e.present_days for e in report.employees)),
-        percent(report.summary.attendance_percent),
-        _fmt_minutes(report.summary.overtime_minutes),
-        num(report.summary.absence_count),
-        num(sum(e.late_count for e in report.employees)),
-        num(sum(e.on_leave_count for e in report.employees)),
-    ]
-
-
-def _monthly_xlsx(report: MonthlyReport, ctx: ExportContext) -> bytes:
-    return _render_xlsx(
-        _MONTHLY_TABLE, _monthly_subtitle(report), ctx, _monthly_kpis(report),
-        _monthly_rows(report, for_xlsx=True), _monthly_totals(report, for_xlsx=True),
-        percent_col=5,
-    )
-
-
-def _monthly_pdf(report: MonthlyReport, ctx: ExportContext) -> bytes:
-    return _render_pdf(
-        _MONTHLY_TABLE, _monthly_subtitle(report), ctx, _monthly_kpis(report),
-        [[str(v) for v in row] for row in _monthly_rows(report, for_xlsx=False)],
-        [str(v) for v in _monthly_totals(report, for_xlsx=False)],
-    )
+# The report wires its spec + row builders into both renderers side by side.
 
 
 def _attendance_xlsx(report: AttendanceRangeReport, ctx: ExportContext) -> bytes:
@@ -941,16 +740,6 @@ def _attendance_pdf(report: AttendanceRangeReport, ctx: ExportContext) -> bytes:
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
-
-
-def export_daily(report: DailyReport, fmt: str, ctx: ExportContext) -> bytes:
-    renderers = {"csv": _daily_csv, "xlsx": _daily_xlsx, "pdf": _daily_pdf}
-    return renderers[fmt](report, ctx)
-
-
-def export_monthly(report: MonthlyReport, fmt: str, ctx: ExportContext) -> bytes:
-    renderers = {"csv": _monthly_csv, "xlsx": _monthly_xlsx, "pdf": _monthly_pdf}
-    return renderers[fmt](report, ctx)
 
 
 def export_attendance(report: AttendanceRangeReport, fmt: str, ctx: ExportContext) -> bytes:

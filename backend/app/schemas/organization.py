@@ -152,6 +152,32 @@ class LocationBrief(BaseModel):
     address: str | None = None
 
 
+class LocationWithBranch(LocationOut):
+    """Location plus an embedded branch summary when available."""
+
+    branch: BranchBrief | None = None
+
+
+class LocationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    address: str | None = None
+    timezone: str = "UTC"
+    branch_id: int | None = None
+    # Super admins operating without a tenant header pick the target org here;
+    # for tenant-scoped users the header/org context always wins.
+    organization_id: int | None = None
+
+
+class LocationUpdate(BaseModel):
+    """Partial update — only fields present in the request body are applied."""
+
+    name: str | None = Field(None, min_length=1, max_length=255)
+    address: str | None = None
+    timezone: str | None = None
+    branch_id: int | None = None
+    is_active: bool | None = None
+
+
 # ── Security config ───────────────────────────────────────────────────────────
 
 class SecurityConfigResponse(BaseModel):

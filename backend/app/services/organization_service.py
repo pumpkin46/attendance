@@ -18,6 +18,10 @@ from app.schemas.organization import (
     DepartmentOut,
     DepartmentUpdate,
     DepartmentWithBranch,
+    LocationCreate,
+    LocationOut,
+    LocationUpdate,
+    LocationWithBranch,
     OrganizationCreate,
     OrganizationOut,
     OrganizationUpdate,
@@ -338,7 +342,94 @@ async def delete_department(db: AsyncSession, org_id: int | None, department_id:
 # ── Locations ─────────────────────────────────────────────────────────────────
 
 
-async def list_locations(db: AsyncSession, org_id: int | None) -> list[Location]:
+def _format_location(loc: Location) -> LocationWithBranch:
+    base = LocationOut.model_validate(loc, from_attributes=True)
+    branch = (
+        BranchBrief(id=loc.branch.id, name=loc.branch.name) if loc.branch is not None else None
+    )
+    return LocationWithBranch(**base.model_dump(), branch=branch)
+
+
+async def list_locations(db: AsyncSession, org_id: int | None) -> list[LocationWithBranch]:
     stmt = select(Location).order_by(Location.name)
     stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-    return list((await db.execute(stmt)).scalars().all())
+    return [_format_location(loc) for loc in (await db.execute(stmt)).scalars().all()]
+
+
+async def _get_location(db: AsyncSession, org_id: int | None, location_id: int) -> Location:
+    stmt = select(Location).where(Location.id == location_id)
+    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
+    location = (await db.execute(stmt)).scalar_one_or_none()
+    if location is None:
+        raise NotFoundError("Location not found")
+    return location
+
+
+async def create_location(
+    db: AsyncSession, org_id: int | None, body: LocationCreate
+) -> LocationWithBranch:
+    target_org_id = await _resolve_target_org_id(db, org_id, body.organization_id)
+    if body.branch_id is not None:
+        await _validate_branch_in_org(db, body.branch_id, target_org_id)
+    location = Location(
+        organization_id=target_org_id,
+        branch_id=body.branch_id,
+        name=body.name,
+        address=body.address,
+        timezone=body.timezone,
+    )
+    db.add(location)
+    await db.flush()
+    await db.refresh(location)
+    return _format_location(location)
+
+
+async def update_location(
+    db: AsyncSession, org_id: int | None, location_id: int, body: LocationUpdate
+) -> LocationWithBranch:
+    location = await _get_location(db, org_id, location_id)
+    changes = body.model_dump(exclude_unset=True)
+    if changes.get("branch_id") is not None:
+        await _validate_branch_in_org(db, changes["branch_id"], location.organization_id)
+    for field, value in changes.items():
+        setattr(location, field, value)
+    await db.flush()
+    await db.refresh(location)
+    return _format_location(location)
+
+
+async def _location_dependents(db: AsyncSession, location_id: int) -> dict[str, int]:
+    """Counts of records that would cascade-delete with the location."""
+    from app.models.camera import Camera
+    from app.models.edge import EdgeDevice
+    from app.models.rfid import RfidReader
+
+    counts: dict[str, int] = {}
+    for label, model in (("camera", Camera), ("RFID reader", RfidReader), ("edge device", EdgeDevice)):
+        stmt = select(func.count()).select_from(model).where(model.location_id == location_id)
+        count = (await db.execute(stmt)).scalar_one()
+        if count:
+            counts[label] = count
+    return counts
+
+
+async def delete_location(db: AsyncSession, org_id: int | None, location_id: int) -> None:
+    location = await _get_location(db, org_id, location_id)
+
+    # Cameras, RFID readers, and edge devices cascade-delete with their
+    # location — refuse instead of silently destroying device configuration.
+    dependents = await _location_dependents(db, location.id)
+    if dependents:
+        detail = ", ".join(f"{count} {label}(s)" for label, count in dependents.items())
+        raise ConflictError(f"Location still has {detail}; move or remove them first")
+
+    employees = await _employee_count(db, Employee.location_id, location.id)
+    if employees:
+        raise ConflictError(
+            f"Location still has {employees} employee(s); reassign or remove them first"
+        )
+
+    # Attendance history and holidays that pointed here are detached
+    # (location_id SET NULL) by the database.
+    await db.delete(location)
+    await db.flush()
