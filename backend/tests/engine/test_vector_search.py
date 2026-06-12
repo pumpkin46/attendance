@@ -17,10 +17,10 @@ def test_search_empty_index(temp_faiss_paths, sample_embedding):
 
 def test_determine_action_thresholds():
     engine = VectorSearchEngine()
-
-    assert engine._determine_action(SearchMatch("1", 0.95, 1)) == MatchAction.AUTO_ACCEPT
-    assert engine._determine_action(SearchMatch("1", 0.85, 1)) == MatchAction.REVIEW
-    assert engine._determine_action(SearchMatch("1", 0.70, 1)) == MatchAction.UNKNOWN
+    # Calibrated for ArcFace: auto-accept >= 0.5, review [0.4, 0.5), unknown < 0.4.
+    assert engine._determine_action(SearchMatch("1", 0.62, 1)) == MatchAction.AUTO_ACCEPT
+    assert engine._determine_action(SearchMatch("1", 0.45, 1)) == MatchAction.REVIEW
+    assert engine._determine_action(SearchMatch("1", 0.30, 1)) == MatchAction.UNKNOWN
     assert engine._determine_action(None) == MatchAction.UNKNOWN
 
 

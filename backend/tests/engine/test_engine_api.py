@@ -31,7 +31,7 @@ def test_get_engine_config(client):
     assert response.status_code == 200
     data = response.json()
     assert "liveness" in data
-    assert data["search"]["auto_accept_threshold"] == 0.9
+    assert data["search"]["auto_accept_threshold"] == 0.5
 
 
 def test_get_performance_requirements(client):

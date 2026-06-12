@@ -46,7 +46,11 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       clearToken()
       if (!window.location.pathname.startsWith('/login')) {
-        window.location.href = '/login'
+        // Preserve where the user was so login can return them there, instead
+        // of always dumping them on the dashboard.
+        const next = window.location.pathname + window.location.search
+        const param = next && next !== '/' ? `?next=${encodeURIComponent(next)}` : ''
+        window.location.href = `/login${param}`
       }
     }
     return Promise.reject(error)

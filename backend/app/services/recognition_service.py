@@ -43,8 +43,12 @@ _NO_FACE_REASONS = frozenset({"no_face", "invalid_image"})
 
 # Reasons that still mean "a real face was searched and nobody matched" — the
 # pipeline leaves reason unset for a plain below-threshold miss; callers may
-# also tag it explicitly.
-_GENUINE_UNKNOWN_REASONS = frozenset({None, "low_confidence", "low_confidence_review"})
+# also tag it explicitly. "stale_identity" = the face matched FAISS vectors of
+# a deleted/deactivated employee, which for alerting purposes is an unknown
+# person on premises.
+_GENUINE_UNKNOWN_REASONS = frozenset(
+    {None, "low_confidence", "low_confidence_review", "stale_identity"}
+)
 
 
 def _unknown_throttled(org_id: int | None) -> bool:
@@ -156,95 +160,155 @@ async def record_identification(
             return {"matched": True, "employee": None, "attendance": None}
 
         employee_id = int(emp_id_str)
-        confidence = result.get("confidence", 0.0)
-        liveness_passed = bool(result.get("liveness_passed", False))
-        processing_ms = result.get("processing_ms", 0)
-
-        record = await attendance_service.process_recognition(
-            db=db,
-            employee_id=employee_id,
-            camera_id=camera_id,
-            confidence=confidence,
-            liveness_passed=liveness_passed,
-            processing_ms=processing_ms,
-            organization_id=org_id,
-        )
-        action = getattr(record, "last_action", None)
-
-        # Log the successful match so it appears in metrics, the events list,
-        # and exports (previously only "unknown" events were recorded).
         employee = await db.get(Employee, employee_id)
-        event_org_id = employee.organization_id if employee else org_id
-        event = RecognitionEvent(
-            employee_id=employee_id,
-            organization_id=event_org_id,
-            camera_id=camera_id,
-            result="matched",
-            confidence=confidence,
-            liveness_passed=liveness_passed,
-            processing_ms=processing_ms,
-            recognized_at=datetime.now(timezone.utc),
-        )
-        db.add(event)
-        await db.flush()
-        snapshot = _save_event_snapshot(image_b64, event.id)
-        if snapshot:
-            event.snapshot_path = snapshot
-            await db.flush()
 
-        # AI security checks (after-hours, tailgating). Best effort — an alert
-        # failure must never break the attendance write it follows.
-        try:
-            await security_monitoring_service.evaluate_matched(
+        # A FAISS hit only counts as a match when the employee row still
+        # exists, is active, and belongs to the caller's tenant. The index is
+        # global, so without these gates a deleted employee's stale vectors
+        # keep matching, and a user in org B could identify (and write
+        # attendance for) org A's employees. Mirrors the visitor gate above.
+        # Mutates `result` in place: the API layer spreads this same dict into
+        # its response, so the identity must be stripped here, not just in the
+        # outcome dict.
+        if employee is None or not employee.is_active:
+            logger.warning(
+                "Face matched employee %s but no active employee row exists; "
+                "treating as unknown (stale FAISS vectors?)",
+                employee_id,
+            )
+            result["employee_id"] = None
+            result["reason"] = "stale_identity"
+        elif org_id is not None and employee.organization_id != org_id:
+            # Indistinguishable from a plain non-match for the caller; the
+            # server log carries the real cause.
+            logger.warning(
+                "Cross-tenant face match suppressed: employee %s belongs to "
+                "org %s, caller org %s",
+                employee_id,
+                employee.organization_id,
+                org_id,
+            )
+            result["employee_id"] = None
+            result["reason"] = "low_confidence"
+        else:
+            return await _record_employee_match(
                 db,
+                result,
                 employee=employee,
-                event=event,
-                org_id=event_org_id,
+                org_id=org_id,
+                image_b64=image_b64,
                 camera_id=camera_id,
-                snapshot_path=snapshot,
             )
-        except Exception as exc:
-            logger.warning("[security-monitoring] matched-event checks failed: %s", exc)
-
-        if employee is not None:
-            await create_live_event(
-                db=db,
-                organization_id=employee.organization_id,
-                event_type="recognition.matched",
-                message=f"{employee.first_name} {employee.last_name} recognized",
-                employee_id=employee.id,
-                camera_id=camera_id,
-                # recognition_event_id lets the dashboard's event detail view
-                # load the stored snapshot for this match.
-                payload={
-                    "recognition_event_id": event.id,
-                    "confidence": confidence,
-                    "liveness_passed": liveness_passed,
-                    "attendance_action": action,
-                    "snapshot": bool(snapshot),
-                },
-            )
-
-        employee_brief = (
-            {
-                "id": employee.id,
-                "employee_code": getattr(employee, "employee_code", None),
-                "first_name": getattr(employee, "first_name", None),
-                "last_name": getattr(employee, "last_name", None),
-            }
-            if employee is not None
-            else None
-        )
-        attendance = (
-            {"action": action, "employee_id": employee_id} if action else None
-        )
-        return {"matched": True, "employee": employee_brief, "attendance": attendance}
 
     # No match. The pipeline only sets a reason when a gate (decode, quality,
     # liveness) stopped the frame before matching; a genuine searched-but-
     # unmatched face (see _GENUINE_UNKNOWN_REASONS) is the only case broadcast
     # as "recognition.unknown" (the org-wide toast). Gate rejections are still
     # persisted for review but broadcast as "recognition.rejected".
+    return await _record_no_match(
+        db, result, org_id=org_id, image_b64=image_b64, camera_id=camera_id
+    )
+
+
+async def _record_employee_match(
+    db: AsyncSession,
+    result: dict,
+    *,
+    employee: Employee,
+    org_id: int | None,
+    image_b64: str | None,
+    camera_id: int | None,
+) -> dict:
+    """Persist attendance + event + realtime for a verified employee match."""
+    employee_id = employee.id
+    confidence = result.get("confidence", 0.0)
+    liveness_passed = bool(result.get("liveness_passed", False))
+    processing_ms = result.get("processing_ms", 0)
+
+    record = await attendance_service.process_recognition(
+        db=db,
+        employee_id=employee_id,
+        camera_id=camera_id,
+        confidence=confidence,
+        liveness_passed=liveness_passed,
+        processing_ms=processing_ms,
+        organization_id=org_id,
+    )
+    action = getattr(record, "last_action", None)
+
+    # Log the successful match so it appears in metrics, the events list,
+    # and exports (previously only "unknown" events were recorded).
+    event_org_id = employee.organization_id
+    event = RecognitionEvent(
+        employee_id=employee_id,
+        organization_id=event_org_id,
+        camera_id=camera_id,
+        result="matched",
+        confidence=confidence,
+        liveness_passed=liveness_passed,
+        processing_ms=processing_ms,
+        recognized_at=datetime.now(timezone.utc),
+    )
+    db.add(event)
+    await db.flush()
+    snapshot = _save_event_snapshot(image_b64, event.id)
+    if snapshot:
+        event.snapshot_path = snapshot
+        await db.flush()
+
+    # AI security checks (after-hours, tailgating). Best effort — an alert
+    # failure must never break the attendance write it follows.
+    try:
+        await security_monitoring_service.evaluate_matched(
+            db,
+            employee=employee,
+            event=event,
+            org_id=event_org_id,
+            camera_id=camera_id,
+            snapshot_path=snapshot,
+        )
+    except Exception as exc:
+        logger.warning("[security-monitoring] matched-event checks failed: %s", exc)
+
+    await create_live_event(
+        db=db,
+        organization_id=employee.organization_id,
+        event_type="recognition.matched",
+        message=f"{employee.first_name} {employee.last_name} recognized",
+        employee_id=employee.id,
+        camera_id=camera_id,
+        # recognition_event_id lets the dashboard's event detail view
+        # load the stored snapshot for this match.
+        payload={
+            "recognition_event_id": event.id,
+            "confidence": confidence,
+            "liveness_passed": liveness_passed,
+            "attendance_action": action,
+            "snapshot": bool(snapshot),
+        },
+    )
+
+    employee_brief = {
+        "id": employee.id,
+        "employee_code": getattr(employee, "employee_code", None),
+        "first_name": getattr(employee, "first_name", None),
+        "last_name": getattr(employee, "last_name", None),
+    }
+    attendance = (
+        {"action": action, "employee_id": employee_id} if action else None
+    )
+    return {"matched": True, "employee": employee_brief, "attendance": attendance}
+
+
+async def _record_no_match(
+    db: AsyncSession,
+    result: dict,
+    *,
+    org_id: int | None,
+    image_b64: str | None,
+    camera_id: int | None,
+) -> dict:
+    """Persist an unknown/rejected recognition event + realtime broadcast."""
     reason = result.get("reason")
     no_match = {"matched": False, "employee": None, "attendance": None, "reason": reason}
 
@@ -401,10 +465,13 @@ async def record_event_feedback(
     }
 
 
-async def snapshot_path(db: AsyncSession, event_id: int) -> str:
-    event = (
-        await db.execute(select(RecognitionEvent).where(RecognitionEvent.id == event_id))
-    ).scalar_one_or_none()
+async def snapshot_path(db: AsyncSession, event_id: int, org_id: int | None = None) -> str:
+    stmt = select(RecognitionEvent).where(RecognitionEvent.id == event_id)
+    if org_id is not None:
+        # Event ids are sequential integers; without the tenant filter any
+        # caller with recognition.view could enumerate other orgs' snapshots.
+        stmt = stmt.where(RecognitionEvent.organization_id == org_id)
+    event = (await db.execute(stmt)).scalar_one_or_none()
     if not event:
         raise NotFoundError("Event not found")
     if not event.snapshot_path:

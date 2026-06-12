@@ -33,12 +33,3 @@ export function setOrgId(orgId: string): void {
 export function clearOrgId(): void {
   localStorage.removeItem(ORG_KEY)
 }
-
-/** Subscribe to token changes made in other tabs (cross-tab logout/login). */
-export function onTokenChange(handler: (token: string | null) => void): () => void {
-  const listener = (e: StorageEvent) => {
-    if (e.key === TOKEN_KEY) handler(e.newValue)
-  }
-  window.addEventListener('storage', listener)
-  return () => window.removeEventListener('storage', listener)
-}

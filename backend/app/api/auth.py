@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -30,6 +33,18 @@ from app.services.audit_service import log_action
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
+def _password_stamp(user: User) -> int:
+    """Integer seconds of the user's last password change (0 if never)."""
+    if user.password_changed_at is None:
+        return 0
+    return int(user.password_changed_at.timestamp())
+
+
+def issue_token(user: User) -> str:
+    """Mint an access token carrying the password-change stamp for revocation."""
+    return create_access_token({"sub": str(user.id), "pwd_at": _password_stamp(user)})
+
+
 class LogoutResponse(BaseModel):
     message: str
 
@@ -44,16 +59,20 @@ async def login(body: LoginRequest, request: Request, db: DbSession):
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.password):
+    # argon2 verify/hash are CPU-bound (64MB, time_cost=4); run them off the
+    # event loop so a login can't stall every other request on the worker.
+    if user is None or not await run_in_threadpool(
+        verify_password, body.password, user.password
+    ):
         raise AuthError("Invalid email or password")
 
     if not user.is_active:
         raise PermissionDeniedError("Account is deactivated")
 
     if needs_rehash(user.password):
-        user.password = hash_password(body.password)
+        user.password = await run_in_threadpool(hash_password, body.password)
 
-    token = create_access_token({"sub": str(user.id)})
+    token = issue_token(user)
 
     await log_action(
         db,
@@ -97,7 +116,7 @@ async def register(body: RegisterRequest, request: Request, db: DbSession):
     user = User(
         name=body.name,
         email=body.email,
-        password=hash_password(body.password),
+        password=await run_in_threadpool(hash_password, body.password),
         auth_provider="local",
         is_active=True,
     )
@@ -108,7 +127,7 @@ async def register(body: RegisterRequest, request: Request, db: DbSession):
     await db.flush()
     await db.refresh(user)
 
-    token = create_access_token({"sub": str(user.id)})
+    token = issue_token(user)
 
     await log_action(
         db,
@@ -187,13 +206,15 @@ async def update_me(body: UpdateProfileRequest, user: CurrentUser, request: Requ
 async def change_password(
     body: ChangePasswordRequest, user: CurrentUser, request: Request, db: DbSession
 ):
-    if not verify_password(body.current_password, user.password):
+    if not await run_in_threadpool(verify_password, body.current_password, user.password):
         raise ValidationError("Your current password is incorrect")
 
-    if verify_password(body.new_password, user.password):
+    if await run_in_threadpool(verify_password, body.new_password, user.password):
         raise ValidationError("New password must be different from the current one")
 
-    user.password = hash_password(body.new_password)
+    user.password = await run_in_threadpool(hash_password, body.new_password)
+    # Invalidate every previously-issued token for this user.
+    user.password_changed_at = datetime.now(timezone.utc)
 
     await log_action(
         db,

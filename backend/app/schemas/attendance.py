@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.core.timeutil import app_tz
 
 
 # ── Attendance Records ────────────────────────────────────────────────────────
@@ -41,10 +43,32 @@ class TodaySummary(BaseModel):
 
 class AttendanceManualRequest(BaseModel):
     employee_id: int
-    work_date: str
-    check_in_at: str | None = None
-    check_out_at: str | None = None
+    work_date: date
+    check_in_at: datetime | None = None
+    check_out_at: datetime | None = None
     notes: str | None = None
+
+    @field_validator("check_in_at", "check_out_at")
+    @classmethod
+    def _ensure_tz_aware(cls, v: datetime | None) -> datetime | None:
+        # The UI DatePicker submits naive local wall-clock strings
+        # (YYYY-MM-DDTHH:mm). Interpret those in the app timezone and attach
+        # tzinfo so downstream arithmetic against tz-aware columns never raises
+        # the naive/aware TypeError (a 500 on the common "fill in the missing
+        # checkout" flow).
+        if v is not None and v.tzinfo is None:
+            v = v.replace(tzinfo=app_tz())
+        return v
+
+    @model_validator(mode="after")
+    def _check_order(self) -> "AttendanceManualRequest":
+        if (
+            self.check_in_at is not None
+            and self.check_out_at is not None
+            and self.check_out_at <= self.check_in_at
+        ):
+            raise ValueError("check_out_at must be after check_in_at")
+        return self
 
 
 class ShiftTypeMeta(BaseModel):

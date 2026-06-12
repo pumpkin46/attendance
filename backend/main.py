@@ -36,6 +36,11 @@ from app.api.ws import router as ws_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Install formatted logging first so startup logs are actually emitted
+    # (otherwise logger.info goes to the handler-less root logger and is dropped).
+    from app.core.logging import setup_logging
+    setup_logging()
+
     # When Celery is enabled, Beat runs visitor expiry (and other periodic jobs);
     # otherwise fall back to the in-process loop so single-process deploys still work.
     if not settings.celery_enabled:
@@ -46,6 +51,17 @@ async def lifespan(app: FastAPI):
     # Multi-worker realtime: each worker subscribes to Redis and fans events out
     # to its local connections. No-op when Redis is disabled (local-only mode).
     await get_hub().start_subscriber()
+
+    if settings.engine_enabled:
+        # Apply ENGINE_* settings onto the engine config (thresholds, windows);
+        # otherwise the dataclass defaults run regardless of configuration.
+        from app.engine.config import configure_from_settings
+        configure_from_settings()
+
+        # Persists camera-pipeline attendance events; runs whether or not the
+        # engine auto-starts, because /engine/recognize* enqueue events too.
+        from app.engine.attendance_sync import get_attendance_consumer
+        get_attendance_consumer().start()
 
     if settings.engine_enabled and settings.engine_auto_start:
         from app.engine.recognition_engine import get_recognition_engine
@@ -58,6 +74,10 @@ async def lifespan(app: FastAPI):
         from app.engine.recognition_engine import get_recognition_engine
         recognition_engine = get_recognition_engine()
         await recognition_engine.stop()
+
+    if settings.engine_enabled:
+        from app.engine.attendance_sync import get_attendance_consumer
+        await get_attendance_consumer().stop()
 
     await get_hub().stop_subscriber()
     await close_redis()

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWebcam } from '@/shared/hooks/useWebcam'
-import { getToken } from '@/shared/lib/session'
+import { useAuthedWebSocket } from '@/shared/hooks/useAuthedWebSocket'
 import { Button } from '@/shared/ui/Button'
 import { Combobox } from '@/shared/ui/Combobox'
 import { detectFaces, identifyFace } from '@/features/recognition/api/recognitionApi'
@@ -209,55 +209,34 @@ export default function WebcamMonitor() {
   // Server-stream live view over a WebSocket: the backend pushes JPEG frames on a
   // single persistent connection (replacing snapshot polling, which saturated the
   // browser's connection pool under load). Each binary frame → object URL on the
-  // <img>, revoking the previous. Auto-reconnects if the socket drops.
-  useEffect(() => {
-    if (typeof source !== 'number') return
-    const token = getToken()
-    if (!token) return // protected page — token is always present here
-
-    const apiBase = import.meta.env.VITE_API_URL ?? '/api/v1'
-    const httpBase = /^https?:\/\//.test(apiBase) ? apiBase : window.location.origin + apiBase
-    const wsUrl = `${httpBase.replace(/^http/, 'ws')}/engine/streams/${source}/ws`
-
-    let cancelled = false
-    let ws: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined
-    let lastUrl: string | null = null
-
-    const connect = () => {
-      if (cancelled) return
-      ws = new WebSocket(wsUrl, ['bearer', token])
-      ws.binaryType = 'blob'
-
-      ws.onmessage = (ev) => {
-        if (cancelled) return
-        if (typeof ev.data === 'string') {
-          // Text status frame (e.g. stream not started yet).
-          setStreamErr('Stream not live yet — start the engine and this camera below.')
-          return
-        }
-        const url = URL.createObjectURL(ev.data as Blob)
-        setStreamImg(url)
-        setStreamErr(null)
-        if (lastUrl) URL.revokeObjectURL(lastUrl)
-        lastUrl = url
-      }
-
-      ws.onclose = () => {
-        if (!cancelled) reconnectTimer = setTimeout(connect, 1500)
-      }
-      ws.onerror = () => ws?.close()
+  // <img>, revoking the previous. Shared hook handles fresh-token auth + backoff.
+  const lastUrlRef = useRef<string | null>(null)
+  const onStreamFrame = useCallback((ev: MessageEvent) => {
+    if (typeof ev.data === 'string') {
+      // Text status frame (e.g. stream not started yet).
+      setStreamErr('Stream not live yet — start the engine and this camera below.')
+      return
     }
+    const url = URL.createObjectURL(ev.data as Blob)
+    setStreamImg(url)
+    setStreamErr(null)
+    if (lastUrlRef.current) URL.revokeObjectURL(lastUrlRef.current)
+    lastUrlRef.current = url
+  }, [])
 
-    connect()
-
-    return () => {
-      cancelled = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      ws?.close()
-      if (lastUrl) URL.revokeObjectURL(lastUrl)
-    }
-  }, [source])
+  useAuthedWebSocket({
+    path: typeof source === 'number' ? `/engine/streams/${source}/ws` : '',
+    enabled: typeof source === 'number',
+    binaryType: 'blob',
+    onMessage: onStreamFrame,
+    onTeardown: () => {
+      if (lastUrlRef.current) {
+        URL.revokeObjectURL(lastUrlRef.current)
+        lastUrlRef.current = null
+      }
+    },
+    deps: [source],
+  })
 
   // Keep the fullscreen label in sync with reality (covers Esc / OS exits).
   useEffect(() => {

@@ -83,9 +83,25 @@ class LivenessResult:
 
 
 class LivenessDetector:
-    """Multi-layer liveness detector combining passive and active checks."""
+    """Heuristic liveness detector (passive texture/moire/color + active blink).
+
+    IMPORTANT: this engine-path detector is HEURISTIC-ONLY. The passive check
+    is classical computer vision (Laplacian texture variance, FFT moire
+    detection, color-channel consistency) and the active check is blink/head
+    movement on a frame sequence. There is no ML anti-spoof model behind it:
+    ``_antispoof_session``/``_model_loaded`` are placeholders that are never
+    populated, and the ``LivenessConfig.detect_*`` flags (deepfake, face-swap,
+    AI-generated, etc.) describe aspirational capabilities that are NOT
+    enforced here. A determined deepfake/screen-replay attack can pass.
+
+    The kiosk path (services.liveness / services.antispoof) is where the real
+    MiniFASNet ONNX anti-spoof model runs; wire that model in here, or treat
+    this engine path as a coarse first filter only.
+    """
 
     def __init__(self) -> None:
+        # Placeholders for a future ONNX anti-spoof model. Never loaded today —
+        # see the class docstring: the engine liveness path is heuristic-only.
         self._antispoof_session = None
         self._model_loaded = False
 

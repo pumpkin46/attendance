@@ -40,6 +40,17 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    # Token revocation: a password change bumps password_changed_at, so any
+    # token minted before that (pwd_at claim older, or absent on legacy tokens)
+    # is no longer valid.
+    if user.password_changed_at is not None:
+        token_pwd_at = payload.get("pwd_at", 0)
+        if token_pwd_at < int(user.password_changed_at.timestamp()):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token invalidated by password change",
+            )
     return user
 
 
@@ -55,6 +66,26 @@ def require_permission(permission_name: str):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission required: {permission_name}",
+            )
+        return user
+
+    return Annotated[User, Depends(checker)]
+
+
+def require_super_admin():
+    """Allow only super admins. Use for global, cross-tenant resources.
+
+    Roles/permissions have no organization_id, so any org admin holding
+    roles.manage could otherwise edit roles shared by every tenant or mint a
+    high-privilege role. Gating role mutation on super-admin keeps a tenant
+    admin from escalating across the whole platform.
+    """
+
+    async def checker(user: Annotated[User, Depends(get_current_user)]) -> User:
+        if not user.has_role(settings.super_admin_role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This action requires the super admin role",
             )
         return user
 

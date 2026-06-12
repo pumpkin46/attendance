@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -27,6 +28,11 @@ from typing import Any
 from app.engine.config import engine_config
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on pending (not yet persisted) events. The consumer drains every
+# couple of seconds, so hitting this means it is dead/stopped — dropping the
+# oldest is preferable to growing without bound for the process lifetime.
+MAX_PENDING_EVENTS = 1000
 
 
 class AttendanceEventType(Enum):
@@ -104,7 +110,9 @@ class AttendanceGenerator:
 
     def __init__(self) -> None:
         self._duplicate_tracker = DuplicateTracker()
-        self._event_queue: list[AttendanceEvent] = []
+        # Producers run on threadpool threads while the consumer drains from
+        # the event loop; deque append/popleft/remove are atomic under the GIL.
+        self._event_queue: deque[AttendanceEvent] = deque(maxlen=MAX_PENDING_EVENTS)
         self._total_events = 0
         self._duplicates_prevented = 0
 
@@ -166,10 +174,29 @@ class AttendanceGenerator:
         return event
 
     def drain_events(self) -> list[AttendanceEvent]:
-        """Drain the event queue for batch processing."""
-        events = self._event_queue[:]
-        self._event_queue.clear()
-        return events
+        """Drain the event queue for batch processing.
+
+        Pops one event at a time so nothing appended concurrently (producers
+        run on threadpool threads) is lost between a copy and a clear.
+        """
+        events: list[AttendanceEvent] = []
+        while True:
+            try:
+                events.append(self._event_queue.popleft())
+            except IndexError:
+                return events
+
+    def consume(self, event: AttendanceEvent) -> bool:
+        """Claim a specific event for inline persistence.
+
+        Returns True if the event was still queued (the caller now owns
+        persisting it); False if the background consumer already drained it.
+        """
+        try:
+            self._event_queue.remove(event)
+            return True
+        except ValueError:
+            return False
 
     def _resolve_event_type(
         self, event_type: AttendanceEventType, direction: str | None

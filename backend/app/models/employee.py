@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -12,6 +21,9 @@ class Employee(Base, TimestampMixin):
     __tablename__ = "employees"
     __table_args__ = (
         Index("ix_employees_organization_id_is_active", "organization_id", "is_active"),
+        # Employee codes are unique per organization, not globally — two tenants
+        # can each have "EMP-001".
+        UniqueConstraint("organization_id", "employee_code", name="uq_employees_org_code"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -27,7 +39,7 @@ class Employee(Base, TimestampMixin):
     department_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
     )
-    employee_code: Mapped[str] = mapped_column(String(255), unique=True)
+    employee_code: Mapped[str] = mapped_column(String(255))
     first_name: Mapped[str] = mapped_column(String(255))
     last_name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)

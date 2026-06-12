@@ -36,6 +36,9 @@ celery[redis]==5.6.3
 # Utilities
 httpx==0.28.1
 python-dateutil==2.9.0.post0
+# IANA timezone database for zoneinfo (Windows has no system tz database;
+# required for APP_TIMEZONE values other than UTC).
+tzdata==2026.2
 
 # Report exports (styled Excel / PDF)
 openpyxl==3.1.5
@@ -44,3 +47,6 @@ reportlab==4.5.1
 #Unit test
 pytest==9.0.3
 pytest-asyncio==1.4.0
+# In-memory SQLite async driver for DB-backed behavioral tests (real SQL,
+# the UNIQUE(employee_id, work_date) constraint, the check-in/out state machine).
+aiosqlite==0.21.0

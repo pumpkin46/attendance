@@ -83,6 +83,12 @@ class User(Base, TimestampMixin):
     oauth_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="1")
     remember_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Bumped on every password change. Access tokens carry the value they were
+    # minted with; get_current_user rejects any token older than this, so a
+    # password change invalidates all previously-issued tokens.
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     organization: Mapped["Organization | None"] = relationship(lazy="selectin")
     branch: Mapped["Branch | None"] = relationship(lazy="selectin")

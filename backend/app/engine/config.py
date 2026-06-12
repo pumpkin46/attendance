@@ -12,8 +12,22 @@ class StreamConfig:
     max_latency_ms: int = 500
     warmup_frames: int = 5
     reconnect_interval_seconds: int = 5
+    # Retained for backward compat / status reporting only. The reconnect loop
+    # no longer gives up after this many tries; it backs off and retries
+    # indefinitely so a routine NVR reboot or network blip self-heals.
     max_reconnect_attempts: int = 10
+    # Cap for the exponential reconnect backoff (starts at
+    # reconnect_interval_seconds, doubles, clamps here).
+    max_reconnect_interval_seconds: int = 60
     health_check_interval_seconds: int = 30
+    # FFmpeg open/read timeouts (ms) for IP-camera captures. Without these a
+    # dead RTSP source can block VideoCapture.read() indefinitely in a worker
+    # thread, which also makes clean shutdown impossible.
+    open_timeout_ms: int = 5000
+    read_timeout_ms: int = 5000
+    # Grace period when stopping a stream: wait this long for the read loop to
+    # finish its current iteration before force-cancelling.
+    stop_grace_seconds: float = 8.0
     # Frames per second handed to the recognition pipeline, independent of the
     # stream read rate. On CPU-only hosts a single detection takes hundreds of
     # ms, so analyzing every frame of a 30fps stream saturates every core.
@@ -60,6 +74,11 @@ class LivenessConfig:
     min_score: float = 0.85
     passive_enabled: bool = True
     active_enabled: bool = True
+    # NOTE: the detect_* flags below are descriptive only — the engine's
+    # LivenessDetector is heuristic (texture/moire/color + blink) and does NOT
+    # run a model for these categories. They are surfaced in the config API for
+    # display, but toggling them changes nothing until a real anti-spoof model
+    # is wired in (see LivenessDetector docstring).
     detect_printed_photos: bool = True
     detect_screen_replays: bool = True
     detect_video_replays: bool = True
@@ -70,9 +89,14 @@ class LivenessConfig:
 
 @dataclass
 class SearchConfig:
-    auto_accept_threshold: float = 0.90
-    review_threshold: float = 0.80
-    unknown_threshold: float = 0.80
+    # Cosine similarity over L2-normalized ArcFace (buffalo_l) embeddings.
+    # Genuine same-person pairs score ~0.4-0.7, so the old 0.90 floor marked
+    # nearly every real employee UNKNOWN. These match the kiosk path's 0.5
+    # recognition_threshold; tune via ENGINE_AUTO_ACCEPT_THRESHOLD /
+    # ENGINE_REVIEW_THRESHOLD (wired in configure_from_settings()).
+    auto_accept_threshold: float = 0.5
+    review_threshold: float = 0.4
+    unknown_threshold: float = 0.4
     top_k: int = 5
     embedding_dim: int = 512
 
@@ -150,3 +174,23 @@ class EngineConfig:
 
 
 engine_config = EngineConfig()
+
+
+def configure_from_settings(cfg: EngineConfig | None = None) -> EngineConfig:
+    """Apply runtime overrides from app settings onto the engine config.
+
+    Without this the ENGINE_* settings (and their .env values) were dead code:
+    the engine always ran on the hardcoded dataclass defaults. Called at app
+    startup so operators can tune thresholds without editing source.
+    """
+    from app.core.config import settings
+
+    cfg = cfg or engine_config
+    cfg.search.auto_accept_threshold = settings.engine_auto_accept_threshold
+    cfg.search.review_threshold = settings.engine_review_threshold
+    cfg.liveness.min_score = settings.engine_liveness_threshold
+    cfg.attendance.duplicate_window_seconds = settings.engine_duplicate_window_seconds
+    cfg.tracking.max_tracks = settings.engine_max_tracks_per_camera
+    cfg.tracking.cooldown_seconds = settings.engine_track_cooldown_seconds
+    cfg.unknown_person.alert_cooldown_seconds = settings.engine_unknown_alert_cooldown
+    return cfg

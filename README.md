@@ -35,6 +35,8 @@ createdb attendance
 ```bash
 cd backend
 cp .env.example .env
+# Edit .env: set DB_PASSWORD, and generate a real JWT_SECRET:
+#   python -c "import secrets; print(secrets.token_hex(64))"
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
@@ -86,7 +88,7 @@ UI runs at **http://127.0.0.1:5173** (proxies API to port 8000 via `VITE_API_URL
 ## Recognition flow
 
 1. Camera or kiosk sends base64 image to `POST /api/v1/recognition/identify`
-2. API runs embedding match (threshold ≥ 0.95) and liveness check
+2. API runs embedding match (cosine ≥ `RECOGNITION_THRESHOLD`, default 0.5) and liveness check
 3. Attendance engine records check-in or check-out (60s duplicate window)
 4. Unknown faces logged as security alerts
 
@@ -130,20 +132,36 @@ under **Required performance metrics**.
 - Use **TLS 1.3** in production (reverse proxy: nginx, Caddy, or IIS)
 - Set `APP_ENV=production` and a strong `JWT_SECRET` in production
 - Passwords hashed with **Argon2id**
-- Rotate secrets per environment; enable PostgreSQL SSL (`DB_SSLMODE=require`)
+- Rotate secrets per environment; enable PostgreSQL SSL by setting `DB_SSLMODE=require` (applied to both the async and sync database URLs)
 
 ## Non-functional requirements (NFR)
 
 | ID | Requirement | Implementation |
 |----|-------------|----------------|
-| **NFR-001** | Recognition < 500 ms/face | `NFR_RECOGNITION_SLA_MS=500`; API returns `sla_met` |
-| **NFR-002** | 10,000 employees | `NFR_MAX_EMPLOYEES=10000`; FAISS flat index |
-| **NFR-003** | 100 cameras | `NFR_MAX_CAMERAS=100`; stream poll + heartbeat |
+| **NFR-001** | Recognition < 500 ms/face | `RECOGNITION_SLA_MS=500`; API returns `sla_met` |
+| **NFR-002** | 10,000 employees | `MAX_EMPLOYEES=10000`; FAISS flat index |
+| **NFR-003** | 100 cameras | `MAX_CAMERAS=100`; stream poll + heartbeat |
 | **NFR-004** | 99.9% uptime | `GET /api/v1/health` and `GET /up` |
 | **NFR-005** | Horizontal scaling | Stateless API; Redis in production |
 | **NFR-008** | GDPR compliance | Retention purge API; privacy endpoints |
 
 Check compliance: `GET http://127.0.0.1:8000/api/v1/health`
+
+## Backup & restore
+
+Face embeddings live **outside** PostgreSQL: the FAISS index (`INDEX_PATH`,
+default `data/faiss.index`) and its metadata (`METADATA_PATH`, default
+`data/metadata.json`). A database row references an embedding by FAISS id, so
+restoring one store without the other leaves attendance/enrollment rows and
+vectors out of sync (recognitions then mis-resolve or 404).
+
+Back them up as a single consistent unit:
+
+1. `pg_dump` the PostgreSQL database, and
+2. snapshot the `data/` directory (FAISS index + metadata),
+
+taken at the same time (ideally with the API stopped, or right after a quiet
+period). Restore both together; never restore just one.
 
 ## Windows installer (offline)
 

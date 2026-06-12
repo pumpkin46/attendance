@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Integer, JSON, Numeric, SmallInteger, String
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, JSON, Numeric, SmallInteger, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -31,6 +31,11 @@ class FaceEnrollmentSession(Base, TimestampMixin):
 
 class FaceEmbedding(Base, TimestampMixin):
     __tablename__ = "face_embeddings"
+    # Mirrors the index created in migration e5f6a7b8c9d0 (the model previously
+    # lagged the schema, so autogenerate would propose dropping it).
+    __table_args__ = (
+        Index("ix_face_embeddings_employee_id_is_active", "employee_id", "is_active"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     employee_id: Mapped[int] = mapped_column(

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -105,6 +106,7 @@ class Visitor(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_visitors_status_face_expires_at", "status", "face_expires_at"),
         Index("ix_visitors_organization_id_status", "organization_id", "status"),
+        Index("ix_visitors_host_employee_id", "host_employee_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -472,8 +474,10 @@ class VisitorLog(Base):
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     meta: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # func.now() (not the literal string "now()", which renders as a column
+    # default of the text 'now()' on some backends).
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default="now()"
+        DateTime(timezone=True), server_default=func.now()
     )
 
     visitor: Mapped[Visitor] = relationship(back_populates="logs", lazy="selectin")

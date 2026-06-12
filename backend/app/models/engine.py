@@ -8,14 +8,12 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
     JSON,
     Numeric,
     String,
-    Text,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -72,10 +70,11 @@ class EngineStream(Base, TimestampMixin):
     protocol: Mapped[str] = mapped_column(String(32), server_default="rtsp")
     camera_type: Mapped[str] = mapped_column(String(64), server_default="ip_camera")
     mode: Mapped[str] = mapped_column(String(32), server_default="live_stream")
-    status: Mapped[EngineStreamStatus] = mapped_column(
-        Enum(EngineStreamStatus, values_callable=lambda e: [x.value for x in e]),
-        server_default="offline",
-    )
+    # Stored as varchar to match the migration (c3d4e5f6a7b8). Declaring a
+    # native PG Enum here made autogenerate want to convert the live column to
+    # an enum type — a destructive diff. EngineStreamStatus enumerates the
+    # valid values for callers; the column itself is a plain string.
+    status: Mapped[str] = mapped_column(String(32), server_default="offline")
     direction: Mapped[str] = mapped_column(String(16), server_default="both")
     zone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     target_fps: Mapped[int] = mapped_column(Integer, server_default="30")
@@ -111,9 +110,8 @@ class EngineRecognitionLog(Base):
     organization_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
     )
-    result: Mapped[RecognitionEventResult] = mapped_column(
-        Enum(RecognitionEventResult, values_callable=lambda e: [x.value for x in e])
-    )
+    # Varchar to match the migration (see EngineStream.status note above).
+    result: Mapped[str] = mapped_column(String(32))
     confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     liveness_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     liveness_passed: Mapped[bool] = mapped_column(Boolean, server_default="0")

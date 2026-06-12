@@ -7,13 +7,14 @@ response models and delegates.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
+from app.core.timeutil import local_date, local_day_bounds_utc
 from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord
 from app.models.camera import Camera, CameraStatus
@@ -119,7 +120,8 @@ def _parse_payload(raw: object) -> dict | None:
 
 async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
     now = datetime.now(timezone.utc)
-    today = date.today()
+    today = local_date(now)
+    day_start_utc, day_end_utc = local_day_bounds_utc(today)
     heartbeat_threshold = now - timedelta(seconds=settings.camera_online_threshold_seconds)
 
     cam_stmt = (
@@ -137,7 +139,8 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
             select(RecognitionEvent.camera_id, func.count())
             .where(
                 RecognitionEvent.camera_id.isnot(None),
-                func.date(RecognitionEvent.recognized_at) == today,
+                RecognitionEvent.recognized_at >= day_start_utc,
+                RecognitionEvent.recognized_at < day_end_utc,
             )
             .group_by(RecognitionEvent.camera_id)
         )
@@ -192,7 +195,8 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
 
     unknown_stmt = select(func.count()).select_from(RecognitionEvent).where(
         RecognitionEvent.result == RecognitionResult.unknown,
-        func.date(RecognitionEvent.recognized_at) == today,
+        RecognitionEvent.recognized_at >= day_start_utc,
+        RecognitionEvent.recognized_at < day_end_utc,
     )
     if org_id is not None:
         unknown_stmt = unknown_stmt.where(RecognitionEvent.organization_id == org_id)

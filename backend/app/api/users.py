@@ -20,6 +20,7 @@ from app.core.dependencies import (
     TenantOrgId,
     require_any_permission,
     require_permission,
+    require_super_admin,
 )
 from app.core.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from app.core.security import hash_password
@@ -293,7 +294,9 @@ async def create_role(
     body: RoleCreateRequest,
     request: Request,
     db: DbSession,
-    user: require_permission("roles.manage"),
+    # Roles are global (no organization_id); restrict mutation to super admins
+    # so a tenant admin cannot mint cross-tenant high-privilege roles.
+    user: require_super_admin(),
 ):
     existing = await db.execute(select(Role.id).where(Role.name == body.name))
     if existing.scalar_one_or_none() is not None:
@@ -323,7 +326,7 @@ async def update_role(
     body: RoleUpdateRequest,
     request: Request,
     db: DbSession,
-    user: require_permission("roles.manage"),
+    user: require_super_admin(),
 ):
     result = await db.execute(
         select(Role).options(selectinload(Role.permissions)).where(Role.id == role_id)
@@ -372,7 +375,7 @@ async def delete_role(
     role_id: int,
     request: Request,
     db: DbSession,
-    user: require_permission("roles.manage"),
+    user: require_super_admin(),
 ):
     result = await db.execute(select(Role).where(Role.id == role_id))
     role = result.scalar_one_or_none()

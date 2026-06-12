@@ -81,16 +81,20 @@ class SearchResult:
 
 
 class VectorSearchEngine:
-    """FAISS-based vector search for face identity matching."""
+    """FAISS-based vector search for face identity matching.
 
-    def __init__(self) -> None:
-        self._index: FaissIndex | None = None
+    Reuses the single ``face_service`` index instance rather than opening its
+    own. Enrollment writes through ``face_service.get_index()``; if the engine
+    held a separate FaissIndex, freshly enrolled employees stayed UNKNOWN on
+    the live camera path until a manual /engine/index/reload. Sharing the one
+    (now lock-guarded) instance keeps both paths consistent.
+    """
 
     @property
     def index(self) -> FaissIndex:
-        if self._index is None:
-            self._index = FaissIndex()
-        return self._index
+        from app.services.face_service import get_index
+
+        return get_index()
 
     def search(self, embedding: np.ndarray) -> SearchResult:
         """Search for matching identity in the FAISS index."""
@@ -98,7 +102,8 @@ class VectorSearchEngine:
         cfg = engine_config.search
         idx = self.index
 
-        if idx.count() == 0:
+        index_size = idx.count()
+        if index_size == 0:
             return SearchResult(
                 top_match=None,
                 matches=[],
@@ -107,24 +112,15 @@ class VectorSearchEngine:
                 index_size=0,
             )
 
-        embedding = embedding.astype(np.float32).reshape(1, -1)
-        import faiss
-        faiss.normalize_L2(embedding)
+        # Lock-guarded read (normalization + search + id mapping happen
+        # atomically inside FaissIndex), so enrollment cannot swap the index
+        # mid-search.
+        ranked = idx.search_ranked(embedding, cfg.top_k)
 
-        k = min(cfg.top_k, idx.count())
-        scores, indices = idx.index.search(embedding, k)
-
-        matches: list[SearchMatch] = []
-        for rank in range(k):
-            faiss_idx = int(indices[0][rank])
-            score = float(scores[0][rank])
-            emp_id = idx.id_to_employee.get(faiss_idx)
-            if emp_id:
-                matches.append(SearchMatch(
-                    employee_id=emp_id,
-                    confidence=score,
-                    rank=rank + 1,
-                ))
+        matches = [
+            SearchMatch(employee_id=emp_id, confidence=score, rank=rank + 1)
+            for rank, (emp_id, score) in enumerate(ranked)
+        ]
 
         seen_employees: set[str] = set()
         unique_matches: list[SearchMatch] = []
@@ -141,7 +137,7 @@ class VectorSearchEngine:
             matches=unique_matches[:cfg.top_k],
             action=action,
             search_ms=int((time.perf_counter() - t0) * 1000),
-            index_size=idx.count(),
+            index_size=index_size,
         )
 
     def _determine_action(self, match: SearchMatch | None) -> MatchAction:
@@ -172,8 +168,11 @@ class VectorSearchEngine:
         }
 
     def reload(self) -> None:
-        if self._index:
-            self._index.reload()
+        # Reload the shared face_service index from disk (e.g. after an
+        # out-of-process import or a multi-worker peer wrote new embeddings).
+        from app.services.face_service import reload_embeddings
+
+        reload_embeddings()
 
 
 _engine: VectorSearchEngine | None = None

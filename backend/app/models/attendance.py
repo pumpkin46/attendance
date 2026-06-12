@@ -19,6 +19,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -62,7 +63,8 @@ class AttendancePolicy(Base, TimestampMixin):
     night_shift_start: Mapped[time | None] = mapped_column(Time, nullable=True)
     night_shift_end: Mapped[time | None] = mapped_column(Time, nullable=True)
     night_shift_multiplier: Mapped[float] = mapped_column(Numeric(4, 2), server_default="1.25")
-    weekend_days: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Stored as a JSON list of weekday ints (0-6), not an object.
+    weekend_days: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     weekend_multiplier: Mapped[float] = mapped_column(Numeric(4, 2), server_default="1.5")
     holiday_paid: Mapped[bool] = mapped_column(Boolean, server_default="1")
     auto_checkout_exit_zone: Mapped[bool] = mapped_column(Boolean, server_default="1")
@@ -95,7 +97,8 @@ class Shift(Base, TimestampMixin):
     break_minutes: Mapped[int] = mapped_column(SmallInteger, server_default="0")
     min_work_minutes: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     max_work_minutes: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
-    days_of_week: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Stored as a JSON list of weekday ints (0-6), not an object.
+    days_of_week: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="1")
 
     organization: Mapped["Organization"] = relationship(lazy="selectin")
@@ -128,8 +131,29 @@ class ShiftAssignment(Base, TimestampMixin):
 
 class Holiday(Base, TimestampMixin):
     __tablename__ = "holidays"
+    # A plain UNIQUE(org, date, location_id) does NOT prevent duplicate org-wide
+    # holidays: NULL location_id is "distinct" from NULL in Postgres, so two
+    # rows with the same org+date and NULL location both pass. Two partial
+    # unique indexes — one for per-location rows, one for org-wide (NULL
+    # location) rows — close that gap.
     __table_args__ = (
-        UniqueConstraint("organization_id", "date", "location_id"),
+        Index(
+            "uq_holidays_org_date_location",
+            "organization_id",
+            "date",
+            "location_id",
+            unique=True,
+            postgresql_where=text("location_id IS NOT NULL"),
+            sqlite_where=text("location_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_holidays_org_date_global",
+            "organization_id",
+            "date",
+            unique=True,
+            postgresql_where=text("location_id IS NULL"),
+            sqlite_where=text("location_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -149,6 +173,9 @@ class Holiday(Base, TimestampMixin):
 
 class LeaveRequest(Base, TimestampMixin):
     __tablename__ = "leave_requests"
+    __table_args__ = (
+        Index("ix_leave_requests_employee_id", "employee_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     employee_id: Mapped[int] = mapped_column(
@@ -178,6 +205,8 @@ class AttendanceRecord(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("employee_id", "work_date"),
         Index("ix_attendance_records_work_date_status", "work_date", "status"),
+        Index("ix_attendance_records_location_id", "location_id"),
+        Index("ix_attendance_records_camera_id", "camera_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

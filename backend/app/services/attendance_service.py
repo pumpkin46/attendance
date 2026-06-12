@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import get_redis
+from app.core.timeutil import local_date, to_local
 from app.models.attendance import (
     AttendancePolicy,
     AttendanceRecord,
@@ -75,12 +76,23 @@ def _prune_dup_cache(now: datetime) -> None:
         _dup_cache.clear()
 
 
+def _as_utc(dt: datetime) -> datetime:
+    """Coerce a possibly-naive datetime to aware UTC.
+
+    Timestamps are stored in timestamptz columns, but a naive value can come
+    back from some drivers (notably SQLite in tests). Normalizing here keeps
+    arithmetic against the aware ``now`` from raising the naive/aware
+    TypeError.
+    """
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
 def _recent_action_within(
     record: AttendanceRecord, window_seconds: int, now: datetime
 ) -> bool:
     """Authoritative, cross-worker duplicate guard based on persisted state."""
     last = record.check_out_at or record.check_in_at
-    return last is not None and (now - last).total_seconds() < window_seconds
+    return last is not None and (now - _as_utc(last)).total_seconds() < window_seconds
 
 
 async def _get_or_create_today_record(
@@ -181,14 +193,17 @@ def _resolve_status(
     policy: AttendancePolicy | None,
 ) -> str:
     if shift and shift.start_time:
-        scheduled = check_in_at.replace(
+        # Shift.start_time is a local wall-clock time; compare in the app
+        # timezone, not UTC, or lateness is off by the UTC offset.
+        check_in_local = to_local(check_in_at)
+        scheduled = check_in_local.replace(
             hour=shift.start_time.hour,
             minute=shift.start_time.minute,
             second=0,
             microsecond=0,
         )
         grace = (policy.grace_minutes if policy else shift.grace_minutes) or 15
-        if check_in_at > scheduled + timedelta(minutes=grace):
+        if check_in_local > scheduled + timedelta(minutes=grace):
             return "late"
     return "present"
 
@@ -198,7 +213,7 @@ def _calc_worked(
     check_out: datetime,
     policy: AttendancePolicy | None,
 ) -> tuple[int, int]:
-    diff_seconds = (check_out - check_in).total_seconds()
+    diff_seconds = (_as_utc(check_out) - _as_utc(check_in)).total_seconds()
     break_minutes = policy.break_minutes if policy else settings.attendance_break_minutes
     raw_minutes = max(0, int(diff_seconds / 60) - break_minutes)
 
@@ -232,7 +247,7 @@ async def process_recognition(
     processing_ms: int | None = None,
     organization_id: int | None = None,
     method: str = "face",
-) -> AttendanceRecord:
+) -> AttendanceRecord | None:
     # Note: confidence / liveness_passed / processing_ms describe the recognition
     # event, not the attendance row (which has no columns for them), so they are
     # accepted for a uniform caller interface but not persisted here.
@@ -242,10 +257,14 @@ async def process_recognition(
     emp_stmt = select(Employee).where(Employee.id == employee_id)
     emp_result = await db.execute(emp_stmt)
     employee = emp_result.scalar_one_or_none()
-    org_id = employee.organization_id if employee else organization_id
+    if employee is None or not employee.is_active:
+        # Stale FAISS vector (deleted/deactivated employee): writing a record
+        # would violate the FK / resurrect attendance for a removed person.
+        return None
+    org_id = employee.organization_id
 
     now = datetime.now(timezone.utc)
-    today = now.date()
+    today = local_date(now)
 
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None
@@ -288,7 +307,11 @@ async def process_recognition(
         action = "already_complete"
 
     await db.flush()
-    await db.refresh(record)
+    # Refresh only the server-generated timestamps. A bare db.refresh() would
+    # re-trigger the AttendanceRecord employee/location/shift selectin loads on
+    # this hot recognition path (three extra queries per recognition) for
+    # relationships no caller reads here.
+    await db.refresh(record, attribute_names=["created_at", "updated_at"])
     record.last_action = action
     return record
 
@@ -297,17 +320,19 @@ async def process_rfid_tap(
     db: AsyncSession,
     employee_id: int,
     reader_direction: str,
-) -> AttendanceRecord:
+) -> AttendanceRecord | None:
     window = settings.rfid_duplicate_window_seconds
     dup_key = f"rfid:{employee_id}"
 
     emp_stmt = select(Employee).where(Employee.id == employee_id)
     emp_result = await db.execute(emp_stmt)
     employee = emp_result.scalar_one_or_none()
-    org_id = employee.organization_id if employee else None
+    if employee is None or not employee.is_active:
+        return None
+    org_id = employee.organization_id
 
     now = datetime.now(timezone.utc)
-    today = now.date()
+    today = local_date(now)
 
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None
@@ -323,17 +348,23 @@ async def process_rfid_tap(
     )
 
     if fast_dup or _recent_action_within(record, window, now):
+        # Transient marker so the caller reports the real outcome instead of
+        # re-deriving it from timestamps after the write (which misreported a
+        # first check-in as duplicate_ignored).
+        record.last_action = "duplicate_ignored"
         return record
 
     is_entry = reader_direction in ("in", "both")
     is_exit = reader_direction in ("out", "both")
 
+    action = "none"
     if is_entry and not record.check_in_at:
         record.check_in_at = now
         record.check_in_method = "rfid"
         record.shift_id = shift.id if shift else record.shift_id
         record.status = _resolve_status(now, shift, policy)
         record.attendance_type = record.status
+        action = "check_in"
     elif is_exit and record.check_in_at and not record.check_out_at:
         record.check_out_at = now
         record.check_out_method = "rfid"
@@ -342,7 +373,9 @@ async def process_rfid_tap(
         record.overtime_minutes = overtime
         record.status = _resolve_checkout_status(worked, policy, record.status)
         record.attendance_type = record.status
+        action = "check_out"
 
     await db.flush()
-    await db.refresh(record)
+    await db.refresh(record, attribute_names=["created_at", "updated_at"])
+    record.last_action = action
     return record

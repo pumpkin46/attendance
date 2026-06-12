@@ -105,13 +105,7 @@ export const logoutUser = createAsyncThunk('auth/logout', async () => {
 const authSlice = createSlice({
   name: 'auth',
   initialState,
-  reducers: {
-    /** Force the anonymous state (e.g. on a 401 from the axios interceptor). */
-    sessionExpired(state) {
-      state.user = null
-      state.status = 'anonymous'
-    },
-  },
+  reducers: {},
   extraReducers: (builder) => {
     builder
       .addCase(fetchCurrentUser.pending, (state) => {
@@ -150,8 +144,6 @@ const authSlice = createSlice({
       })
   },
 })
-
-export const { sessionExpired } = authSlice.actions
 
 // ── Selectors ────────────────────────────────────────────────────────────────
 export const selectUser = (state: RootState) => state.auth.user

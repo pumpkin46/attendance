@@ -7,7 +7,7 @@ emits. The rfid router only handles auth, request parsing, and responses.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.security import generate_device_token
+from app.core.timeutil import local_date, local_day_bounds_utc
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
 from app.models.location import Location
@@ -107,12 +108,13 @@ def format_event(event: RfidEvent) -> RfidEventOut:
 async def _taps_today_by_reader(db: AsyncSession, reader_ids: list[int]) -> dict[int, int]:
     if not reader_ids:
         return {}
-    today = date.today()
+    day_start_utc, day_end_utc = local_day_bounds_utc(local_date())
     stmt = (
         select(RfidEvent.rfid_reader_id, func.count())
         .where(
             RfidEvent.rfid_reader_id.in_(reader_ids),
-            func.date(RfidEvent.tapped_at) == today,
+            RfidEvent.tapped_at >= day_start_utc,
+            RfidEvent.tapped_at < day_end_utc,
         )
         .group_by(RfidEvent.rfid_reader_id)
     )
@@ -434,6 +436,11 @@ async def process_tap(
 
     direction = _direction_value(reader.direction)
     record = await process_rfid_tap(db, card.employee_id, direction)
+    if record is None:
+        # Employee row vanished/deactivated between the check above and the
+        # tap processing (or the card outlived the employee).
+        await _record_event(db, reader, uid, RfidEventResult.inactive, employee, now)
+        return SimulateTapResponse(matched=False, reason="inactive", uid=uid)
 
     brief = EmployeeBrief(
         id=employee.id,
@@ -442,18 +449,16 @@ async def process_tap(
         employee_code=employee.employee_code,
     )
 
-    if record.check_in_at and (not record.check_out_at or record.check_out_at >= now):
-        if record.check_in_at >= now - timedelta(seconds=settings.rfid_duplicate_window_seconds):
-            await _record_event(db, reader, uid, RfidEventResult.duplicate_ignored, employee, now)
-            return SimulateTapResponse(
-                matched=True, uid=uid, attendance_action="duplicate_ignored", employee=brief
-            )
+    # Use the action the state machine actually took, not one re-derived from
+    # timestamps after the write — the old timestamp heuristic misreported a
+    # genuine first check-in as duplicate_ignored.
+    action = getattr(record, "last_action", "none") or "none"
 
-    action = "none"
-    if direction in ("in", "both") and record.check_in_at and record.check_in_at >= now - timedelta(seconds=5):
-        action = "check_in"
-    elif direction in ("out", "both") and record.check_out_at and record.check_out_at >= now - timedelta(seconds=5):
-        action = "check_out"
+    if action == "duplicate_ignored":
+        await _record_event(db, reader, uid, RfidEventResult.duplicate_ignored, employee, now)
+        return SimulateTapResponse(
+            matched=True, uid=uid, attendance_action="duplicate_ignored", employee=brief
+        )
 
     await _record_event(
         db, reader, uid, RfidEventResult.matched, employee, now, {"attendance_action": action}

@@ -31,6 +31,7 @@ class RecognitionEvent(Base):
     __table_args__ = (
         Index("ix_recognition_events_recognized_at_result", "recognized_at", "result"),
         Index("ix_recognition_events_org_recognized_at", "organization_id", "recognized_at"),
+        Index("ix_recognition_events_employee_id", "employee_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

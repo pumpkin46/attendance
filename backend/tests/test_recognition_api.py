@@ -24,10 +24,14 @@ from main import app
 class FakeSession:
     """Minimal async session that records added ORM objects."""
 
+    _DEFAULT = object()  # sentinel: "use the stock employee"
+
     def __init__(self):
         self.added = []
         # Single row returned by execute().scalar_one_or_none() (event feedback)
         self.event = None
+        # Override what db.get() returns (None = employee row missing)
+        self.employee = self._DEFAULT
 
     def add(self, obj):
         self.added.append(obj)
@@ -36,8 +40,14 @@ class FakeSession:
         pass
 
     async def get(self, model, pk):
+        if self.employee is not self._DEFAULT:
+            return self.employee
         return SimpleNamespace(
-            id=pk, first_name="Ada", last_name="Lovelace", organization_id=1
+            id=pk,
+            first_name="Ada",
+            last_name="Lovelace",
+            organization_id=1,
+            is_active=True,
         )
 
     async def execute(self, stmt):
@@ -152,6 +162,66 @@ def test_unknown_identify_response_contract(client, monkeypatch):
     assert body["matched"] is False
     assert body["employee"] is None
     assert body["reason"] == "low_confidence"
+
+
+def _identify_returns_employee_7(monkeypatch):
+    monkeypatch.setattr(
+        face_service,
+        "identify",
+        lambda **kwargs: {
+            "success": True,
+            "employee_id": "7",
+            "confidence": 0.95,
+            "liveness_passed": True,
+            "processing_ms": 100,
+        },
+    )
+
+
+def test_cross_tenant_match_is_suppressed(client, fake_session, monkeypatch):
+    """A FAISS hit on another org's employee must read as a plain non-match:
+    no identity leak, no attendance write, event logged under the caller's org.
+    """
+    _identify_returns_employee_7(monkeypatch)
+    fake_session.employee = SimpleNamespace(
+        id=7, first_name="Eve", last_name="Other", organization_id=2, is_active=True
+    )
+
+    body = client.post("/api/v1/recognition/identify", json={"image": "x"}).json()
+
+    assert body["matched"] is False
+    assert body["employee"] is None
+    assert body["employee_id"] is None  # raw FAISS identity must not leak
+    events = [o for o in fake_session.added if isinstance(o, RecognitionEvent)]
+    assert len(events) == 1
+    assert events[0].result == "unknown"
+    assert events[0].employee_id is None
+    assert events[0].organization_id == 1  # caller org, not the victim's
+
+
+def test_match_on_missing_employee_row_is_unknown(client, fake_session, monkeypatch):
+    """Stale FAISS vectors after a delete must not 500 or claim a match."""
+    _identify_returns_employee_7(monkeypatch)
+    fake_session.employee = None
+
+    resp = client.post("/api/v1/recognition/identify", json={"image": "x"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["matched"] is False
+    assert body["reason"] == "stale_identity"
+
+
+def test_match_on_inactive_employee_is_unknown(client, fake_session, monkeypatch):
+    _identify_returns_employee_7(monkeypatch)
+    fake_session.employee = SimpleNamespace(
+        id=7, first_name="Ada", last_name="Lovelace", organization_id=1, is_active=False
+    )
+
+    body = client.post("/api/v1/recognition/identify", json={"image": "x"}).json()
+
+    assert body["matched"] is False
+    assert body["reason"] == "stale_identity"
 
 
 def test_unknown_identify_records_unknown_event(client, fake_session, monkeypatch):

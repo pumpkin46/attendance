@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_url: str = "http://localhost:8000"
     app_timezone: str = "UTC"
+    # Root log level (DEBUG/INFO/WARNING/ERROR). Below this, logs are dropped.
+    log_level: str = "INFO"
     secret_key: str = Field(
         default=DEFAULT_SECRET_KEY,
         validation_alias=AliasChoices("SECRET_KEY", "JWT_SECRET"),
@@ -22,7 +24,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("JWT_ALGORITHM",),
     )
     token_expire_minutes: int = Field(
-        default=60 * 24 * 7,  # 7 days
+        default=60 * 24,  # 1 day (tokens can't be revoked except via password change)
         validation_alias=AliasChoices("TOKEN_EXPIRE_MINUTES", "JWT_EXPIRATION_MINUTES"),
     )
 
@@ -44,20 +46,28 @@ class Settings(BaseSettings):
     db_echo: bool = False
     db_pool_size: int = 10
     db_max_overflow: int = 20
+    # PostgreSQL SSL mode (e.g. "require", "verify-full"). Empty = no SSL
+    # (default; local dev). When set it is applied to BOTH the async (asyncpg
+    # `ssl=`) and sync (psycopg2 `sslmode=`) URLs, so configuring it actually
+    # encrypts DB traffic instead of being silently ignored.
+    db_sslmode: str = ""
 
     @property
     def database_url(self) -> str:
-        return (
+        url = (
             f"postgresql+asyncpg://{self.db_username}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_database}"
         )
+        # asyncpg takes the libpq mode under the `ssl` query key.
+        return f"{url}?ssl={self.db_sslmode}" if self.db_sslmode else url
 
     @property
     def database_url_sync(self) -> str:
-        return (
+        url = (
             f"postgresql+psycopg2://{self.db_username}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_database}"
         )
+        return f"{url}?sslmode={self.db_sslmode}" if self.db_sslmode else url
 
     # ── Redis ────────────────────────────────────────────────────────────
     # When disabled, duplicate-suppression and rate-limiting fall back to the
@@ -189,8 +199,11 @@ class Settings(BaseSettings):
     # ── Self-registration ─────────────────────────────────────────────────
     # When enabled, anyone can create an account via POST /auth/register; new
     # accounts get registration_default_role (no permissions by default) until
-    # an administrator assigns more via the user management UI.
-    registration_enabled: bool = True
+    # an administrator assigns more via the user management UI. Disabled by
+    # default: even a permissionless account can reach the authenticated-only
+    # recognition/engine compute endpoints, so registration must be an
+    # explicit opt-in.
+    registration_enabled: bool = False
     registration_default_role: str = "employee"
 
     # ── OAuth / SSO ───────────────────────────────────────────────────────
@@ -286,8 +299,12 @@ class Settings(BaseSettings):
     engine_unknown_alert_cooldown: int = 300
     engine_max_tracks_per_camera: int = 200
     engine_track_cooldown_seconds: float = 5.0
-    engine_auto_accept_threshold: float = 0.90
-    engine_review_threshold: float = 0.80
+    # Cosine-similarity thresholds for the camera engine over ArcFace
+    # embeddings. Genuine pairs score ~0.4-0.7, so 0.5/0.4 (aligned with the
+    # kiosk's recognition_threshold) — NOT the old 0.90/0.80, which rejected
+    # real employees as unknown.
+    engine_auto_accept_threshold: float = 0.5
+    engine_review_threshold: float = 0.4
 
     @property
     def upload_dir(self) -> str:
@@ -297,10 +314,21 @@ class Settings(BaseSettings):
     def _enforce_production_security(self) -> "Settings":
         """Fail closed on insecure defaults when running in production."""
         if self.app_env == "production":
-            if self.secret_key in ("", DEFAULT_SECRET_KEY):
+            # Reject the default, any "change-me*" placeholder variant (the
+            # exact-string check was bypassed by a placeholder that merely
+            # differed from the default), and anything too short to be a real
+            # key.
+            secret = self.secret_key.strip()
+            if (
+                not secret
+                or secret.lower().startswith("change-me")
+                or len(secret) < 32
+            ):
                 raise ValueError(
-                    "SECRET_KEY must be overridden with a strong, unique value when "
-                    "APP_ENV=production (the default value is insecure and makes JWTs forgeable)."
+                    "SECRET_KEY must be a strong, unique value of at least 32 "
+                    "characters when APP_ENV=production (placeholders make "
+                    "JWTs forgeable). Generate one with: "
+                    'python -c "import secrets; print(secrets.token_hex(64))"'
                 )
             if "*" in self.cors_origins:
                 raise ValueError(

@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ValidationError
 from app.engine.config import engine_config
 from app.engine.recognition_engine import get_recognition_engine
 from app.engine.stream_manager import (
@@ -128,26 +128,25 @@ async def engine_recognize(
     )
 
     if result.attendance_event:
+        from app.engine.attendance_generator import get_attendance_generator
+        from app.engine.attendance_sync import employee_pk_from_identity
         from app.services import attendance_service
-        emp_id_str = result.employee_id
-        if emp_id_str and not emp_id_str.startswith("visitor-"):
-            try:
-                await attendance_service.process_recognition(
-                    db=db,
-                    employee_id=int(emp_id_str),
-                    camera_id=body.camera_id,
-                    confidence=result.confidence,
-                    liveness_passed=result.liveness_passed,
-                    method="face",
-                )
-            except (ValueError, TypeError) as exc:
-                # Non-numeric employee id from the engine — skip the attendance
-                # write but record why so it is not silently lost.
-                logger.warning(
-                    "Skipping attendance write for employee_id=%r: %s",
-                    emp_id_str,
-                    exc,
-                )
+
+        employee_pk = employee_pk_from_identity(result.employee_id)
+        # Claim the event from the queue first: if the background consumer
+        # already drained it, it owns the write and we must not double-process
+        # (a second write outside the duplicate window would flip the record
+        # into a bogus check-out).
+        claimed = get_attendance_generator().consume(result.attendance_event)
+        if employee_pk is not None and claimed:
+            await attendance_service.process_recognition(
+                db=db,
+                employee_id=employee_pk,
+                camera_id=body.camera_id,
+                confidence=result.confidence,
+                liveness_passed=result.liveness_passed,
+                method="face",
+            )
 
     return result.to_dict()
 
@@ -155,9 +154,17 @@ async def engine_recognize(
 @router.post("/recognize-stream", response_model=RecognitionResult)
 async def engine_recognize_stream(
     body: EngineStreamRecognizeRequest,
-    user: CurrentUser,
+    # cameras.manage + URL validation: a raw stream_url opened server-side is
+    # an SSRF primitive (see services.stream_capture.validate_stream_url).
+    user: require_permission("cameras.manage"),
 ):
     """Capture a frame from a video stream and run recognition."""
+    from app.services.stream_capture import validate_stream_url
+
+    error = await run_in_threadpool(validate_stream_url, body.stream_url)
+    if error is not None:
+        raise ValidationError(error)
+
     engine = get_recognition_engine()
     result = await run_in_threadpool(
         engine.recognize_stream,
@@ -196,6 +203,11 @@ async def add_stream(
     from app.core.cache import invalidate_prefix
     from app.models.camera import CameraDirection
     from app.services import camera_service, stream_sync
+    from app.services.stream_capture import validate_stream_url
+
+    url_error = await run_in_threadpool(validate_stream_url, body.stream_url)
+    if url_error is not None:
+        raise ValidationError(url_error)
 
     camera = await camera_service.get_camera(db, body.camera_id, org_id)
 
@@ -266,7 +278,10 @@ async def stop_stream(body: StreamControlRequest, user: require_permission("came
 async def remove_stream(camera_id: int, user: require_permission("cameras.manage")):
     """Remove a stream from the engine."""
     manager = get_stream_manager()
-    await run_in_threadpool(manager.remove_stream, camera_id)
+    # remove_stream only signals the read loop and pops the registry entry
+    # (the loop releases its own capture), so run it on the loop rather than a
+    # worker thread that would race the manager's state.
+    manager.remove_stream(camera_id)
     return None
 
 

@@ -351,6 +351,21 @@ class RecognitionEngine:
                 confidence=search_result.confidence,
                 bbox=face.bbox_xyxy,
             )
+        elif search_result.action == MatchAction.REVIEW:
+            # Borderline match (review band): below auto-accept but above the
+            # unknown floor. We do not auto-write attendance, but log it rather
+            # than dropping it silently so a miscalibrated threshold is visible
+            # in the logs/metrics instead of looking like a clean non-match.
+            logger.info(
+                "Review-band match on camera %s: employee %s @ conf=%.3f "
+                "(between review %.2f and auto-accept %.2f)",
+                camera_id,
+                search_result.employee_id,
+                search_result.confidence,
+                self._config.search.review_threshold,
+                self._config.search.auto_accept_threshold,
+            )
+            self._metrics.record_recognition(False)
 
         event_ms = int((time.perf_counter() - t5) * 1000)
         pipeline.append({

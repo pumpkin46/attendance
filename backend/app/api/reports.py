@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.core.dependencies import DbSession, TenantOrgId, require_permission
 from app.core.errors import ValidationError
+from app.core.timeutil import local_date
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.models.organization import Organization
 from app.schemas.report import UnknownPersonEvent, UnknownPersonsSummary
@@ -71,7 +72,7 @@ async def export_report(
     date_from = date_from or legacy_start
     date_to = date_to or legacy_end
 
-    today = date.today()
+    today = local_date()
     start = date_from or today
     end = date_to or today
     if start > end:

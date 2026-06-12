@@ -9,8 +9,10 @@ from sqlalchemy.orm import lazyload
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
-from app.core.errors import ValidationError
+from app.core.errors import NotFoundError, ValidationError
+from app.core.timeutil import local_date
 from app.core.pagination import PaginatedResponse, PaginationParams, paginate, PaginationDep
+from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord
 from app.models.employee import Employee
 from app.schemas.attendance import (
@@ -99,7 +101,7 @@ async def today_summary(
     user: CurrentUser,
     org_id: TenantOrgId,
 ) -> TodaySummary:
-    today = date.today()
+    today = local_date()
 
     emp_stmt = select(func.count(Employee.id)).where(Employee.is_active == True)  # noqa: E712
     if org_id:
@@ -132,9 +134,16 @@ async def today_summary(
 async def create_manual_attendance(
     body: AttendanceManualRequest,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("attendance.manage"),
 ):
-    from datetime import datetime, timezone
+    # Tenant scope: an org admin must not be able to write attendance for an
+    # employee in another org. Loading the employee through the tenant filter
+    # also gives a clean 404 instead of an orphaned record on a bad id.
+    emp_stmt = select(Employee.id).where(Employee.id == body.employee_id)
+    emp_stmt = apply_tenant_filter(emp_stmt, org_id, Employee.organization_id)
+    if (await db.execute(emp_stmt)).scalar_one_or_none() is None:
+        raise NotFoundError("Employee not found")
 
     stmt = select(AttendanceRecord).where(
         AttendanceRecord.employee_id == body.employee_id,
@@ -152,14 +161,16 @@ async def create_manual_attendance(
         db.add(record)
         await db.flush()
 
+    # check_in_at / check_out_at arrive already tz-aware (the schema coerces
+    # naive UI input to the app timezone), so the arithmetic below is safe.
     if body.check_in_at:
-        record.check_in_at = datetime.fromisoformat(body.check_in_at)
+        record.check_in_at = body.check_in_at
         record.check_in_method = "manual"
         record.status = "present"
         record.attendance_type = "present"
 
     if body.check_out_at:
-        record.check_out_at = datetime.fromisoformat(body.check_out_at)
+        record.check_out_at = body.check_out_at
         record.check_out_method = "manual"
         if record.check_in_at and record.check_out_at:
             diff = (record.check_out_at - record.check_in_at).total_seconds()

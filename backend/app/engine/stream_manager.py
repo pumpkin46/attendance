@@ -184,11 +184,19 @@ class StreamManager:
         return stream
 
     def remove_stream(self, camera_id: int) -> None:
+        """Remove a stream. Safe to call from sync contexts.
+
+        Signals the read loop to stop and removes the stream from the registry.
+        The loop releases its own VideoCapture in its finally block (within one
+        read timeout) — we must NOT release it here, because the loop may be
+        mid-``read()`` on a worker thread and cv2 is not thread-safe.
+        """
         stream = self._streams.pop(camera_id, None)
         if stream:
             stream._running = False
-            if stream._capture:
-                stream._capture.release()
+            # If the loop never started, no task owns the capture — but in that
+            # case _capture is None anyway (it is created inside the loop), so
+            # there is nothing to release here.
             logger.info("Removed stream for camera %d", camera_id)
 
     async def start(self) -> None:
@@ -203,11 +211,18 @@ class StreamManager:
         self._running = False
         for stream in self._streams.values():
             stream._running = False
-            if stream._capture:
-                stream._capture.release()
-                stream._capture = None
+        # Let each loop finish its current read and release its own capture.
+        await asyncio.gather(
+            *(self._await_stream_task(s) for s in self._streams.values()),
+            return_exceptions=True,
+        )
         if self._monitor_task:
             self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._monitor_task = None
         logger.info("Stream manager stopped")
 
     async def start_stream(self, camera_id: int) -> bool:
@@ -223,12 +238,37 @@ class StreamManager:
         stream = self._streams.get(camera_id)
         if not stream:
             return False
+        # Signal the loop to stop, then wait for it to exit and release its own
+        # capture. Never release here while a read may be in flight.
         stream._running = False
-        if stream._capture:
-            stream._capture.release()
-            stream._capture = None
+        await self._await_stream_task(stream)
         stream.status = StreamStatus.OFFLINE
         return True
+
+    async def _await_stream_task(self, stream: CameraStream) -> None:
+        """Wait for a stream's read loop to finish, force-cancelling if it hangs.
+
+        The loop owns its VideoCapture and releases it on exit, so by the time
+        this returns the capture is released with no read in flight.
+        """
+        task = stream._task
+        if task is None or task.done():
+            stream._task = None
+            return
+        grace = engine_config.stream.stop_grace_seconds
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=grace)
+        except asyncio.TimeoutError:
+            # Read genuinely stuck past the FFmpeg read timeout — cancel it.
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        except (asyncio.CancelledError, Exception):
+            pass
+        finally:
+            stream._task = None
 
     def snapshot_jpeg(self, camera_id: int, max_width: int = 960) -> bytes | None:
         """JPEG-encode the most recent frame of a running stream (for live preview).
@@ -327,74 +367,103 @@ class StreamManager:
         stream.status = StreamStatus.CONNECTING
         cfg = engine_config.stream
 
-        while stream._running and self._running:
-            try:
-                if not stream._capture or not stream._capture.isOpened():
-                    if not await self._connect_stream(stream):
-                        stream.reconnect_attempts += 1
-                        if stream.reconnect_attempts > cfg.max_reconnect_attempts:
-                            stream.status = StreamStatus.ERROR
-                            logger.error(
-                                "Camera %d: max reconnect attempts exceeded", camera_id
+        try:
+            while stream._running and self._running:
+                try:
+                    if not stream._capture or not stream._capture.isOpened():
+                        if not await self._connect_stream(stream):
+                            # Capped exponential backoff, retrying indefinitely:
+                            # a routine NVR reboot / network blip must self-heal
+                            # instead of stopping attendance until a manual
+                            # restart.
+                            stream.reconnect_attempts += 1
+                            if stream.reconnect_attempts == 1:
+                                self._record_camera_offline(camera_id)
+                            stream.status = StreamStatus.INTERRUPTED
+                            backoff = min(
+                                cfg.reconnect_interval_seconds
+                                * (2 ** (stream.reconnect_attempts - 1)),
+                                cfg.max_reconnect_interval_seconds,
                             )
-                            break
-                        await asyncio.sleep(cfg.reconnect_interval_seconds)
+                            logger.warning(
+                                "Camera %d: reconnect attempt %d failed; retrying in %ds",
+                                camera_id,
+                                stream.reconnect_attempts,
+                                backoff,
+                            )
+                            await asyncio.sleep(backoff)
+                            continue
+
+                    t0 = time.perf_counter()
+                    ok, frame = await asyncio.to_thread(stream._capture.read)
+                    latency = int((time.perf_counter() - t0) * 1000)
+
+                    if not ok or frame is None:
+                        stream.health.dropped_frames += 1
+                        stream.status = StreamStatus.INTERRUPTED
+                        # Release here is safe: this read has already returned,
+                        # so no read is in flight on a worker thread.
+                        if stream._capture:
+                            stream._capture.release()
+                            stream._capture = None
                         continue
 
-                t0 = time.perf_counter()
-                ok, frame = await asyncio.to_thread(stream._capture.read)
-                latency = int((time.perf_counter() - t0) * 1000)
+                    stream.health.total_frames += 1
+                    stream.health.latency_ms = latency
+                    stream.health.last_frame_at = datetime.now(timezone.utc)
+                    stream.health.resolution = (frame.shape[1], frame.shape[0])
+                    stream.reconnect_attempts = 0
+                    stream._last_frame = frame
 
-                if not ok or frame is None:
-                    stream.health.dropped_frames += 1
-                    stream.status = StreamStatus.INTERRUPTED
-                    if stream._capture:
-                        stream._capture.release()
-                        stream._capture = None
-                    continue
+                    if stream.health.started_at:
+                        elapsed = (datetime.now(timezone.utc) - stream.health.started_at).total_seconds()
+                        stream.health.uptime_seconds = elapsed
+                        if elapsed > 0:
+                            stream.health.fps = stream.health.total_frames / elapsed
 
-                stream.health.total_frames += 1
-                stream.health.latency_ms = latency
-                stream.health.last_frame_at = datetime.now(timezone.utc)
-                stream.health.resolution = (frame.shape[1], frame.shape[0])
-                stream.reconnect_attempts = 0
-                stream._last_frame = frame
+                    self._validate_stream(stream)
 
-                if stream.health.started_at:
-                    elapsed = (datetime.now(timezone.utc) - stream.health.started_at).total_seconds()
-                    stream.health.uptime_seconds = elapsed
-                    if elapsed > 0:
-                        stream.health.fps = stream.health.total_frames / elapsed
+                    # Analyze at process_fps, not stream fps: frames keep flowing
+                    # for preview/health, but recognition only sees a bounded rate.
+                    now = time.perf_counter()
+                    if now - stream._last_processed >= 1.0 / max(cfg.process_fps, 1):
+                        stream._last_processed = now
+                        timestamp = time.time()
+                        for callback in self._frame_callbacks:
+                            try:
+                                await callback(camera_id, frame, timestamp)
+                            except Exception as e:
+                                logger.error("Frame callback error for camera %d: %s", camera_id, e)
 
-                self._validate_stream(stream)
+                    frame_interval = 1.0 / max(stream.target_fps, 1)
+                    await asyncio.sleep(max(0, frame_interval - (time.perf_counter() - t0)))
 
-                # Analyze at process_fps, not stream fps: frames keep flowing
-                # for preview/health, but recognition only sees a bounded rate.
-                now = time.perf_counter()
-                if now - stream._last_processed >= 1.0 / max(cfg.process_fps, 1):
-                    stream._last_processed = now
-                    timestamp = time.time()
-                    for callback in self._frame_callbacks:
-                        try:
-                            await callback(camera_id, frame, timestamp)
-                        except Exception as e:
-                            logger.error("Frame callback error for camera %d: %s", camera_id, e)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error("Stream loop error for camera %d: %s", camera_id, e)
+                    stream.status = StreamStatus.ERROR
+                    stream.health.errors.append(str(e))
+                    await asyncio.sleep(cfg.reconnect_interval_seconds)
+        finally:
+            # The loop exclusively owns release() of its own capture, so stop
+            # paths only signal _running=False and never race this.
+            if stream._capture:
+                try:
+                    stream._capture.release()
+                except Exception:
+                    pass
+                stream._capture = None
+            stream.status = StreamStatus.OFFLINE
 
-                frame_interval = 1.0 / max(stream.target_fps, 1)
-                await asyncio.sleep(max(0, frame_interval - (time.perf_counter() - t0)))
+    def _record_camera_offline(self, camera_id: int) -> None:
+        """Emit a CAMERA_OFFLINE alert (best effort)."""
+        try:
+            from app.engine.metrics import get_metrics
 
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("Stream loop error for camera %d: %s", camera_id, e)
-                stream.status = StreamStatus.ERROR
-                stream.health.errors.append(str(e))
-                await asyncio.sleep(cfg.reconnect_interval_seconds)
-
-        if stream._capture:
-            stream._capture.release()
-            stream._capture = None
-        stream.status = StreamStatus.OFFLINE
+            get_metrics().record_camera_offline(camera_id)
+        except Exception:  # never let metrics break the stream loop
+            logger.debug("record_camera_offline failed for camera %d", camera_id, exc_info=True)
 
     async def _connect_stream(self, stream: CameraStream) -> bool:
         try:
@@ -404,7 +473,24 @@ class StreamManager:
             elif stream.protocol == StreamProtocol.WEBCAM:
                 url = int(url) if url.isdigit() else 0
 
-            cap = await asyncio.to_thread(cv2.VideoCapture, url)
+            cfg = engine_config.stream
+
+            def _open():
+                # FFmpeg open/read timeouts (ms) so a dead RTSP source can't
+                # block read() forever in a worker thread (which would also
+                # make clean shutdown impossible). These props apply to the
+                # FFmpeg backend used for network streams; harmless for USB.
+                cap = cv2.VideoCapture(url)
+                try:
+                    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, cfg.open_timeout_ms)
+                    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, cfg.read_timeout_ms)
+                except (AttributeError, cv2.error):
+                    # Older OpenCV without these constants — fall back to no
+                    # explicit timeout.
+                    pass
+                return cap
+
+            cap = await asyncio.to_thread(_open)
             if not cap.isOpened():
                 stream.status = StreamStatus.ERROR
                 return False
@@ -450,7 +536,24 @@ class StreamManager:
         cfg = engine_config.stream
         while self._running:
             await asyncio.sleep(cfg.health_check_interval_seconds)
-            for camera_id, stream in self._streams.items():
+            try:
+                from app.engine.metrics import get_metrics
+
+                metrics = get_metrics()
+            except Exception:
+                metrics = None
+
+            for camera_id, stream in list(self._streams.items()):
+                # Surface live fps/latency to the metrics collector (which fires
+                # HIGH_LATENCY alerts) for every stream that has produced frames.
+                if metrics is not None and stream.health.last_frame_at:
+                    try:
+                        metrics.record_camera_health(
+                            camera_id, stream.health.fps, stream.health.latency_ms
+                        )
+                    except Exception:
+                        pass
+
                 if stream.status == StreamStatus.OFFLINE:
                     continue
                 if stream.health.last_frame_at:
@@ -460,6 +563,15 @@ class StreamManager:
                     if elapsed > cfg.health_check_interval_seconds * 2:
                         stream.status = StreamStatus.INTERRUPTED
                         logger.warning("Camera %d: no frames for %.0fs", camera_id, elapsed)
+                        # Restart a read loop that died (task finished) while the
+                        # stream is still supposed to be running.
+                        if (
+                            self._running
+                            and stream.mode == StreamMode.LIVE_STREAM
+                            and (stream._task is None or stream._task.done())
+                        ):
+                            logger.info("Camera %d: restarting dead stream loop", camera_id)
+                            stream._task = asyncio.create_task(self._stream_loop(camera_id))
 
 
 _stream_manager: StreamManager | None = None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import lazyload
 
@@ -10,6 +11,7 @@ from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
 from app.schemas.employee import EmployeeCreate, EmployeeOut, EmployeeUpdate
+from app.services import face_service
 from app.services.audit_service import log_action
 
 router = APIRouter(prefix="/api/v1/employees", tags=["employees"])
@@ -133,6 +135,14 @@ async def delete_employee(
     org_id: TenantOrgId,
     user: require_permission("employees.manage"),
 ):
+    """Deactivate an employee (soft delete).
+
+    A hard delete would cascade into attendance/payroll history, shift
+    assignments and leave requests — irreversible destruction from a routine
+    admin action. Deactivating preserves the ledger; the privacy-erase
+    endpoint exists for genuine GDPR removal. Face vectors are purged from
+    the FAISS index either way so the person stops being matchable.
+    """
     emp = await _get_employee_or_404(db, employee_id, org_id)
 
     await log_action(
@@ -145,7 +155,10 @@ async def delete_employee(
         old_values={"employee_code": emp.employee_code, "name": f"{emp.first_name} {emp.last_name}"},
     )
 
-    await db.delete(emp)
+    await run_in_threadpool(face_service.delete_employee, str(employee_id))
+    emp.is_active = False
+    emp.face_enrolled = False
+    emp.face_enrolled_at = None
     await db.flush()
 
 

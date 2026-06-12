@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import NotFoundError
+from app.core.timeutil import local_date, to_local
 from app.models.attendance import AnomalyStatus, AttendanceAnomaly, AttendanceRecord
 from app.models.employee import Employee
 from app.schemas.attendance import AnomalySummary, AnomalyUpdateRequest
@@ -40,7 +41,7 @@ async def run_anomaly_detection(
     lookback = lookback_days or settings.anomaly_lookback_days
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback)
 
-    stmt = select(AttendanceRecord).where(AttendanceRecord.work_date >= cutoff.date())
+    stmt = select(AttendanceRecord).where(AttendanceRecord.work_date >= local_date(cutoff))
     if org_id:
         emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
         stmt = stmt.where(AttendanceRecord.employee_id.in_(emp_ids))
@@ -53,7 +54,10 @@ async def run_anomaly_detection(
     for r in records:
         check_in_hour = None
         if r.check_in_at:
-            check_in_hour = r.check_in_at.hour + r.check_in_at.minute / 60.0
+            # Local wall-clock hour: shift_start_hour below is local time, so
+            # the deviation comparison must be too.
+            check_in_local = to_local(r.check_in_at)
+            check_in_hour = check_in_local.hour + check_in_local.minute / 60.0
 
         shift_start_hour = None
         if r.shift and r.shift.start_time:

@@ -53,6 +53,14 @@ function Feature({ icon, title, desc }: { icon: ReactNode; title: string; desc: 
   )
 }
 
+/** Read ?next= and accept only same-origin relative paths (block open redirects). */
+function safeNextPath(): string {
+  const next = new URLSearchParams(window.location.search).get('next')
+  // Must be a root-relative path; reject protocol-relative (//evil.com) and absolute URLs.
+  if (next && next.startsWith('/') && !next.startsWith('//')) return next
+  return '/'
+}
+
 export default function LoginPage() {
   const { user, login, loading } = useAuth()
   const [email, setEmail] = useState(import.meta.env.DEV ? '' : '')
@@ -71,7 +79,7 @@ export default function LoginPage() {
   }, [])
 
   if (needsSetup) return <Navigate to="/setup" replace />
-  if (!loading && user) return <Navigate to="/" replace />
+  if (!loading && user) return <Navigate to={safeNextPath()} replace />
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

@@ -8,6 +8,7 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.timeutil import local_date, local_day_bounds_utc
 from app.models.employee import Employee
 from app.models.visitor import (
     ApprovalStatus,
@@ -481,7 +482,7 @@ async def expire_visitors(db: AsyncSession) -> int:
             Visitor.visit_end_at <= now,
             and_(
                 Visitor.contract_end_date.isnot(None),
-                Visitor.contract_end_date < now.date(),
+                Visitor.contract_end_date < local_date(now),
             ),
         ),
     )
@@ -587,9 +588,8 @@ async def get_active_visitors(db: AsyncSession, org_id: int) -> list[Visitor]:
 
 
 async def get_daily_report(db: AsyncSession, org_id: int, report_date: date | None = None) -> dict:
-    d = report_date or _now().date()
-    day_start = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-    day_end = day_start + timedelta(days=1)
+    d = report_date or local_date()
+    day_start, day_end = local_day_bounds_utc(d)
     base = select(Visitor).where(
         Visitor.organization_id == org_id,
         Visitor.created_at >= day_start,

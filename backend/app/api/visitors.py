@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
@@ -8,9 +9,9 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import or_, select, update
 
 from app.core.dependencies import (
-    CurrentUser,
     DbSession,
     TenantOrgId,
+    require_permission,
 )
 from app.core.errors import NotFoundError, ValidationError
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
@@ -54,6 +55,8 @@ from app.services.audit_service import log_action
 from app.services import visitor_service
 from app.realtime.hub import emit
 
+logger = logging.getLogger(__name__)
+
 
 async def _emit_visitor_change(visitor) -> None:
     await emit(visitor.organization_id, "visitors.changed", {"visitor_id": visitor.id})
@@ -94,7 +97,7 @@ _EMPTY_DASHBOARD = VisitorDashboard(
 @router.get("/visitors/dashboard", response_model=VisitorDashboard)
 async def visitor_dashboard(
     db: DbSession,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
     org_id: TenantOrgId,
 ):
     if org_id is None:
@@ -106,7 +109,7 @@ async def visitor_dashboard(
 @router.get("/visitors/active", response_model=list[VisitorOut])
 async def list_active_visitors(
     db: DbSession,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
     org_id: TenantOrgId,
 ):
     if org_id is None:
@@ -118,7 +121,7 @@ async def list_active_visitors(
 @router.get("/visitors/reports/daily", response_model=VisitorDailyReport)
 async def visitor_daily_report(
     db: DbSession,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
     org_id: TenantOrgId,
     report_date: str | None = None,
 ):
@@ -141,7 +144,7 @@ async def visitor_daily_report(
 @router.get("/visitors/pending-approval", response_model=list[VisitorOut])
 async def list_pending_approvals(
     db: DbSession,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
     org_id: TenantOrgId,
 ):
     if org_id is None:
@@ -153,7 +156,7 @@ async def list_pending_approvals(
 @router.get("/visitors", response_model=PaginatedResponse[VisitorOut])
 async def list_visitors(
     db: DbSession,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
     org_id: TenantOrgId,
     pagination: PaginationDep,
     status_filter: str | None = Query(None, alias="status"),
@@ -183,7 +186,7 @@ async def create_visitor(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     if org_id is None:
         raise ValidationError("Organization context required")
@@ -215,7 +218,7 @@ async def create_visitor(
 async def get_visitor(
     visitor_id: int,
     db: DbSession,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
     org_id: TenantOrgId,
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
@@ -229,7 +232,7 @@ async def update_visitor(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     updates = body.model_dump(exclude_none=True)
@@ -259,7 +262,7 @@ async def enroll_visitor_face(
     visitor_id: int,
     request: Request,
     db: DbSession,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
     org_id: TenantOrgId,
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
@@ -277,7 +280,7 @@ async def check_in_visitor(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     try:
@@ -304,7 +307,7 @@ async def check_out_visitor(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     notes = None
@@ -343,7 +346,7 @@ async def approve_visitor(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     try:
@@ -369,7 +372,7 @@ async def cancel_visitor(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     visitor.status = VisitorStatus.cancelled
@@ -399,7 +402,7 @@ async def revoke_visitor_access(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     identity = f"visitor-{visitor.id}"
@@ -422,7 +425,7 @@ async def reject_visitor(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     visitor = await visitor_service.reject_visitor(
@@ -463,7 +466,7 @@ async def list_visitor_photos(
     visitor_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
 ):
     await _get_visitor_or_404(db, visitor_id, org_id)
     stmt = (
@@ -480,7 +483,7 @@ async def upload_visitor_photo(
     visitor_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
     file: UploadFile | None = File(None),
     image: str | None = Form(None),
     caption: str | None = Form(None),
@@ -515,7 +518,7 @@ async def upload_visitor_photo_base64(
     body: PhotoUploadBase64,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     _, url = save_visitor_base64(visitor.organization_id, visitor_id, "photos", body.image)
@@ -538,7 +541,7 @@ async def set_primary_visitor_photo(
     photo_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     photo = await db.get(VisitorPhoto, photo_id)
@@ -556,7 +559,7 @@ async def delete_visitor_photo(
     photo_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     photo = await db.get(VisitorPhoto, photo_id)
@@ -593,7 +596,7 @@ async def list_visitor_documents(
     visitor_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
 ):
     await _get_visitor_or_404(db, visitor_id, org_id)
     stmt = select(VisitorDocument).where(VisitorDocument.visitor_id == visitor_id)
@@ -617,7 +620,7 @@ async def upload_visitor_document(
     visitor_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
     file: UploadFile = File(...),
     document_type: str = Form("other"),
     notes: str | None = Form(None),
@@ -659,7 +662,7 @@ async def delete_visitor_document(
     doc_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     await _get_visitor_or_404(db, visitor_id, org_id)
     doc = await db.get(VisitorDocument, doc_id)
@@ -680,7 +683,7 @@ async def get_visitor_timeline(
     visitor_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
     limit: int = Query(50, ge=1, le=200),
 ):
     await _get_visitor_or_404(db, visitor_id, org_id)
@@ -702,7 +705,7 @@ async def list_visitor_access_permissions(
     visitor_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
 ):
     from app.models.visitor import VisitorAccessPermission
     await _get_visitor_or_404(db, visitor_id, org_id)
@@ -720,7 +723,7 @@ async def set_visitor_access_permissions(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     perms = await visitor_service.set_access_permissions(db, visitor, body.zones)
@@ -743,7 +746,7 @@ async def set_visitor_access_permissions(
 async def list_blacklist(
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.view"),
     pagination: PaginationDep,
 ):
     stmt = select(VisitorBlacklist).where(VisitorBlacklist.is_active == True).order_by(VisitorBlacklist.id.desc())  # noqa: E712
@@ -772,7 +775,7 @@ async def add_to_blacklist(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     if org_id is None:
         raise ValidationError("Organization context required")
@@ -811,7 +814,7 @@ async def remove_from_blacklist(
     entry_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: CurrentUser,
+    user: require_permission("visitors.manage"),
 ):
     stmt = select(VisitorBlacklist).where(VisitorBlacklist.id == entry_id)
     stmt = apply_tenant_filter(stmt, org_id, VisitorBlacklist.organization_id)
@@ -833,9 +836,9 @@ async def _run_visitor_expiry_loop() -> None:
                 count = await visitor_service.expire_visitors(db)
                 await db.commit()
                 if count:
-                    print(f"[visitor-expiry] Expired {count} visitor(s)")
-        except Exception as exc:
-            print(f"[visitor-expiry] Error: {exc}")
+                    logger.info("[visitor-expiry] Expired %d visitor(s)", count)
+        except Exception:
+            logger.exception("[visitor-expiry] loop error")
         await asyncio.sleep(60)
 
 

@@ -57,6 +57,33 @@ async def build_health_response() -> dict:
     except Exception as exc:
         checks["ai_service"] = {"status": "degraded", "error": str(exc)}
 
+    # Redis backs rate limiting, cross-worker duplicate suppression, response
+    # caching and the realtime pub/sub. When it is enabled but down, the API
+    # keeps answering while those silently degrade — so report it.
+    if settings.redis_enabled:
+        from app.core.redis import get_redis
+
+        try:
+            redis = get_redis()
+            await redis.ping()
+            checks["redis"] = {"status": "healthy"}
+        except Exception as exc:
+            checks["redis"] = {"status": "unhealthy", "error": str(exc)}
+
+    # Celery Beat runs the periodic jobs (visitor expiry, anomaly detection,
+    # retention purge). Ping the broker so a dead worker/broker is visible.
+    if settings.celery_enabled:
+        try:
+            from app.celery_app import celery_app
+
+            replies = celery_app.control.ping(timeout=1.0)
+            if replies:
+                checks["celery"] = {"status": "healthy", "workers": len(replies)}
+            else:
+                checks["celery"] = {"status": "degraded", "error": "no workers responded"}
+        except Exception as exc:
+            checks["celery"] = {"status": "degraded", "error": str(exc)}
+
     overall = "healthy" if all(c["status"] == "healthy" for c in checks.values()) else "degraded"
 
     return {

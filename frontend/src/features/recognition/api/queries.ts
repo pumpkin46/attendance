@@ -1,10 +1,10 @@
-import { useEffect } from 'react'
+import { useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, getApiErrorMessage } from '@/shared/api/client'
 import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
+import { useAuthedWebSocket } from '@/shared/hooks/useAuthedWebSocket'
 import { useFallbackPoll } from '@/features/realtime/useFallbackPoll'
-import { getToken } from '@/shared/lib/session'
 import type { Paginated, RecognitionEvent } from '@/shared/types'
 import type {
   AddStreamInput,
@@ -91,44 +91,20 @@ export function useEngineStreams() {
  */
 export function useEngineLiveFeed() {
   const qc = useQueryClient()
-  useEffect(() => {
-    const token = getToken()
-    if (!token) return
-
-    const apiBase = import.meta.env.VITE_API_URL ?? '/api/v1'
-    const httpBase = /^https?:\/\//.test(apiBase) ? apiBase : window.location.origin + apiBase
-    const wsUrl = `${httpBase.replace(/^http/, 'ws')}/engine/status/ws`
-
-    let cancelled = false
-    let ws: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined
-
-    const connect = () => {
-      if (cancelled) return
-      ws = new WebSocket(wsUrl, ['bearer', token])
-      ws.onmessage = (ev) => {
-        if (cancelled || typeof ev.data !== 'string') return
-        try {
-          const msg = JSON.parse(ev.data) as { status?: EngineStatus; streams?: StreamsResponse }
-          if (msg.status) qc.setQueryData(engineKeys.status, msg.status)
-          if (msg.streams) qc.setQueryData(engineKeys.streams, msg.streams)
-        } catch {
-          /* ignore malformed frame */
-        }
+  const onMessage = useCallback(
+    (ev: MessageEvent) => {
+      if (typeof ev.data !== 'string') return
+      try {
+        const msg = JSON.parse(ev.data) as { status?: EngineStatus; streams?: StreamsResponse }
+        if (msg.status) qc.setQueryData(engineKeys.status, msg.status)
+        if (msg.streams) qc.setQueryData(engineKeys.streams, msg.streams)
+      } catch {
+        /* ignore malformed frame */
       }
-      ws.onclose = () => {
-        if (!cancelled) reconnectTimer = setTimeout(connect, 1500)
-      }
-      ws.onerror = () => ws?.close()
-    }
-
-    connect()
-    return () => {
-      cancelled = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      ws?.close()
-    }
-  }, [qc])
+    },
+    [qc]
+  )
+  useAuthedWebSocket({ path: '/engine/status/ws', onMessage })
 }
 
 export function useEngineConfig() {

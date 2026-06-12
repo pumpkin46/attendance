@@ -105,7 +105,13 @@ async def recognize_face(body: RecognizeRequest, user: CurrentUser):
 
 
 @router.post("/recognition/recognize-stream", response_model=RecognizeResponse)
-async def recognize_from_stream(body: RecognizeStreamRequest, user: CurrentUser):
+async def recognize_from_stream(
+    body: RecognizeStreamRequest,
+    # cameras.manage: opening an arbitrary client-supplied URL server-side is
+    # an SSRF primitive; restrict to camera administrators (mirrors
+    # /engine/streams/add) on top of validate_stream_url.
+    user: require_permission("cameras.manage"),
+):
     capture = await run_in_threadpool(capture_stream_frame, body.stream_url)
     if not capture["success"]:
         raise ValidationError(capture.get("error", "Failed to capture frame from stream"))
@@ -155,8 +161,9 @@ async def get_event_snapshot(
     event_id: int,
     db: DbSession,
     user: require_permission("recognition.view"),
+    org_id: TenantOrgId = None,
 ):
-    path = await recognition_service.snapshot_path(db, event_id)
+    path = await recognition_service.snapshot_path(db, event_id, org_id)
     return FileResponse(path, media_type="image/jpeg")
 
 
