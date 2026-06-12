@@ -30,7 +30,6 @@ const routeLoaders: Record<string, () => Promise<unknown>> = {
   '/unknown-faces': () => import('@/features/recognition/UnknownFacesPage'),
   '/audit-logs': () => import('@/features/audit/AuditLogsPage'),
   '/security': () => import('@/features/security/SecurityTenancyPage'),
-  '/security-monitoring': () => import('@/features/security/SecurityMonitoringPage'),
   '/recognition-engine': () => import('@/features/recognition/RecognitionEnginePage'),
   '/privacy': () => import('@/features/privacy/PrivacyPage'),
   '/user-management': () => import('@/features/users/UserManagementPage'),

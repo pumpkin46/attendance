@@ -111,7 +111,7 @@ export default function UnknownFacesPage() {
     <div>
       <PageHeader
         title="Unknown Faces"
-        description="Review unrecognized persons captured by cameras — snapshots, liveness, and alert status."
+        description="Review unrecognized faces captured by cameras, with snapshots and liveness results."
         actions={
           <DateRangePicker
             className="w-60"

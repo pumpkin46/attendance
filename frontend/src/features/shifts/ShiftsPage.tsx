@@ -22,7 +22,7 @@ export default function ShiftsPage() {
     <div>
       <PageHeader
         title="Shift Management"
-        description="Shift schedules, attendance policies, holidays, and leave approvals."
+        description="Manage shift schedules, attendance policies, holidays, and leave."
       />
       <Tabs tabs={TABS} value={tab} onChange={setTab} />
       <div role="tabpanel" id={`tabpanel-${tab}`} aria-labelledby={`tab-${tab}`}>

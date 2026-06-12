@@ -414,7 +414,7 @@ export default function CamerasPage() {
     <div>
       <PageHeader
         title="Camera Management"
-        description="Configure cameras and monitor stream health: online status, FPS, latency, bandwidth, CPU/GPU, and recognition events."
+        description="Configure cameras and monitor stream health and recognition activity."
         actions={
           <Button onClick={() => (showForm ? closePanel() : openCreate())} variant={showForm ? 'ghost' : 'primary'}>
             {showForm ? 'Cancel' : '+ Register camera'}
@@ -684,7 +684,7 @@ export default function CamerasPage() {
 
       {/* Content */}
       {isPending ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
             <Card key={i} padding={false} className="overflow-hidden">
               <Skeleton className="aspect-video w-full rounded-none" />
@@ -721,7 +721,7 @@ export default function CamerasPage() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {paged.map((c) => (
               <CameraTile
                 key={c.id}

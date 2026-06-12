@@ -135,7 +135,7 @@ export default function EmployeesPage() {
     <div>
       <PageHeader
         title="Employees"
-        description="Workforce registry, face enrollment, and RFID card status"
+        description="Employee directory with face enrollment and RFID card status."
         actions={
           <div className="flex flex-wrap gap-2">
             <SearchBox

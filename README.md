@@ -76,7 +76,7 @@ UI runs at **http://127.0.0.1:5173** (proxies API to port 8000 via `VITE_API_URL
 | Attendance Engine | Check-in/out, duplicate prevention, overtime |
 | Anomaly Detection | Rules + Isolation Forest on attendance patterns |
 | Shift Management | Schedules, grace periods, assignments |
-| Reporting | Summary, overtime, CSV export |
+| Reporting | Attendance + security-alert exports (CSV / Excel / PDF) |
 | Camera Management | Multi-camera, heartbeat monitoring |
 | Edge camera mode | On-device backend + FAISS embedding sync |
 | Audit Logs | Sensitive actions logged |

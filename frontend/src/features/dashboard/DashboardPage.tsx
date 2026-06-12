@@ -186,10 +186,10 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title="Dashboard"
-        description="Live workforce, camera health, and security events"
+        description="Live overview of attendance, camera health, and security events."
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 2xl:grid-cols-6">
         <Kpi
           label="Active cameras"
           value={`${dashboard?.active_cameras ?? '—'}/${dashboard?.total_cameras ?? '—'}`}

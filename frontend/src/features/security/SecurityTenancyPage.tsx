@@ -12,6 +12,7 @@ import { TenancyDirectory } from '@/features/security/components/TenancyDirector
 import {
   useBranches,
   useDepartments,
+  useLocations,
   useOrganizations,
   useSecurityConfig,
 } from '@/features/security/api/queries'
@@ -131,6 +132,7 @@ export default function SecurityTenancyPage() {
   const { data: organizations } = useOrganizations()
   const { data: branches } = useBranches()
   const { data: departments } = useDepartments()
+  const { data: locations } = useLocations()
 
   const [tenantOrgId, setTenantOrgId] = useState(() => currentOrgId ?? '')
 
@@ -154,13 +156,14 @@ export default function SecurityTenancyPage() {
     <div className="space-y-6">
       <PageHeader
         title="Security & Multi-Tenancy"
-        description="Platform security posture, role-based access, and the tenant directory of organizations, branches, and departments."
+        description="Security posture, role-based access, and the organization directory."
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <StatTile label="Organizations" value={orgs.length} dot="bg-blue-400" accent="border-l-blue-500" />
         <StatTile label="Branches" value={(branches ?? []).length} dot="bg-violet-400" accent="border-l-violet-500" />
         <StatTile label="Departments" value={(departments ?? []).length} dot="bg-cyan-400" accent="border-l-cyan-500" />
+        <StatTile label="Locations" value={(locations ?? []).length} dot="bg-amber-400" accent="border-l-amber-500" />
         <StatTile label="Employees" value={employeesTotal} dot="bg-emerald-400" accent="border-l-emerald-500" />
       </div>
 
@@ -306,9 +309,9 @@ export default function SecurityTenancyPage() {
 
       <div>
         <div className="mb-4">
-          <h2 className="text-lg font-semibold text-slate-100">Tenant directory</h2>
+          <h2 className="text-lg font-semibold text-slate-100">Organization directory</h2>
           <p className="mt-0.5 text-sm text-slate-400">
-            Manage organizations and their branches and departments.
+            Manage your organization&apos;s name, branches, departments, and locations.
           </p>
         </div>
         <TenancyDirectory />

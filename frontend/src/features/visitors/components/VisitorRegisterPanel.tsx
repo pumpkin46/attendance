@@ -1,13 +1,12 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { selectIsSuperAdmin } from '@/features/auth/authSlice'
-import { selectOrgId } from '@/features/tenant/tenantSlice'
-import { useAppSelector } from '@/store/hooks'
 import { Button } from '@/shared/ui/Button'
 import { Checkbox } from '@/shared/ui/Checkbox'
 import { Combobox } from '@/shared/ui/Combobox'
 import { DatePicker } from '@/shared/ui/DatePicker'
+import { IdNumberInput } from '@/shared/ui/IdNumberInput'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
+import { PhoneInput } from '@/shared/ui/PhoneInput'
 import { SidePanel } from '@/shared/ui/SidePanel'
 import { Textarea } from '@/shared/ui/Textarea'
 import { useEmployeeOptions, useRegisterVisitor } from '@/features/visitors/api/queries'
@@ -59,11 +58,6 @@ export function VisitorRegisterPanel({
   const { data: employeesResp } = useEmployeeOptions()
   const employees = employeesResp?.data ?? []
   const register = useRegisterVisitor()
-  // Super admins act across tenants: a visitor must belong to a concrete
-  // organization, picked via the OrgSwitcher in the top bar.
-  const isSuperAdmin = useAppSelector(selectIsSuperAdmin)
-  const actingOrgId = useAppSelector(selectOrgId)
-  const needsOrg = isSuperAdmin && !actingOrgId
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -100,7 +94,7 @@ export function VisitorRegisterPanel({
       onClose={onClose}
       footer={
         <>
-          <Button type="submit" form={FORM_ID} isLoading={register.isPending} disabled={needsOrg}>
+          <Button type="submit" form={FORM_ID} isLoading={register.isPending}>
             Register visitor
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
@@ -109,17 +103,6 @@ export function VisitorRegisterPanel({
         </>
       }
     >
-      {needsOrg && (
-        <div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-600/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <span>
-            Select an organization first — use the <strong>Organization</strong> selector in the top bar.
-            Visitors are always registered into a specific organization.
-          </span>
-        </div>
-      )}
       <form id={FORM_ID} className="space-y-8" onSubmit={submit}>
         <FormSection title="Visitor details">
           <Label>
@@ -136,7 +119,7 @@ export function VisitorRegisterPanel({
           </Label>
           <Label>
             Phone
-            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <PhoneInput value={form.phone} onChange={(phone) => setForm({ ...form, phone })} />
           </Label>
           <Label>
             Email
@@ -144,7 +127,7 @@ export function VisitorRegisterPanel({
           </Label>
           <Label>
             ID number
-            <Input value={form.id_number} onChange={(e) => setForm({ ...form, id_number: e.target.value })} />
+            <IdNumberInput value={form.id_number} onChange={(id_number) => setForm({ ...form, id_number })} />
           </Label>
           <Label>
             Nationality

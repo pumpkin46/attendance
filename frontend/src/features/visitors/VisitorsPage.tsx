@@ -46,7 +46,7 @@ export default function VisitorsPage() {
     <div>
       <PageHeader
         title="Visitor Management"
-        description="Register, verify, track, and manage visitors with face recognition and badge access."
+        description="Visitor registration, approvals, check-ins, and watchlist screening."
         actions={<Button onClick={() => setShowRegister(true)}>+ Register visitor</Button>}
       />
 

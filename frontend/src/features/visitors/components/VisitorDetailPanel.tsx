@@ -8,6 +8,8 @@ import { Combobox } from '@/shared/ui/Combobox'
 import { DatePicker } from '@/shared/ui/DatePicker'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
+import { PhoneInput } from '@/shared/ui/PhoneInput'
+import { formatPhone } from '@/shared/lib/format'
 import { SidePanel } from '@/shared/ui/SidePanel'
 import { confirmDialog, promptDialog } from '@/shared/ui/dialogs'
 import { AuthImage } from '@/shared/components/AuthImage'
@@ -256,7 +258,7 @@ export function VisitorDetailPanel({
       first_name: visitor.first_name ?? '',
       last_name: visitor.last_name ?? '',
       company: visitor.company ?? '',
-      phone: visitor.phone ?? '',
+      phone: formatPhone(visitor.phone ?? ''),
       email: visitor.email ?? '',
       purpose: visitor.purpose ?? '',
       visit_start_at: toLocalInput(visitor.visit_start_at),
@@ -541,7 +543,7 @@ export function VisitorDetailPanel({
                 </Label>
                 <Label>
                   Phone
-                  <Input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} />
+                  <PhoneInput value={editForm.phone} onChange={(phone) => setEditForm({ ...editForm, phone })} />
                 </Label>
                 <Label className="sm:col-span-2">
                   Email

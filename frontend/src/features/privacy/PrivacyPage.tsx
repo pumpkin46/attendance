@@ -8,6 +8,7 @@ import { PageHeader } from '@/shared/ui/PageHeader'
 import { Spinner } from '@/shared/ui/Loading'
 import { cn } from '@/shared/lib/cn'
 import { downloadBlob } from '@/shared/lib/download'
+import { initialsOf } from '@/shared/lib/format'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useActiveEmployees } from '@/features/employees/api/queries'
 import { useEraseEmployeeData, useMyData, usePrivacyPolicy } from '@/features/privacy/api/queries'
@@ -97,6 +98,36 @@ function MiniStat({ label, value }: { label: string; value: ReactNode }) {
   )
 }
 
+/** One consequence of an erasure request: what data, and what happens to it. */
+function EraseEffect({
+  title,
+  outcome,
+  outcomeClass,
+  detail,
+}: {
+  title: string
+  outcome: string
+  outcomeClass: string
+  detail: string
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-lg bg-slate-800/40 px-3 py-2.5">
+      <div className="min-w-0">
+        <div className="text-sm text-slate-200">{title}</div>
+        <div className="mt-0.5 text-xs text-slate-500">{detail}</div>
+      </div>
+      <span
+        className={cn(
+          'mt-0.5 shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium',
+          outcomeClass
+        )}
+      >
+        {outcome}
+      </span>
+    </div>
+  )
+}
+
 export default function PrivacyPage() {
   const { hasPermission } = useAuth()
   const canErase = hasPermission('employees.manage')
@@ -107,6 +138,7 @@ export default function PrivacyPage() {
   const employees = employeesResp?.data ?? []
 
   const [eraseId, setEraseId] = useState('')
+  const selectedEmployee = employees.find((e) => String(e.id) === eraseId)
 
   const erase = useEraseEmployeeData()
 
@@ -132,7 +164,7 @@ export default function PrivacyPage() {
     <div className="space-y-6">
       <PageHeader
         title="Privacy & GDPR"
-        description="Data retention policy, personal-data export, and right-to-erasure (GDPR Art. 15 & 17)."
+        description="Data retention, personal-data export, and right-to-erasure requests."
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -233,25 +265,82 @@ export default function PrivacyPage() {
             description="Irreversible removal of an employee's personal data"
             className="border-red-800/40 lg:col-span-2"
           >
-            <div className="mb-4 rounded-lg border border-red-800/40 bg-red-500/5 px-3 py-2.5 text-sm text-red-300">
-              Permanently removes face embeddings, anonymizes recognition/attendance data, and
-              deactivates the record. This action cannot be undone.
-            </div>
-            <div className="flex flex-wrap items-end gap-3">
-              <Label className="min-w-[260px] flex-1">
-                Employee
-                <Combobox value={eraseId} onChange={(value) => setEraseId(value)}>
-                  <option value="">Select employee</option>
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.employee_code} — {e.first_name} {e.last_name}
-                    </option>
-                  ))}
-                </Combobox>
-              </Label>
-              <Button variant="danger" disabled={!eraseId} isLoading={erase.isPending} onClick={confirmErase}>
-                Erase data
-              </Button>
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                  What happens to the data
+                </p>
+                <div className="space-y-2">
+                  <EraseEffect
+                    title="Face embeddings & enrollment photos"
+                    detail="Biometric templates and source images"
+                    outcome="Deleted"
+                    outcomeClass="bg-red-500/15 text-red-400"
+                  />
+                  <EraseEffect
+                    title="Recognition & attendance history"
+                    detail="Identity unlinked; totals stay valid for reporting"
+                    outcome="Anonymized"
+                    outcomeClass="bg-amber-500/15 text-amber-400"
+                  />
+                  <EraseEffect
+                    title="Profile & contact details"
+                    detail="Personal fields cleared, record deactivated"
+                    outcome="Anonymized"
+                    outcomeClass="bg-amber-500/15 text-amber-400"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Process a request
+                </p>
+                <Label>
+                  Employee
+                  <Combobox value={eraseId} onChange={(value) => setEraseId(value)}>
+                    <option value="">Select employee</option>
+                    {employees.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.employee_code} — {e.first_name} {e.last_name}
+                      </option>
+                    ))}
+                  </Combobox>
+                </Label>
+
+                {selectedEmployee && (
+                  <div className="mt-3 flex items-center gap-3 rounded-lg bg-slate-800/40 p-3">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-700 text-xs font-semibold text-slate-200">
+                      {initialsOf(selectedEmployee.first_name, selectedEmployee.last_name)}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-100">
+                        {selectedEmployee.first_name} {selectedEmployee.last_name}
+                      </div>
+                      <div className="truncate text-xs text-slate-500">
+                        {selectedEmployee.employee_code}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-auto flex items-center justify-between gap-3 border-t border-slate-800 pt-4">
+                  <span className="flex items-center gap-1.5 text-xs text-red-400/90">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+                    </svg>
+                    This action cannot be undone.
+                  </span>
+                  <Button
+                    variant="danger"
+                    disabled={!eraseId}
+                    isLoading={erase.isPending}
+                    onClick={confirmErase}
+                  >
+                    Erase data
+                  </Button>
+                </div>
+              </div>
             </div>
           </SectionCard>
         )}

@@ -82,7 +82,7 @@ export default function RecognitionTestPage() {
     <div>
       <PageHeader
         title="Test recognition (attendance)"
-        description="Step 1: Face Enrollment with your image. Step 2: run recognition here (same or similar photo)."
+        description="Verify enrollment quality by running recognition against a test photo."
       />
 
       <Card className="mb-6">

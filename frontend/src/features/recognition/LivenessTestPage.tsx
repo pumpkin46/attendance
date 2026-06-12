@@ -140,7 +140,7 @@ export default function LivenessTestPage() {
     <div className="space-y-6">
       <PageHeader
         title="Liveness Detection Test"
-        description="FR-017 anti-spoof (print, screen, video, deepfake) and FR-018 blink/head-movement verification"
+        description="Test anti-spoofing and blink and head-movement liveness checks."
       />
 
       {/* Capability status */}

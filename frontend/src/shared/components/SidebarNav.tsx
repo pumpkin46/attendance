@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { prefetchRoute } from '@/app/routes'
 import { ROUTE_PERMISSIONS } from '@/app/access'
@@ -36,21 +37,6 @@ const navGroups: NavGroup[] = [
     items: [{ to: '/', label: 'Dashboard', end: true }],
   },
   {
-    id: 'access',
-    title: 'Visitors & Security',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M12 3l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V7l8-4z" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/visitors', label: 'Visitors' },
-      { to: '/security-monitoring', label: 'AI Security' },
-    ],
-  },
-  {
     id: 'people',
     title: 'People',
     icon: (
@@ -63,6 +49,7 @@ const navGroups: NavGroup[] = [
     ),
     items: [
       { to: '/employees', label: 'Employees' },
+      { to: '/visitors', label: 'Visitors' },
       { to: '/enrollment', label: 'Face Enrollment' },
       { to: '/enrollment-simple', label: 'Quick Face Register' },
     ],
@@ -173,11 +160,32 @@ function updateScrollThumb(el: HTMLElement): ScrollThumb {
   return { height: thumbHeight, top, show: true }
 }
 
-export default function SidebarNav() {
+export default function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { hasPermission } = useAuth()
   const [query, setQuery] = useState('')
+
+  // Collapsed-rail flyout: which group is open and where to anchor its panel.
+  const [flyout, setFlyout] = useState<{ id: string; top: number; left: number } | null>(null)
+  const flyoutTimer = useRef<number | null>(null)
+  const cancelFlyoutClose = () => {
+    if (flyoutTimer.current !== null) {
+      window.clearTimeout(flyoutTimer.current)
+      flyoutTimer.current = null
+    }
+  }
+  const scheduleFlyoutClose = () => {
+    cancelFlyoutClose()
+    flyoutTimer.current = window.setTimeout(() => setFlyout(null), 150)
+  }
+  // Navigating (from the flyout or anywhere else) dismisses the panel
+  // (render-phase adjustment, re-renders before commit).
+  const [flyoutPath, setFlyoutPath] = useState(pathname)
+  if (flyoutPath !== pathname) {
+    setFlyoutPath(pathname)
+    setFlyout(null)
+  }
 
   // Hide nav items the current user can't access (matches the route guards and
   // the backend's per-endpoint permissions). Items with no required permission
@@ -254,6 +262,99 @@ export default function SidebarNav() {
     if (first) {
       navigate(first.to)
     }
+  }
+
+  // ── Collapsed rail: icon-only groups with hover/focus flyout menus ─────────
+  if (collapsed) {
+    const flyoutGroup = flyout ? visibleGroups.find((g) => g.id === flyout.id) : null
+    const showFlyout = (id: string, el: HTMLElement, firstTo?: string) => {
+      cancelFlyoutClose()
+      const rect = el.getBoundingClientRect()
+      setFlyout({ id, top: rect.top, left: rect.right + 10 })
+      if (firstTo) prefetchRoute(firstTo)
+    }
+
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <nav aria-label="Main navigation" className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-2">
+          <ul className="flex flex-col gap-1">
+            {visibleGroups.map((group) => {
+              const isActiveGroup = groupHasActiveItem(pathname, group)
+              return (
+                <li key={group.id}>
+                  <button
+                    type="button"
+                    aria-label={group.title}
+                    onClick={() => openGroup(group)}
+                    onMouseEnter={(e) => showFlyout(group.id, e.currentTarget, group.items[0]?.to)}
+                    onMouseLeave={scheduleFlyoutClose}
+                    onFocus={(e) => showFlyout(group.id, e.currentTarget, group.items[0]?.to)}
+                    onBlur={scheduleFlyoutClose}
+                    className={cn(
+                      'flex w-full items-center justify-center rounded-lg py-3 transition-colors',
+                      // Rail mode: upsize the shared group icons for legibility.
+                      '[&_span]:!h-7 [&_span]:!w-7 [&_svg]:!h-6 [&_svg]:!w-6',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+                      isActiveGroup
+                        ? 'bg-slate-800 [&_svg]:text-blue-400'
+                        : 'hover:bg-slate-800/60 [&_svg]:text-slate-400 hover:[&_svg]:text-slate-200'
+                    )}
+                  >
+                    {group.icon}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </nav>
+
+        {flyoutGroup &&
+          flyout &&
+          createPortal(
+            <div
+              className="fixed z-50"
+              style={{
+                left: flyout.left,
+                // Keep the panel on-screen near the bottom of the rail.
+                top: Math.max(
+                  8,
+                  Math.min(flyout.top, window.innerHeight - (52 + flyoutGroup.items.length * 34))
+                ),
+              }}
+              onMouseEnter={cancelFlyoutClose}
+              onMouseLeave={scheduleFlyoutClose}
+            >
+              <div className="w-56 rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl shadow-black/50">
+                <div className="px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {flyoutGroup.title}
+                </div>
+                <ul className="flex flex-col gap-0.5">
+                  {flyoutGroup.items.map((item) => (
+                    <li key={item.to}>
+                      <NavLink
+                        to={item.to}
+                        end={item.end}
+                        onMouseEnter={() => prefetchRoute(item.to)}
+                        className={({ isActive }) =>
+                          cn(
+                            'block rounded-lg px-2.5 py-1.5 text-sm transition-colors',
+                            isActive
+                              ? 'bg-blue-500/10 font-semibold text-blue-300'
+                              : 'font-medium text-slate-300 hover:bg-slate-800 hover:text-slate-100'
+                          )
+                        }
+                      >
+                        {item.label}
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>,
+            document.body
+          )}
+      </div>
+    )
   }
 
   return (

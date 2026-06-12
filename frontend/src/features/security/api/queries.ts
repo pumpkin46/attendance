@@ -2,21 +2,19 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/shared/api/client'
 import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
-import type { Paginated } from '@/shared/types'
 import type {
   Branch,
   CreateBranchPayload,
   CreateDepartmentPayload,
+  CreateLocationPayload,
   CreateOrganizationPayload,
   Department,
+  Location,
   Organization,
   SecurityConfig,
-  SecurityAlert,
-  SecurityAlertFilters,
-  SecurityDashboard,
-  SecurityMonitoringConfig,
   UpdateBranchPayload,
   UpdateDepartmentPayload,
+  UpdateLocationPayload,
   UpdateOrganizationPayload,
 } from '@/features/security/types'
 
@@ -25,103 +23,14 @@ export const securityKeys = {
   config: ['security', 'config'] as const,
 }
 
-export const securityMonitoringKeys = {
-  all: ['security-monitoring'] as const,
-  config: ['security-monitoring', 'config'] as const,
-  dashboard: ['security-monitoring', 'dashboard'] as const,
-  alerts: ['security-monitoring', 'alerts'] as const,
-  alertList: (filters: SecurityAlertFilters) =>
-    ['security-monitoring', 'alerts', filters] as const,
-}
-
-/** All times the API filters/aggregates on are shifted to the viewer's day. */
-const tzOffset = () => new Date().getTimezoneOffset()
-
-export function useSecurityMonitoringConfig() {
-  return useApiQuery<SecurityMonitoringConfig>(
-    securityMonitoringKeys.config,
-    '/security-monitoring/config',
-    undefined,
-    { silent: true, staleTime: STATIC_STALE_MS }
-  )
-}
-
-/** `poll` comes from `useFallbackPoll` — undefined while the socket is healthy. */
-export function useSecurityDashboard(poll: number | undefined) {
-  return useApiQuery<SecurityDashboard>(
-    securityMonitoringKeys.dashboard,
-    '/security-monitoring/dashboard',
-    { tz_offset: tzOffset() },
-    { silent: true, refetchInterval: poll }
-  )
-}
-
-export function useSecurityAlerts(filters: SecurityAlertFilters, poll: number | undefined) {
-  return useApiQuery<Paginated<SecurityAlert>>(
-    securityMonitoringKeys.alertList(filters),
-    '/security-monitoring/alerts',
-    { ...filters, tz_offset: tzOffset() },
-    { silent: true, refetchInterval: poll, keepPreviousData: true }
-  )
-}
-
-/**
- * Fetch a security-alert export (csv/xlsx) for client-side download. The
- * filename comes from the response's Content-Disposition — the backend is the
- * single source of truth for naming.
- */
-export async function fetchSecurityAlertExport(
-  params: Record<string, string | number | undefined>
-): Promise<{ blob: Blob; filename: string | null }> {
-  const res = await api.get<Blob>('/security-monitoring/alerts/export', {
-    params: { ...params, tz_offset: tzOffset() },
-    responseType: 'blob',
-  })
-  const disposition = res.headers['content-disposition'] as string | undefined
-  const match = disposition?.match(/filename="?([^";]+)"?/i)
-  return { blob: res.data, filename: match?.[1] ?? null }
-}
-
-/** Alert mutations change the alert list and the dashboard counters — config is static and never refetched here. */
-function useInvalidateAlerts() {
-  const qc = useQueryClient()
-  return () => {
-    qc.invalidateQueries({ queryKey: securityMonitoringKeys.alerts })
-    qc.invalidateQueries({ queryKey: securityMonitoringKeys.dashboard })
-  }
-}
-
-export function useAcknowledgeAlert() {
-  const invalidate = useInvalidateAlerts()
-  return useMutation({
-    mutationFn: async (id: number) => {
-      const { data } = await api.post<SecurityAlert>(
-        `/security-monitoring/alerts/${id}/acknowledge`
-      )
-      return data
-    },
-    onSuccess: invalidate,
-  })
-}
-
-export function useResolveAlert() {
-  const invalidate = useInvalidateAlerts()
-  return useMutation({
-    mutationFn: async (id: number) => {
-      const { data } = await api.post<SecurityAlert>(
-        `/security-monitoring/alerts/${id}/resolve`
-      )
-      return data
-    },
-    onSuccess: invalidate,
-  })
-}
-
 export const organizationKeys = {
   all: ['organizations'] as const,
   list: ['organizations', 'list'] as const,
   branches: ['organizations', 'branches'] as const,
   departments: ['organizations', 'departments'] as const,
+  // Deliberately the same key the employee form's location dropdown uses
+  // (employeeKeys.locations), so location changes refresh both surfaces.
+  locations: ['locations'] as const,
 }
 
 export function useSecurityConfig(enabled: boolean) {
@@ -142,6 +51,10 @@ export function useBranches() {
 
 export function useDepartments() {
   return useApiQuery<Department[]>(organizationKeys.departments, '/departments')
+}
+
+export function useLocations() {
+  return useApiQuery<Location[]>(organizationKeys.locations, '/locations')
 }
 
 export function useInvalidateOrganizationList() {
@@ -263,6 +176,40 @@ export function useDeleteDepartment() {
     onSuccess: () => {
       toast.success('Department deleted')
       invalidate()
+    },
+  })
+}
+
+export function useCreateLocation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: CreateLocationPayload) => api.post('/locations', payload),
+    onSuccess: () => {
+      toast.success('Location created')
+      qc.invalidateQueries({ queryKey: organizationKeys.locations })
+    },
+  })
+}
+
+export function useUpdateLocation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...payload }: UpdateLocationPayload & { id: number }) =>
+      api.patch(`/locations/${id}`, payload),
+    onSuccess: () => {
+      toast.success('Location updated')
+      qc.invalidateQueries({ queryKey: organizationKeys.locations })
+    },
+  })
+}
+
+export function useDeleteLocation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/locations/${id}`),
+    onSuccess: () => {
+      toast.success('Location deleted')
+      qc.invalidateQueries({ queryKey: organizationKeys.locations })
     },
   })
 }

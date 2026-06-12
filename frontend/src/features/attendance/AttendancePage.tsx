@@ -114,7 +114,7 @@ export default function AttendancePage() {
     <div>
       <PageHeader
         title="Attendance"
-        description="Auto check-in on recognition with confidence and liveness; auto check-out at exit cameras per policy."
+        description="Daily attendance records with automatic check-in and check-out from recognition."
         actions={
           <div className="flex items-center gap-2">
             <DateRangePicker
@@ -169,7 +169,6 @@ export default function AttendancePage() {
               above are client-side only and are not applied to the file. */}
           <ReportExportButtons
             params={{
-              report_type: 'attendance',
               date_from: dateFrom || undefined,
               date_to: dateTo || undefined,
             }}

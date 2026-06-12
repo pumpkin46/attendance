@@ -13,36 +13,41 @@ import { SearchBox } from '@/shared/ui/SearchBox'
 import { SidePanel } from '@/shared/ui/SidePanel'
 import { confirmDialog } from '@/shared/ui/dialogs'
 import { cn } from '@/shared/lib/cn'
-import type { Branch, Department, Organization } from '@/features/security/types'
+import type { Branch, Department, Location, Organization } from '@/features/security/types'
 import {
   useBranches,
   useCreateBranch,
   useCreateDepartment,
+  useCreateLocation,
   useCreateOrganization,
   useDeleteBranch,
   useDeleteDepartment,
+  useDeleteLocation,
   useDeleteOrganization,
   useDepartments,
+  useLocations,
   useOrganizations,
   useUpdateBranch,
   useUpdateDepartment,
+  useUpdateLocation,
   useUpdateOrganization,
 } from '@/features/security/api/queries'
 
 const FORM_ID = 'tenancy-entity-form'
 const PAGE_SIZE = 8
 
-type EntityTab = 'organizations' | 'branches' | 'departments'
+type EntityTab = 'organizations' | 'branches' | 'departments' | 'locations'
 
 interface PanelState {
   entity: EntityTab
-  record: Organization | Branch | Department | null
+  record: Organization | Branch | Department | Location | null
 }
 
 const ENTITY_LABEL: Record<EntityTab, string> = {
   organizations: 'organization',
   branches: 'branch',
   departments: 'department',
+  locations: 'location',
 }
 
 function StatusBadge({ active }: { active: boolean }) {
@@ -84,9 +89,12 @@ function OrgContextRow({ name }: { name: string }) {
 
 function OrganizationForm({
   record,
+  allowDeactivate,
   onSubmit,
 }: {
   record: Organization | null
+  /** Hidden for the lone organization — deactivating it would break the whole tenant context. */
+  allowDeactivate: boolean
   onSubmit: (values: { name: string; code: string; timezone: string; is_active?: boolean }) => void
 }) {
   const [name, setName] = useState(record?.name ?? '')
@@ -118,7 +126,9 @@ function OrganizationForm({
         Timezone
         <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
       </Label>
-      {record && <ActiveField checked={active} onChange={setActive} entity="organization" />}
+      {record && allowDeactivate && (
+        <ActiveField checked={active} onChange={setActive} entity="organization" />
+      )}
     </form>
   )
 }
@@ -303,6 +313,107 @@ function DepartmentForm({
   )
 }
 
+function LocationForm({
+  record,
+  organizations,
+  branches,
+  showOrgPicker,
+  defaultOrgId,
+  orgPinned,
+  onSubmit,
+}: {
+  record: Location | null
+  organizations: Organization[]
+  branches: Branch[]
+  showOrgPicker: boolean
+  defaultOrgId: string
+  orgPinned: boolean
+  onSubmit: (values: {
+    name: string
+    address: string | null
+    timezone: string
+    branch_id: number | null
+    organization_id?: number
+    is_active?: boolean
+  }) => void
+}) {
+  const [orgId, setOrgId] = useState(record ? String(record.organization_id) : defaultOrgId)
+  const [branchId, setBranchId] = useState(record?.branch_id ? String(record.branch_id) : '')
+  const [name, setName] = useState(record?.name ?? '')
+  const [address, setAddress] = useState(record?.address ?? '')
+  const [timezone, setTimezone] = useState(record?.timezone ?? 'UTC')
+  const [active, setActive] = useState(record?.is_active ?? true)
+  const orgName = organizations.find((o) => o.id === record?.organization_id)?.name
+
+  // Only branches of the target organization are valid parents. When no picker
+  // is shown the list is already tenant-scoped by the API.
+  const branchOptions = useMemo(() => {
+    const scoped = orgId ? branches.filter((b) => b.organization_id === Number(orgId)) : branches
+    return [
+      { value: '', label: 'No branch' },
+      ...scoped.map((b) => ({ value: String(b.id), label: b.name })),
+    ]
+  }, [branches, orgId])
+
+  return (
+    <form
+      id={FORM_ID}
+      onSubmit={(e) => {
+        e.preventDefault()
+        onSubmit({
+          name,
+          address: address.trim() || null,
+          timezone,
+          branch_id: branchId ? Number(branchId) : null,
+          ...(record
+            ? { is_active: active }
+            : orgId
+              ? { organization_id: Number(orgId) }
+              : {}),
+        })
+      }}
+    >
+      {record ? (
+        <OrgContextRow name={orgName ?? `Organization #${record.organization_id}`} />
+      ) : (
+        showOrgPicker && (
+          <Label>
+            Organization
+            <Combobox
+              value={orgId}
+              onChange={(v) => {
+                setOrgId(v)
+                setBranchId('')
+              }}
+              required
+              disabled={orgPinned}
+              placeholder="Select organization…"
+              options={organizations.map((o) => ({ value: String(o.id), label: o.name }))}
+            />
+          </Label>
+        )
+      )}
+      <Label>
+        Name
+        <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Head Office" />
+      </Label>
+      <Label>
+        Branch <span className="text-xs text-slate-500">(optional)</span>
+        <Combobox value={branchId} onChange={setBranchId} options={branchOptions} />
+      </Label>
+      <Label>
+        Address <span className="text-xs text-slate-500">(optional)</span>
+        <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="100 Main Street" />
+      </Label>
+      <Label>
+        Timezone
+        <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
+      </Label>
+      {record && <ActiveField checked={active} onChange={setActive} entity="location" />}
+    </form>
+  )
+}
+
 // ── Directory ────────────────────────────────────────────────────────────────
 
 /**
@@ -316,9 +427,11 @@ export function TenancyDirectory() {
   const { data: organizations, isPending: orgsLoading } = useOrganizations()
   const { data: branches, isPending: branchesLoading } = useBranches()
   const { data: departments, isPending: departmentsLoading } = useDepartments()
+  const { data: locations, isPending: locationsLoading } = useLocations()
   const orgs = organizations ?? []
   const branchList = branches ?? []
   const deptList = departments ?? []
+  const locationList = locations ?? []
 
   const [tab, setTab] = useState<EntityTab>('organizations')
   const [search, setSearch] = useState('')
@@ -336,14 +449,23 @@ export function TenancyDirectory() {
   const createDept = useCreateDepartment()
   const updateDept = useUpdateDepartment()
   const deleteDept = useDeleteDepartment()
+  const createLocation = useCreateLocation()
+  const updateLocation = useUpdateLocation()
+  const deleteLocation = useDeleteLocation()
 
   const canManage: Record<EntityTab, boolean> = {
     organizations: hasPermission('organizations.manage'),
     branches: hasPermission('branches.manage'),
     departments: hasPermission('departments.manage'),
+    // Locations are facility management, same scope as branches.
+    locations: hasPermission('branches.manage'),
   }
-  // Creating / deleting whole tenants is reserved for super admins (API-enforced).
-  const canCreateOrg = isSuperAdmin()
+  // Single-organization deployment: the directory converges to exactly one
+  // org. Creating is only offered when none exists (broken-state recovery)
+  // and deleting only while there is more than one (pruning back to one) —
+  // day to day, the lone organization is just renamed via Edit.
+  const canCreateOrg = isSuperAdmin() && orgs.length === 0
+  const canDeleteOrg = isSuperAdmin() && orgs.length > 1
 
   const orgNames = useMemo(
     () => new Map((organizations ?? []).map((o) => [o.id, o.name])),
@@ -359,11 +481,15 @@ export function TenancyDirectory() {
   const filteredOrgs = orgs.filter((o) => matches(o.name, o.code))
   const filteredBranches = branchList.filter((b) => matches(b.name, b.code) && inOrgFilter(b.organization_id))
   const filteredDepts = deptList.filter((d) => matches(d.name, d.code) && inOrgFilter(d.organization_id))
+  const filteredLocations = locationList.filter(
+    (l) => matches(l.name, l.address ?? '') && inOrgFilter(l.organization_id)
+  )
 
   const tabs: { id: EntityTab; label: string; count: number }[] = [
     { id: 'organizations', label: 'Organizations', count: orgs.length },
     { id: 'branches', label: 'Branches', count: branchList.length },
     { id: 'departments', label: 'Departments', count: deptList.length },
+    { id: 'locations', label: 'Locations', count: locationList.length },
   ]
 
   const openPanel = (entity: EntityTab, record: PanelState['record']) => {
@@ -399,18 +525,30 @@ export function TenancyDirectory() {
     if (ok) deleteDept.mutate(dept.id, { onSuccess: closePanel })
   }
 
-  const deleting = deleteOrg.isPending || deleteBranch.isPending || deleteDept.isPending
+  const removeLocation = async (loc: Location) => {
+    const ok = await confirmDialog({
+      title: 'Delete location',
+      message: `"${loc.name}" will be permanently removed. Locations with cameras, RFID readers, or employees assigned cannot be deleted — move those first.`,
+      confirmLabel: 'Delete location',
+    })
+    if (ok) deleteLocation.mutate(loc.id, { onSuccess: closePanel })
+  }
+
+  const deleting =
+    deleteOrg.isPending || deleteBranch.isPending || deleteDept.isPending || deleteLocation.isPending
   const saving =
     createOrg.isPending ||
     updateOrg.isPending ||
     createBranch.isPending ||
     updateBranch.isPending ||
     createDept.isPending ||
-    updateDept.isPending
+    updateDept.isPending ||
+    createLocation.isPending ||
+    updateLocation.isPending
 
   const rowActions = (
     entity: EntityTab,
-    record: Organization | Branch | Department,
+    record: Organization | Branch | Department | Location,
     onDelete: () => void,
     allowDelete: boolean
   ) => {
@@ -547,7 +685,7 @@ export function TenancyDirectory() {
               key: 'actions',
               header: '',
               align: 'right',
-              cell: (o) => rowActions('organizations', o, () => removeOrganization(o), canCreateOrg),
+              cell: (o) => rowActions('organizations', o, () => removeOrganization(o), canDeleteOrg),
             },
           ]}
         />
@@ -649,6 +787,48 @@ export function TenancyDirectory() {
         />
       )}
 
+      {tab === 'locations' && (
+        <DataTable
+          data={filteredLocations}
+          rowKey={(l) => l.id}
+          loading={locationsLoading}
+          pageSize={PAGE_SIZE}
+          onRowClick={canManage.locations ? (l) => openPanel('locations', l) : undefined}
+          empty={query || orgFilter ? 'No locations match your filters' : 'No locations yet'}
+          columns={[
+            {
+              key: 'name',
+              header: 'Name',
+              sortable: true,
+              cell: (l) => <span className="font-medium text-slate-100">{l.name}</span>,
+            },
+            {
+              key: 'branch',
+              header: 'Branch',
+              sortable: true,
+              sortValue: (l) => l.branch?.name ?? '',
+              cell: (l) => l.branch?.name ?? <span className="text-slate-600">—</span>,
+            },
+            {
+              key: 'address',
+              header: 'Address',
+              className: 'max-w-[16rem]',
+              cell: (l) => (
+                <span className="block truncate text-slate-400">{l.address || '—'}</span>
+              ),
+            },
+            { key: 'timezone', header: 'Timezone', width: '9rem', className: 'text-slate-400' },
+            { key: 'status', header: 'Status', width: '6.5rem', cell: (l) => <StatusBadge active={l.is_active} /> },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right',
+              cell: (l) => rowActions('locations', l, () => removeLocation(l), true),
+            },
+          ]}
+        />
+      )}
+
       <SidePanel
         open={panelOpen}
         title={panelTitle}
@@ -675,6 +855,7 @@ export function TenancyDirectory() {
           <OrganizationForm
             key={(panel.record as Organization | null)?.id ?? 'new'}
             record={panel.record as Organization | null}
+            allowDeactivate={orgs.length > 1}
             onSubmit={(values) => {
               const record = panel.record as Organization | null
               if (record) updateOrg.mutate({ id: record.id, ...values }, { onSuccess: closePanel })
@@ -710,6 +891,23 @@ export function TenancyDirectory() {
               const record = panel.record as Department | null
               if (record) updateDept.mutate({ id: record.id, ...values }, { onSuccess: closePanel })
               else createDept.mutate(values, { onSuccess: closePanel })
+            }}
+          />
+        )}
+        {panel?.entity === 'locations' && (
+          <LocationForm
+            key={(panel.record as Location | null)?.id ?? 'new'}
+            record={panel.record as Location | null}
+            organizations={orgs}
+            branches={branchList}
+            showOrgPicker={showOrgPicker}
+            defaultOrgId={defaultOrgId}
+            orgPinned={orgPinned}
+            onSubmit={(values) => {
+              const record = panel.record as Location | null
+              if (record)
+                updateLocation.mutate({ id: record.id, ...values }, { onSuccess: closePanel })
+              else createLocation.mutate(values, { onSuccess: closePanel })
             }}
           />
         )}

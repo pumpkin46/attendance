@@ -145,7 +145,7 @@ export default function RfidPage() {
     <div>
       <PageHeader
         title="RFID Integration"
-        description="Register readers, assign cards to employees, and process tap events for attendance."
+        description="Manage RFID readers and employee cards for badge-based attendance."
         actions={
           <div className="flex gap-2">
             <Button

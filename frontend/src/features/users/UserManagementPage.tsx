@@ -617,7 +617,7 @@ export default function UserManagementPage() {
     <div>
       <PageHeader
         title="Users & Permissions"
-        description="Manage accounts, assign roles, and control what each role can access."
+        description="Manage user accounts, roles, and permissions."
       />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'users' ? <UsersTab /> : <RolesTab />}

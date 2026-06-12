@@ -168,7 +168,7 @@ export default function EnrollmentPage() {
     <div>
       <PageHeader
         title="Face Enrollment"
-        description="Capture all required angles and expressions. Blurry, dark, occluded, multi-face, and low-resolution images are rejected automatically."
+        description="Guided face capture for every required angle; low-quality images are rejected automatically."
         actions={<Badge tone="neutral">Guided mode</Badge>}
       />
 

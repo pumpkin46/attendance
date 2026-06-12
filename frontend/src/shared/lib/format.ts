@@ -40,6 +40,25 @@ export function initials(name?: string | null): string {
   return initialsOf(parts[0], parts[1])
 }
 
+/** Normalize any text to a `xxx-xxx-xxxx` phone number (partial while typing), max 10 digits. */
+export function formatPhone(text: string): string {
+  const d = text.replace(/\D/g, '').slice(0, 10)
+  if (d.length <= 3) return d
+  if (d.length <= 6) return `${d.slice(0, 3)}-${d.slice(3)}`
+  return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`
+}
+
+/**
+ * Normalize any text to an ID number (partial while typing), max 10 digits:
+ * `xx xxxxxx` (8 digits) or `xxx xxxxxxx` (9-10 digits — the longer layout).
+ */
+export function formatIdNumber(text: string): string {
+  const d = text.replace(/\D/g, '').slice(0, 10)
+  if (d.length <= 2) return d
+  if (d.length <= 8) return `${d.slice(0, 2)} ${d.slice(2)}`
+  return `${d.slice(0, 3)} ${d.slice(3)}`
+}
+
 /** Badge tone for an attendance status. */
 export function attendanceStatusTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
   if (status === 'present') return 'ok'

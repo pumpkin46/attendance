@@ -8,7 +8,7 @@
  * checks via `useAuth().hasPermission`, which short-circuits for super_admin.
  */
 export const ROUTE_PERMISSIONS: Record<string, string> = {
-  '/security-monitoring': 'security.monitor',
+  '/reports': 'security.monitor',
   '/employees': 'employees.manage',
   '/enrollment': 'employees.manage',
   '/enrollment-simple': 'employees.manage',
@@ -17,7 +17,6 @@ export const ROUTE_PERMISSIONS: Record<string, string> = {
   '/anomalies': 'reports.view',
   '/cameras': 'cameras.manage',
   '/rfid': 'rfid.manage',
-  '/reports': 'reports.view',
   '/audit-logs': 'audit.view',
   '/security': 'security.view',
   '/user-management': 'users.manage',

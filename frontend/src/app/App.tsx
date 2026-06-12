@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from '@/features/auth/ProtectedRoute'
 import { RequirePermission } from '@/features/auth/RequirePermission'
 import { ErrorBoundary } from '@/shared/components/ErrorBoundary'
@@ -27,7 +27,6 @@ const ReportsPage = lazy(() => import('@/features/reports/ReportsPage'))
 const UnknownFacesPage = lazy(() => import('@/features/recognition/UnknownFacesPage'))
 const AuditLogsPage = lazy(() => import('@/features/audit/AuditLogsPage'))
 const SecurityTenancyPage = lazy(() => import('@/features/security/SecurityTenancyPage'))
-const SecurityMonitoringPage = lazy(() => import('@/features/security/SecurityMonitoringPage'))
 const RecognitionEnginePage = lazy(() => import('@/features/recognition/RecognitionEnginePage'))
 const PrivacyPage = lazy(() => import('@/features/privacy/PrivacyPage'))
 const ProfilePage = lazy(() => import('@/features/auth/ProfilePage'))
@@ -84,7 +83,8 @@ export default function App() {
                 <Route path="audit-logs" element={guard('/audit-logs', <AuditLogsPage />)} />
                 <Route path="security" element={guard('/security', <SecurityTenancyPage />)} />
                 <Route path="user-management" element={guard('/user-management', <UserManagementPage />)} />
-                <Route path="security-monitoring" element={guard('/security-monitoring', <SecurityMonitoringPage />)} />
+                {/* The AI security monitoring page moved to /reports; keep old links working. */}
+                <Route path="security-monitoring" element={<Navigate to="/reports" replace />} />
                 <Route path="recognition-engine" element={guard('/recognition-engine', <RecognitionEnginePage />)} />
                 <Route path="privacy" element={<PrivacyPage />} />
                 <Route path="profile" element={<ProfilePage />} />

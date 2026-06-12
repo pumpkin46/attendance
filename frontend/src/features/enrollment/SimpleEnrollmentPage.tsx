@@ -88,7 +88,7 @@ export default function SimpleEnrollmentPage() {
     <div>
       <PageHeader
         title="Quick Face Register"
-        description="Pick an employee, take one or more clear photos of a single face, and save. No guided pose steps required."
+        description="Enroll an employee's face from a few clear photos, without the guided capture flow."
         actions={<Badge tone="neutral">Simple mode</Badge>}
       />
 

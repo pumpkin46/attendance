@@ -334,7 +334,7 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
           <div>
             <h1 className="text-2xl font-semibold">Live recognition</h1>
             <p className="mt-0.5 text-sm text-slate-400">
-              FR-017 anti-spoof + FR-018 blink/head-movement active liveness
+              Walk-up check-in with anti-spoofing and active liveness verification.
             </p>
           </div>
         </div>

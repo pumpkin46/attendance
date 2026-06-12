@@ -253,7 +253,7 @@ export default function AnomaliesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Attendance Anomalies"
-        description="AI-powered detection of unusual patterns — rules plus Isolation Forest ML"
+        description="AI-assisted detection of unusual attendance patterns."
         actions={
           <Button onClick={runDetection} isLoading={detection.isPending}>
             Run detection

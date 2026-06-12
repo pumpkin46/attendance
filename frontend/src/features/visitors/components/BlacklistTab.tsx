@@ -3,6 +3,7 @@ import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
 import { Combobox } from '@/shared/ui/Combobox'
+import { IdNumberInput } from '@/shared/ui/IdNumberInput'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { DataTable } from '@/shared/ui/DataTable'
@@ -44,7 +45,7 @@ export function BlacklistTab() {
           </Label>
           <Label>
             ID number
-            <Input value={form.id_number} onChange={(e) => setForm({ ...form, id_number: e.target.value })} />
+            <IdNumberInput value={form.id_number} onChange={(id_number) => setForm({ ...form, id_number })} />
           </Label>
           <Label>
             Reason

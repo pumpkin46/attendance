@@ -313,7 +313,7 @@ export default function AuditLogsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Audit Logs"
-        description="Immutable, GDPR-ready trail of every sensitive action — who did what, when and from where"
+        description="A complete, immutable record of every sensitive action in the system."
         actions={
           <>
             <Button
