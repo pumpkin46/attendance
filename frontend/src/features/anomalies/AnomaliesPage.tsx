@@ -344,7 +344,8 @@ export default function AnomaliesPage() {
       )}
 
       <Card padding={false} className="overflow-hidden">
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 p-4">
+        {/* Combobox roots are w-full — size them via wrapper divs. */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 p-3">
           <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950/60 p-0.5" role="group" aria-label="Filter by status">
             {STATUS_TABS.map((tab) => (
               <button
@@ -365,14 +366,20 @@ export default function AnomaliesPage() {
             ))}
           </div>
 
-          <Combobox value={typeFilter} onChange={(v) => setFilter(setTypeFilter, v)} className="min-w-44">
-            <option value="">All types</option>
-            {Object.entries(TYPE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Combobox>
+          <div className="w-44">
+            <Combobox
+              aria-label="Filter by anomaly type"
+              value={typeFilter}
+              onChange={(v) => setFilter(setTypeFilter, v)}
+            >
+              <option value="">All types</option>
+              {Object.entries(TYPE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Combobox>
+          </div>
 
           {hasFilters && (
             <button
@@ -388,8 +395,8 @@ export default function AnomaliesPage() {
             </button>
           )}
 
-          <span className="ml-auto text-sm text-slate-500">
-            {list?.total ?? 0} {(list?.total ?? 0) === 1 ? 'result' : 'results'}
+          <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-slate-500">
+            {(list?.total ?? 0).toLocaleString()} {(list?.total ?? 0) === 1 ? 'result' : 'results'}
           </span>
         </div>
 

@@ -44,9 +44,10 @@ def _seed_password(env_var: str, label: str) -> str:
 async def seed():
     from app.models.organization import Organization, Branch, Department
     from app.models.location import Location
-    from app.models.user import User, Role, Permission, role_permission, role_user
+    from app.models.user import User
     from app.models.employee import Employee
     from app.models.attendance import AttendancePolicy, Shift
+    from app.services.bootstrap import ensure_roles_and_permissions
 
     async with async_session_factory() as db:
         existing = (await db.execute(select(Organization).limit(1))).scalar_one_or_none()
@@ -70,65 +71,9 @@ async def seed():
         db.add(location)
         await db.flush()
 
-        permissions_data = [
-            ("employees.manage", "Manage Employees"),
-            ("attendance.manage", "Manage Attendance"),
-            ("shifts.manage", "Manage Shifts"),
-            ("holidays.manage", "Manage Holidays"),
-            ("leave.approve", "Approve Leave"),
-            ("cameras.manage", "Manage Cameras"),
-            ("rfid.manage", "Manage RFID"),
-            ("recognition.view", "View Recognition Events"),
-            ("recognition.manage", "Manage Recognition Engine"),
-            ("reports.view", "View Reports"),
-            ("reports.export", "Export Reports"),
-            ("audit.view", "View Audit Logs"),
-            ("organizations.manage", "Manage Organizations"),
-            ("branches.manage", "Manage Branches"),
-            ("departments.manage", "Manage Departments"),
-            ("security.view", "View Security Configuration"),
-            ("building.manage", "Manage Smart Building Integrations"),
-            ("security.monitor", "AI Security Monitoring"),
-            ("visitors.manage", "Manage Visitors"),
-            ("visitors.view", "View Visitors"),
-            ("users.manage", "Manage Users"),
-            ("roles.manage", "Manage Roles & Permissions"),
-        ]
-
-        perm_map = {}
-        for name, label in permissions_data:
-            p = Permission(name=name, label=label)
-            db.add(p)
-            await db.flush()
-            perm_map[name] = p
-
-        all_except_org_manage = [p for name, p in perm_map.items() if name != "organizations.manage"]
-
-        roles_data = {
-            "super_admin": ("Super Admin", []),
-            "org_admin": ("Organization Admin", all_except_org_manage),
-            "hr_manager": ("HR Manager", [perm_map[n] for n in [
-                "employees.manage", "attendance.manage", "shifts.manage", "holidays.manage",
-                "leave.approve", "reports.view", "reports.export", "branches.manage", "departments.manage",
-            ]]),
-            "supervisor": ("Supervisor", [perm_map[n] for n in [
-                "attendance.manage", "reports.view", "leave.approve",
-            ]]),
-            "employee": ("Employee", []),
-            "security_officer": ("Security Officer", [perm_map[n] for n in [
-                "cameras.manage", "rfid.manage", "recognition.view", "recognition.manage",
-                "reports.view", "security.view", "building.manage", "security.monitor",
-                "visitors.manage", "visitors.view",
-            ]]),
-        }
-
-        role_map = {}
-        for name, (label, perms) in roles_data.items():
-            r = Role(name=name, label=label)
-            r.permissions = perms
-            db.add(r)
-            await db.flush()
-            role_map[name] = r
+        # Canonical roles/permissions live in app.services.bootstrap (shared
+        # with the public /setup wizard).
+        role_map = await ensure_roles_and_permissions(db)
 
         super_admin = User(
             organization_id=None,

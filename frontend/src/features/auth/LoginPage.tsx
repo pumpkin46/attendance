@@ -1,5 +1,6 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate } from 'react-router-dom'
+import { api } from '@/shared/api/client'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { Button } from '@/shared/ui/Button'
 import { AppLogo } from '@/shared/components/AppLogo'
@@ -54,12 +55,22 @@ function Feature({ icon, title, desc }: { icon: ReactNode; title: string; desc: 
 
 export default function LoginPage() {
   const { user, login, loading } = useAuth()
-  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@attendance.local' : '')
-  const [password, setPassword] = useState(import.meta.env.DEV ? 'password' : '')
+  const [email, setEmail] = useState(import.meta.env.DEV ? '' : '')
+  const [password, setPassword] = useState(import.meta.env.DEV ? '' : '')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [needsSetup, setNeedsSetup] = useState(false)
 
+  // Fresh install (no admin account yet) → run the first-time setup wizard.
+  useEffect(() => {
+    api
+      .get<{ needs_setup: boolean }>('/setup/status')
+      .then((r) => setNeedsSetup(r.data.needs_setup))
+      .catch(() => {})
+  }, [])
+
+  if (needsSetup) return <Navigate to="/setup" replace />
   if (!loading && user) return <Navigate to="/" replace />
 
   const handleSubmit = async (e: FormEvent) => {

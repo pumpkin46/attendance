@@ -35,6 +35,7 @@ const PrivacyPage = lazy(() => import('@/features/privacy/PrivacyPage'))
 const ProfilePage = lazy(() => import('@/features/auth/ProfilePage'))
 const LoginPage = lazy(() => import('@/features/auth/LoginPage'))
 const RegisterPage = lazy(() => import('@/features/auth/RegisterPage'))
+const SetupPage = lazy(() => import('@/features/auth/SetupPage'))
 const UserManagementPage = lazy(() => import('@/features/users/UserManagementPage'))
 
 function FullScreenFallback() {
@@ -55,6 +56,7 @@ export default function App() {
           <BrowserRouter>
           <Suspense fallback={<FullScreenFallback />}>
             <Routes>
+              <Route path="/setup" element={<SetupPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route

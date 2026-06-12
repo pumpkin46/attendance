@@ -4,12 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import dispose_engine
 from app.core.errors import register_exception_handlers
 from app.core.redis import close_redis
 from app.realtime.hub import get_hub
 
 from app.api.routes import router as ai_router
+from app.api.setup import router as setup_router
 from app.api.auth import router as auth_router
 from app.api.users import router as users_router
 from app.api.organizations import router as org_router
@@ -62,7 +63,7 @@ async def lifespan(app: FastAPI):
 
     await get_hub().stop_subscriber()
     await close_redis()
-    await engine.dispose()
+    await dispose_engine()
 
 
 app = FastAPI(title=settings.app_name, version="2.0.0", lifespan=lifespan)
@@ -86,6 +87,7 @@ app.add_middleware(
 app.include_router(ai_router)
 
 # Business API routes
+app.include_router(setup_router)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(org_router)
