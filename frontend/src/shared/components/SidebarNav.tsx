@@ -37,7 +37,7 @@ const navGroups: NavGroup[] = [
   },
   {
     id: 'access',
-    title: 'Access & Visitors',
+    title: 'Visitors & Security',
     icon: (
       <Icon>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -47,21 +47,6 @@ const navGroups: NavGroup[] = [
     ),
     items: [
       { to: '/visitors', label: 'Visitors' },
-      { to: '/access-control', label: 'Access Control' },
-    ],
-  },
-  {
-    id: 'facilities',
-    title: 'Facilities & Security',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M3 21V9l9-6 9 6v12M9 21V12h6v9" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/smart-building', label: 'Smart Building' },
       { to: '/security-monitoring', label: 'AI Security' },
     ],
   },

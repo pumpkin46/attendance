@@ -80,8 +80,7 @@ UI runs at **http://127.0.0.1:5173** (proxies API to port 8000 via `VITE_API_URL
 | Camera Management | Multi-camera, heartbeat monitoring |
 | Edge camera mode | On-device backend + FAISS embedding sync |
 | Audit Logs | Sensitive actions logged |
-| Smart Building Integration | Webhook connectors for BMS events |
-| AI Security Monitoring | Unknown persons, spoof, access denied alerts |
+| AI Security Monitoring | Unknown persons, spoof, after-hours and tailgating alerts |
 | Autonomous Visitor Kiosks | Self-service walk-in, face enroll, badge check-in |
 
 ## Recognition flow

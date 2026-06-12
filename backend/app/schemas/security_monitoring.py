@@ -33,7 +33,6 @@ class SecurityAlertOut(BaseModel):
     description: str | None = None
     camera_id: int | None = None
     employee_id: int | None = None
-    access_point_id: int | None = None
     recognition_event_id: int | None = None
     camera: AlertCameraOut | None = None
     employee: AlertEmployeeOut | None = None

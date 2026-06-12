@@ -31,7 +31,6 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("branches.manage", "Manage Branches"),
     ("departments.manage", "Manage Departments"),
     ("security.view", "View Security Configuration"),
-    ("building.manage", "Manage Smart Building Integrations"),
     ("security.monitor", "AI Security Monitoring"),
     ("visitors.manage", "Manage Visitors"),
     ("visitors.view", "View Visitors"),
@@ -58,7 +57,7 @@ ROLE_DEFS: dict[str, tuple[str, list[str] | None]] = {
         "Security Officer",
         [
             "cameras.manage", "rfid.manage", "recognition.view", "recognition.manage",
-            "reports.view", "security.view", "building.manage", "security.monitor",
+            "reports.view", "security.view", "security.monitor",
             "visitors.manage", "visitors.view",
         ],
     ),

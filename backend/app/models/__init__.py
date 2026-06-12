@@ -17,7 +17,6 @@ from app.models.camera import Camera, CameraHealthLog
 from app.models.recognition import RecognitionEvent
 from app.models.rfid import RfidReader, RfidCard, RfidEvent
 from app.models.edge import EdgeDevice
-from app.models.access import AccessPoint, AccessEvent
 from app.models.visitor import (
     Visitor,
     VisitorPhoto,
@@ -32,7 +31,6 @@ from app.models.visitor import (
     VisitorBlacklist,
     VisitorLog,
 )
-from app.models.building import BuildingConnector, BuildingEvent
 from app.models.security import SecurityAlert
 from app.models.audit import AuditLog
 from app.models.token import PersonalAccessToken
@@ -74,8 +72,6 @@ __all__ = [
     "RfidCard",
     "RfidEvent",
     "EdgeDevice",
-    "AccessPoint",
-    "AccessEvent",
     "Visitor",
     "VisitorPhoto",
     "VisitorDocument",
@@ -88,8 +84,6 @@ __all__ = [
     "VisitorNotification",
     "VisitorBlacklist",
     "VisitorLog",
-    "BuildingConnector",
-    "BuildingEvent",
     "SecurityAlert",
     "AuditLog",
     "PersonalAccessToken",

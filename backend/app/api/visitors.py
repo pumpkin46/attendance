@@ -723,9 +723,7 @@ async def set_visitor_access_permissions(
     user: CurrentUser,
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
-    perms = await visitor_service.set_access_permissions(
-        db, visitor, body.zones, body.access_point_id
-    )
+    perms = await visitor_service.set_access_permissions(db, visitor, body.zones)
     await log_action(
         db,
         user_id=user.id,

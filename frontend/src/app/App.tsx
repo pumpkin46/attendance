@@ -11,7 +11,6 @@ import { ROUTE_PERMISSIONS } from '@/app/access'
 import AppLayout from '@/layouts/AppLayout'
 
 const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'))
-const AccessControlPage = lazy(() => import('@/features/access/AccessControlPage'))
 const VisitorsPage = lazy(() => import('@/features/visitors/VisitorsPage'))
 const EmployeesPage = lazy(() => import('@/features/employees/EmployeesPage'))
 const EnrollmentPage = lazy(() => import('@/features/enrollment/EnrollmentPage'))
@@ -28,7 +27,6 @@ const ReportsPage = lazy(() => import('@/features/reports/ReportsPage'))
 const UnknownFacesPage = lazy(() => import('@/features/recognition/UnknownFacesPage'))
 const AuditLogsPage = lazy(() => import('@/features/audit/AuditLogsPage'))
 const SecurityTenancyPage = lazy(() => import('@/features/security/SecurityTenancyPage'))
-const SmartBuildingPage = lazy(() => import('@/features/building/SmartBuildingPage'))
 const SecurityMonitoringPage = lazy(() => import('@/features/security/SecurityMonitoringPage'))
 const RecognitionEnginePage = lazy(() => import('@/features/recognition/RecognitionEnginePage'))
 const PrivacyPage = lazy(() => import('@/features/privacy/PrivacyPage'))
@@ -69,7 +67,6 @@ export default function App() {
               >
                 <Route index element={<DashboardPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="access-control" element={guard('/access-control', <AccessControlPage />)} />
                 <Route path="visitors" element={<VisitorsPage />} />
                 <Route path="employees" element={guard('/employees', <EmployeesPage />)} />
                 <Route path="enrollment" element={guard('/enrollment', <EnrollmentPage />)} />
@@ -87,7 +84,6 @@ export default function App() {
                 <Route path="audit-logs" element={guard('/audit-logs', <AuditLogsPage />)} />
                 <Route path="security" element={guard('/security', <SecurityTenancyPage />)} />
                 <Route path="user-management" element={guard('/user-management', <UserManagementPage />)} />
-                <Route path="smart-building" element={guard('/smart-building', <SmartBuildingPage />)} />
                 <Route path="security-monitoring" element={guard('/security-monitoring', <SecurityMonitoringPage />)} />
                 <Route path="recognition-engine" element={guard('/recognition-engine', <RecognitionEnginePage />)} />
                 <Route path="privacy" element={<PrivacyPage />} />

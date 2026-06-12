@@ -67,9 +67,6 @@ class SecurityAlert(Base, TimestampMixin):
     recognition_event_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("recognition_events.id", ondelete="SET NULL"), nullable=True
     )
-    access_point_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("access_points.id", ondelete="SET NULL"), nullable=True
-    )
     acknowledged_by: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -89,7 +86,6 @@ class SecurityAlert(Base, TimestampMixin):
     employee: Mapped["Employee | None"] = relationship(lazy="selectin")
     visitor: Mapped["Visitor | None"] = relationship(lazy="selectin")
     recognition_event: Mapped["RecognitionEvent | None"] = relationship(lazy="selectin")
-    access_point: Mapped["AccessPoint | None"] = relationship(lazy="selectin")
 
     # The API exposes `description` / `metadata_json`; the table predates those
     # names (`message` / `metadata`). Properties bridge the two so Pydantic's

@@ -9,6 +9,7 @@ import { DatePicker } from '@/shared/ui/DatePicker'
 import { Input } from '@/shared/ui/Input'
 import { Label } from '@/shared/ui/Label'
 import { SidePanel } from '@/shared/ui/SidePanel'
+import { Textarea } from '@/shared/ui/Textarea'
 import { useEmployeeOptions, useRegisterVisitor } from '@/features/visitors/api/queries'
 import { VISIT_TYPES, VISITOR_CATEGORIES } from '@/features/visitors/types'
 
@@ -185,7 +186,13 @@ export function VisitorRegisterPanel({
           </Label>
           <Label className="sm:col-span-2">
             Visit description
-            <Input value={form.visit_description} onChange={(e) => setForm({ ...form, visit_description: e.target.value })} />
+            <Textarea
+              value={form.visit_description}
+              onChange={(e) => setForm({ ...form, visit_description: e.target.value })}
+              placeholder="Agenda, meeting room, equipment they bring along…"
+              maxLength={500}
+              showCount
+            />
           </Label>
           <Label>
             Visit start

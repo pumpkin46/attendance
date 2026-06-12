@@ -31,7 +31,7 @@ src/
     tenant/            #   tenantSlice (super-admin org context)
     realtime/          #   WebSocket -> react-query cache invalidation
     visitors/          #   VisitorsPage + components/ (tabs) + api/queries + types
-    cameras/  shifts/  enrollment/  access/  building/  security/   # api/ + types + page(s)
+    cameras/  shifts/  enrollment/  security/   # api/ + types + page(s)
     dashboard/ monitoring/ employees/ kiosk/ recognition/ attendance/
     anomalies/ rfid/ reports/ audit/
   shared/              # reusable, feature-agnostic code

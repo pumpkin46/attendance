@@ -18,7 +18,6 @@ async def create_live_event(
     camera_id: int | None = None,
     employee_id: int | None = None,
     visitor_id: int | None = None,
-    access_point_id: int | None = None,
 ) -> None:
     event = LiveEvent(
         organization_id=organization_id,
@@ -28,7 +27,6 @@ async def create_live_event(
         camera_id=camera_id,
         employee_id=employee_id,
         visitor_id=visitor_id,
-        access_point_id=access_point_id,
         occurred_at=datetime.now(timezone.utc),
     )
     db.add(event)
@@ -43,7 +41,6 @@ async def create_live_event(
             "camera_id": camera_id,
             "employee_id": employee_id,
             "visitor_id": visitor_id,
-            "access_point_id": access_point_id,
             "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
         },
     )

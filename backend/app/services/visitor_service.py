@@ -29,7 +29,6 @@ from app.models.visitor import (
     VisitorNotification,
     VisitorStatus,
 )
-from app.models.access import AccessPoint
 from app.services import face_service
 
 
@@ -417,7 +416,6 @@ async def set_access_permissions(
     db: AsyncSession,
     visitor: Visitor,
     zones: list[str],
-    access_point_id: int | None = None,
 ) -> list[VisitorAccessPermission]:
     await db.execute(
         delete(VisitorAccessPermission).where(
@@ -434,7 +432,6 @@ async def set_access_permissions(
             continue
         perm = VisitorAccessPermission(
             visitor_id=visitor.id,
-            access_point_id=access_point_id,
             zone_name=zone,
             granted=True,
             expires_at=expires,
@@ -443,82 +440,6 @@ async def set_access_permissions(
         perms.append(perm)
     await db.flush()
     return perms
-
-
-async def verify_visitor_door_access(
-    db: AsyncSession,
-    visitor: Visitor,
-    access_point: AccessPoint,
-) -> tuple[bool, str | None]:
-    """Return (granted, deny_reason)."""
-    now = _now()
-
-    if visitor.status not in (VisitorStatus.checked_in, VisitorStatus.scheduled):
-        return False, f"Visitor status is {visitor.status.value}"
-
-    if visitor.approval_status not in (
-        ApprovalStatus.approved,
-        ApprovalStatus.security_approved,
-    ):
-        return False, "Visitor not approved"
-
-    if visitor.visit_end_at < now:
-        return False, "Visit expired"
-
-    if visitor.face_expires_at and visitor.face_expires_at < now:
-        return False, "Face access expired"
-
-    if not visitor.face_registered:
-        return False, "Face not enrolled"
-
-    perms = list(
-        (await db.execute(
-            select(VisitorAccessPermission).where(
-                VisitorAccessPermission.visitor_id == visitor.id,
-                VisitorAccessPermission.granted == True,  # noqa: E712
-            )
-        )).scalars()
-    )
-
-    if perms:
-        allowed = False
-        for perm in perms:
-            if perm.expires_at and perm.expires_at < now:
-                continue
-            if perm.access_point_id == access_point.id:
-                allowed = True
-                break
-            if perm.zone_name.lower() == access_point.name.lower():
-                allowed = True
-                break
-            if perm.zone_name.lower() in ("all", "reception", "building"):
-                allowed = True
-                break
-        if not allowed:
-            return False, f"Not authorized for {access_point.name}"
-    # No explicit permissions = allow reception-level access points only
-    elif access_point.name.lower() not in ("reception", "main entrance", "lobby", "visitor entrance"):
-        return False, "No access permissions for this zone"
-
-    return True, None
-
-
-async def grant_visitor_zone_access(
-    db: AsyncSession,
-    visitor: Visitor,
-    access_point: AccessPoint,
-) -> Visitor:
-    visitor.current_zone = access_point.name
-    await log_visitor_event(
-        db,
-        visitor.id,
-        "zone_entered",
-        f"Entered {access_point.name}",
-        meta={"access_point_id": access_point.id},
-    )
-    await db.flush()
-    await db.refresh(visitor)
-    return visitor
 
 
 async def approve_visitor(

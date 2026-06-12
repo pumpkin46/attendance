@@ -131,8 +131,8 @@ export default function LoginPage() {
                   <path d="M2 10h20M6 15h4" />
                 </svg>
               }
-              title="RFID & access control"
-              desc="Badge access with zone-level permissions."
+              title="RFID attendance"
+              desc="Badge-based check-in alongside face recognition."
             />
             <Feature
               icon={

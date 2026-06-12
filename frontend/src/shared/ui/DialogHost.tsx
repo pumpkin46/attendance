@@ -2,8 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/shared/ui/Button'
 import { Input } from '@/shared/ui/Input'
+import { Textarea } from '@/shared/ui/Textarea'
 import { registerDialogHost, type DialogRequest } from '@/shared/ui/dialogs'
-import { inputClass } from '@/shared/lib/inputClass'
 import { cn } from '@/shared/lib/cn'
 
 /** Must match the dialog-out / backdrop-out animation durations in index.css. */
@@ -151,12 +151,11 @@ export function DialogHost() {
                   <span className="mb-1.5 block text-xs font-medium text-slate-300">{options.label}</span>
                 )}
                 {options.multiline ? (
-                  <textarea
+                  <Textarea
                     ref={(el) => {
                       fieldRef.current = el
                     }}
                     rows={3}
-                    className={inputClass('resize-none')}
                     value={value}
                     placeholder={options.placeholder}
                     onChange={(e) => setValue(e.target.value)}

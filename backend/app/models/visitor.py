@@ -339,9 +339,6 @@ class VisitorAccessPermission(Base, TimestampMixin):
     visitor_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("visitors.id", ondelete="CASCADE")
     )
-    access_point_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("access_points.id", ondelete="CASCADE"), nullable=True
-    )
     zone_name: Mapped[str] = mapped_column(String(128))
     granted: Mapped[bool] = mapped_column(Boolean, server_default="1")
     expires_at: Mapped[datetime | None] = mapped_column(
@@ -349,7 +346,6 @@ class VisitorAccessPermission(Base, TimestampMixin):
     )
 
     visitor: Mapped[Visitor] = relationship(back_populates="access_permissions", lazy="selectin")
-    access_point: Mapped["AccessPoint | None"] = relationship(lazy="selectin")
 
 
 class VisitorCheckin(Base):

@@ -39,6 +39,18 @@ export function OrgSwitcher() {
     queryClient.invalidateQueries()
   }
 
+  // The persisted scope can outlive its organization (deleted from another
+  // session or by another admin). Self-heal: drop the stale context so writes
+  // don't bounce off the backend's tenant validation.
+  const orgIdStale =
+    orgs.length > 0 && orgId != null && !orgs.some((o) => String(o.id) === orgId)
+  useEffect(() => {
+    if (orgIdStale) {
+      dispatch(clearOrg())
+      queryClient.invalidateQueries()
+    }
+  }, [orgIdStale, dispatch, queryClient])
+
   // Single-organization deployment: pin the context to the lone org. No cache
   // invalidation needed — the backend already defaults to this same org when
   // no tenant header is sent, so earlier responses hold identical data.

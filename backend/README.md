@@ -49,7 +49,7 @@ Health: `GET http://127.0.0.1:8000/health` · API health: `GET /api/v1/health`
 
 ### Business API (`/api/v1/...`)
 
-Auth, employees, attendance, shifts, cameras, RFID, visitors, access control, reports, audit, privacy, smart building, security monitoring, edge devices, and more — see route modules under `app/api/`.
+Auth, employees, attendance, shifts, cameras, RFID, visitors, reports, audit, privacy, security monitoring, edge devices, and more — see route modules under `app/api/`.
 
 ### Face recognition (`/api/v1/...`)
 

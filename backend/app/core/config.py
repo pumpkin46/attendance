@@ -179,13 +179,6 @@ class Settings(BaseSettings):
     visitor_badge_prefix: str = "V"
     visitor_upload_dir: str = "data/uploads"
 
-    # ── Building integration ──────────────────────────────────────────────
-    building_integration_enabled: bool = True
-    building_webhook_timeout: int = 5
-    building_business_hours_start: str = "08:00"
-    building_business_hours_end: str = "18:00"
-    building_business_timezone: str = "UTC"
-
     # ── Security monitoring ───────────────────────────────────────────────
     security_monitoring_enabled: bool = True
     security_after_hours_start: str = "20:00"

@@ -24,10 +24,8 @@ from app.api.recognition import router as recognition_router
 from app.api.engine import router as engine_router
 from app.api.monitoring import router as monitoring_router
 from app.api.rfid import router as rfid_router
-from app.api.access import router as access_router
 from app.api.visitors import router as visitors_router, start_visitor_expiry_task
 from app.api.uploads import router as uploads_router
-from app.api.building import router as building_router
 from app.api.security_monitoring import router as security_monitoring_router
 from app.api.reports import router as reports_router
 from app.api.audit import router as audit_router
@@ -101,10 +99,8 @@ app.include_router(recognition_router)
 app.include_router(engine_router)
 app.include_router(monitoring_router)
 app.include_router(rfid_router)
-app.include_router(access_router)
 app.include_router(visitors_router)
 app.include_router(uploads_router)
-app.include_router(building_router)
 app.include_router(security_monitoring_router)
 app.include_router(reports_router)
 app.include_router(audit_router)

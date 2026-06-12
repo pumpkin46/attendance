@@ -110,7 +110,6 @@ export interface SecurityAlert {
   description?: string | null
   camera_id?: number | null
   employee_id?: number | null
-  access_point_id?: number | null
   recognition_event_id?: number | null
   camera?: { id: number; name: string } | null
   employee?: {
@@ -173,5 +172,4 @@ export const ALERT_TYPE_LABELS: Record<string, string> = {
   spoof_attempt: 'Spoof attempt',
   after_hours_access: 'After-hours access',
   tailgating: 'Tailgating',
-  access_denied: 'Access denied',
 }

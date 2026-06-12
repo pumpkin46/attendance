@@ -14,7 +14,6 @@
 const routeLoaders: Record<string, () => Promise<unknown>> = {
   '/': () => import('@/features/dashboard/DashboardPage'),
   '/dashboard': () => import('@/features/dashboard/DashboardPage'),
-  '/access-control': () => import('@/features/access/AccessControlPage'),
   '/visitors': () => import('@/features/visitors/VisitorsPage'),
   '/employees': () => import('@/features/employees/EmployeesPage'),
   '/enrollment': () => import('@/features/enrollment/EnrollmentPage'),
@@ -31,7 +30,6 @@ const routeLoaders: Record<string, () => Promise<unknown>> = {
   '/unknown-faces': () => import('@/features/recognition/UnknownFacesPage'),
   '/audit-logs': () => import('@/features/audit/AuditLogsPage'),
   '/security': () => import('@/features/security/SecurityTenancyPage'),
-  '/smart-building': () => import('@/features/building/SmartBuildingPage'),
   '/security-monitoring': () => import('@/features/security/SecurityMonitoringPage'),
   '/recognition-engine': () => import('@/features/recognition/RecognitionEnginePage'),
   '/privacy': () => import('@/features/privacy/PrivacyPage'),

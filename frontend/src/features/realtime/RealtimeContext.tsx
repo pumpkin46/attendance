@@ -54,7 +54,7 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
 
   if (type === 'connected') return
 
-  // Recognition + access incidents feed the recognition views and the
+  // Recognition incidents feed the recognition views and the
   // security-monitoring dashboard. The monitoring page is intentionally NOT
   // invalidated here — it streams live via its own WebSocket (useMonitoringFeed),
   // so event-driven refetching would just duplicate that push.
@@ -69,11 +69,6 @@ function handleRealtimeEvent(queryClient: QueryClient, msg: RealtimeMessage) {
         toast.warning(message)
       }
     }
-    return
-  }
-
-  if (type.startsWith('access.')) {
-    invalidate(['security-monitoring'])
     return
   }
 

@@ -109,7 +109,30 @@ async def get_tenant_org_id(
     if user.has_role(settings.super_admin_role):
         header_val = request.headers.get(settings.tenant_header)
         if header_val:
-            return int(header_val)
+            try:
+                org_id = int(header_val)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid {settings.tenant_header} header",
+                )
+            # The scope is persisted client-side and can outlive the org (e.g.
+            # the org was deleted) — reject it up front with a clear message
+            # instead of letting writes die on foreign-key violations.
+            from app.models.organization import Organization
+
+            exists = await db.scalar(
+                select(Organization.id).where(Organization.id == org_id)
+            )
+            if exists is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "The selected organization no longer exists — clear or "
+                        "switch the tenant context and try again"
+                    ),
+                )
+            return org_id
         return await get_single_org_id(db)
     return user.organization_id
 

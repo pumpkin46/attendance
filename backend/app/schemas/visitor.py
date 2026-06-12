@@ -211,7 +211,6 @@ class VisitorAccessPermissionOut(BaseModel):
 
     id: int
     visitor_id: int
-    access_point_id: int | None = None
     zone_name: str
     granted: bool
     expires_at: datetime | None = None
@@ -219,7 +218,6 @@ class VisitorAccessPermissionOut(BaseModel):
 
 class AccessPermissionSet(BaseModel):
     zones: list[str]
-    access_point_id: int | None = None
 
 
 class RejectRequest(BaseModel):

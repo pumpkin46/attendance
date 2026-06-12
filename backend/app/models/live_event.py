@@ -30,13 +30,9 @@ class LiveEvent(Base):
     visitor_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("visitors.id", ondelete="SET NULL"), nullable=True
     )
-    access_point_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("access_points.id", ondelete="SET NULL"), nullable=True
-    )
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     organization: Mapped["Organization | None"] = relationship(lazy="selectin")
     camera: Mapped["Camera | None"] = relationship(lazy="selectin")
     employee: Mapped["Employee | None"] = relationship(lazy="selectin")
     visitor: Mapped["Visitor | None"] = relationship(lazy="selectin")
-    access_point: Mapped["AccessPoint | None"] = relationship(lazy="selectin")
