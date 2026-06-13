@@ -111,7 +111,8 @@ export function UserMenu({
         open={open}
         onClose={() => setOpen(false)}
         matchWidth={false}
-        className="w-64 p-1.5"
+        align="end"
+        className="w-52 p-1.5"
       >
         <div className="flex items-center gap-3 border-b border-slate-800 px-2.5 pb-3 pt-2">
           <StatusAvatar name={user.name} status={status} size="md" />
@@ -122,12 +123,6 @@ export function UserMenu({
               {role}
             </span>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2 border-b border-slate-800 px-2.5 py-2.5 text-xs">
-          <span className={cn('h-2 w-2 shrink-0 rounded-full', realtime.dot)} aria-hidden />
-          <span className="font-medium text-slate-300">{realtime.label}</span>
-          <span className="truncate text-slate-500">· {realtime.desc}</span>
         </div>
 
         {orgName && (

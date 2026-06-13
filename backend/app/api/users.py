@@ -121,6 +121,7 @@ async def create_user(
     request: Request,
     db: DbSession,
     user: require_permission("users.manage"),
+    org_id: TenantOrgId,
 ):
     existing = await db.execute(select(User.id).where(User.email == body.email))
     if existing.scalar_one_or_none() is not None:
@@ -130,7 +131,13 @@ async def create_user(
     _guard_super_admin_assignment(user, roles)
 
     is_super = user.has_role(settings.super_admin_role)
-    organization_id = body.organization_id if is_super else user.organization_id
+    if is_super:
+        # Default to the tenant context (selected tenant header, or the single
+        # active org) so a super admin's new users are never created org-less:
+        # accounts with no organization cannot use tenant-scoped endpoints.
+        organization_id = body.organization_id if body.organization_id is not None else org_id
+    else:
+        organization_id = user.organization_id
 
     target = User(
         organization_id=organization_id,

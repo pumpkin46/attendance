@@ -2,6 +2,8 @@
 
 Enterprise-grade attendance system with face recognition, liveness detection, RBAC, multi-location support, and automated check-in/out. Runs locally without Docker.
 
+> **Using the app?** The [User Guide](docs/USER_GUIDE.md) is a step-by-step walkthrough of every screen — first-run setup, sign-in, face enrollment, the check-in kiosk, attendance, devices, reports, and administration.
+
 ## Architecture
 
 ```

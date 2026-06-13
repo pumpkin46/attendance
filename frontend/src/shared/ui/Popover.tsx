@@ -10,6 +10,8 @@ interface PopoverProps {
   children: React.ReactNode
   /** Match the popover width to the anchor (default true). */
   matchWidth?: boolean
+  /** Horizontal alignment against the anchor: 'start' = left edges, 'end' = right edges (default 'start'). */
+  align?: 'start' | 'end'
   className?: string
 }
 
@@ -19,7 +21,7 @@ interface PopoverProps {
  * scroll/resize, and closes on outside click or Escape. Flips above the anchor
  * when there isn't room below.
  */
-export function Popover({ anchorRef, open, onClose, children, matchWidth = true, className }: PopoverProps) {
+export function Popover({ anchorRef, open, onClose, children, matchWidth = true, align = 'start', className }: PopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const [style, setStyle] = useState<React.CSSProperties>({ position: 'fixed', visibility: 'hidden' })
 
@@ -31,12 +33,20 @@ export function Popover({ anchorRef, open, onClose, children, matchWidth = true,
       const r = anchor.getBoundingClientRect()
       const panel = panelRef.current
       const panelH = panel?.offsetHeight ?? 0
+      const panelW = matchWidth ? r.width : panel?.offsetWidth ?? 0
       const gap = 6
+      const margin = 8
       const below = window.innerHeight - r.bottom
       const flipUp = panelH > 0 && below < panelH + gap && r.top > below
+      // Panels wider than their anchor (e.g. the user menu at the far right of
+      // the header) would otherwise run off screen; clamp to the viewport.
+      let left = align === 'end' ? r.right - panelW : r.left
+      if (panelW > 0) {
+        left = Math.max(margin, Math.min(left, window.innerWidth - panelW - margin))
+      }
       const next: React.CSSProperties = {
         position: 'fixed',
-        left: r.left,
+        left,
         top: flipUp ? Math.max(8, r.top - panelH - gap) : r.bottom + gap,
         visibility: 'visible',
         zIndex: 70,
@@ -54,7 +64,7 @@ export function Popover({ anchorRef, open, onClose, children, matchWidth = true,
       window.removeEventListener('scroll', update, true)
       window.removeEventListener('resize', update)
     }
-  }, [open, anchorRef, matchWidth])
+  }, [open, anchorRef, matchWidth, align])
 
   useEffect(() => {
     if (!open) return
