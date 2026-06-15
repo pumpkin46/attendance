@@ -89,7 +89,10 @@ export function useEnrollFace() {
     // Errors carry per-pose rejection details rendered in-page; surface them
     // there instead of the generic toast.
     meta: { silent: true },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Per-pose validation failures return HTTP 200 with success:false — don't
+      // announce a completion that didn't happen.
+      if (!data.success) return
       toast.success('Enrollment completed')
       invalidate()
     },

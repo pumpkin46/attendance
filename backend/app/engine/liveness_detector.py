@@ -48,6 +48,16 @@ class SpoofType(Enum):
     AI_GENERATED = "ai_generated"
 
 
+# Anti-spoof model (services.antispoof) reports the attack type as a string;
+# map it onto this module's SpoofType enum for LivenessResult.
+_SPOOF_TYPE_MAP = {
+    "printed_photo": SpoofType.PRINTED_PHOTO,
+    "mobile_screen": SpoofType.SCREEN_REPLAY,
+    "video_replay": SpoofType.VIDEO_REPLAY,
+    "deepfake": SpoofType.DEEPFAKE,
+}
+
+
 class LivenessAction(Enum):
     BLINK = "blink"
     SMILE = "smile"
@@ -83,27 +93,26 @@ class LivenessResult:
 
 
 class LivenessDetector:
-    """Heuristic liveness detector (passive texture/moire/color + active blink).
+    """Live-camera liveness detector.
 
-    IMPORTANT: this engine-path detector is HEURISTIC-ONLY. The passive check
-    is classical computer vision (Laplacian texture variance, FFT moire
-    detection, color-channel consistency) and the active check is blink/head
-    movement on a frame sequence. There is no ML anti-spoof model behind it:
-    ``_antispoof_session``/``_model_loaded`` are placeholders that are never
-    populated, and the ``LivenessConfig.detect_*`` flags (deepfake, face-swap,
-    AI-generated, etc.) describe aspirational capabilities that are NOT
-    enforced here. A determined deepfake/screen-replay attack can pass.
+    Passive anti-spoofing delegates to the real MiniFASNetV2 ONNX model
+    (``services.antispoof.AntiSpoofVerifier``) — the same singleton the kiosk
+    and enrollment paths use — which fuses the CNN live-probability with
+    texture/moiré/saturation heuristics under its own ``ANTISPOOF_*``
+    thresholds. If that model is unavailable, ``_passive_check`` falls back to
+    the classical heuristic below so the stage still functions (coarsely).
 
-    The kiosk path (services.liveness / services.antispoof) is where the real
-    MiniFASNet ONNX anti-spoof model runs; wire that model in here, or treat
-    this engine path as a coarse first filter only.
+    The active check (blink / head movement on a frame sequence) is heuristic
+    and only runs when a frame sequence is supplied; ``LivenessConfig.min_score``
+    (ENGINE_LIVENESS_THRESHOLD) governs that active gate and the heuristic
+    fallback. The passive pass/fail decision is owned by the anti-spoof model's
+    thresholds, not by min_score.
     """
 
     def __init__(self) -> None:
-        # Placeholders for a future ONNX anti-spoof model. Never loaded today —
-        # see the class docstring: the engine liveness path is heuristic-only.
-        self._antispoof_session = None
-        self._model_loaded = False
+        # Real passive anti-spoof model (MiniFASNetV2 ONNX), resolved lazily on
+        # first frame so importing this module never triggers a model load.
+        self._antispoof = None
 
     def verify(
         self,
@@ -126,15 +135,22 @@ class LivenessDetector:
 
         checks: dict = {"methods": []}
         passive_score = 1.0
+        passive_passed = True
         active_score = 1.0
 
         if cfg.passive_enabled:
             passive_result = self._passive_check(frame, face)
             passive_score = passive_result["score"]
+            # The anti-spoof model owns the passive pass/fail decision via its
+            # own thresholds; fall back to min_score only when no decision is
+            # reported (heuristic-only path).
+            passive_passed = passive_result.get("passed")
+            if passive_passed is None:
+                passive_passed = passive_score >= cfg.min_score
             checks["passive"] = passive_result
             checks["methods"].append("passive_antispoof")
 
-            if passive_score < cfg.min_score:
+            if not passive_passed:
                 return LivenessResult(
                     passed=False, score=passive_score, is_live=False,
                     spoof_type=passive_result.get("spoof_type"),
@@ -159,11 +175,13 @@ class LivenessDetector:
                     verification_ms=int((time.perf_counter() - t0) * 1000),
                 )
 
+        # Passive (and active, when required) gates already early-returned on
+        # failure above, so reaching here means the passive decision passed.
         final_score = passive_score
+        passed = passive_passed
         if liveness_frames:
             final_score = (passive_score * 0.6 + active_score * 0.4)
-
-        passed = final_score >= cfg.min_score
+            passed = passive_passed and final_score >= cfg.min_score
         verification_ms = int((time.perf_counter() - t0) * 1000)
 
         return LivenessResult(
@@ -177,8 +195,45 @@ class LivenessDetector:
             verification_ms=verification_ms,
         )
 
+    def _get_antispoof(self):
+        """Lazily resolve the shared MiniFASNetV2 anti-spoof verifier."""
+        if self._antispoof is None:
+            from app.services.antispoof import get_antispoof_verifier
+
+            self._antispoof = get_antispoof_verifier()
+        return self._antispoof
+
     def _passive_check(self, frame: np.ndarray, face: DetectedFace) -> dict:
-        """Passive anti-spoofing: texture analysis + model inference."""
+        """Passive anti-spoofing via the real MiniFASNetV2 model.
+
+        Delegates to services.antispoof (CNN live-probability fused with
+        texture/moiré/saturation heuristics). Falls back to the classical
+        heuristic only if the verifier raises (e.g. model file unavailable).
+        """
+        try:
+            result = self._get_antispoof().verify(frame, list(face.bbox_xyxy))
+            spoof_type = _SPOOF_TYPE_MAP.get(result.spoof_type) if result.spoof_type else None
+            reason = None
+            if not result.passed:
+                reason = result.reason or "spoof_detected"
+                if spoof_type:
+                    reason = f"{reason}:{spoof_type.value}"
+            return {
+                "score": float(result.live_score),
+                "passed": bool(result.passed),
+                "model_score": result.model_score,
+                "heuristic_score": result.heuristic_score,
+                "spoof_type": spoof_type,
+                "reason": reason,
+                "engine": "minifasnet_onnx" if result.model_score is not None else "heuristic_only",
+                "checks": result.checks,
+            }
+        except Exception as e:  # defensive: never let anti-spoof break recognition
+            logger.warning("Anti-spoof model unavailable (%s); using heuristic fallback", e)
+            return self._heuristic_passive_check(frame, face)
+
+    def _heuristic_passive_check(self, frame: np.ndarray, face: DetectedFace) -> dict:
+        """Fallback passive check: classical texture / moiré / color heuristics."""
         bbox = face.bbox_xyxy
         x1, y1, x2, y2 = [int(v) for v in bbox]
         h, w = frame.shape[:2]
@@ -187,22 +242,24 @@ class LivenessDetector:
 
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0:
-            return {"score": 0.0, "reason": "empty_crop"}
+            return {"score": 0.0, "passed": False, "reason": "empty_crop"}
 
         texture_score = self._texture_analysis(crop)
         moire_score = self._moire_detection(crop)
         color_score = self._color_consistency(crop)
 
         score = 0.4 * texture_score + 0.35 * moire_score + 0.25 * color_score
+        passed = score >= engine_config.liveness.min_score
 
         spoof_type = None
         reason = None
-        if score < engine_config.liveness.min_score:
+        if not passed:
             spoof_type = self._classify_spoof(texture_score, moire_score, color_score)
             reason = f"spoof_detected:{spoof_type.value}" if spoof_type else "spoof_detected"
 
         return {
             "score": score,
+            "passed": passed,
             "texture_score": texture_score,
             "moire_score": moire_score,
             "color_score": color_score,

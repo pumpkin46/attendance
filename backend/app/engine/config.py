@@ -58,7 +58,7 @@ class TrackingConfig:
 
 @dataclass
 class QualityConfig:
-    min_quality_score: float = 0.70
+    min_quality_score: float = 0.45
     min_blur_score: float = 0.35
     min_brightness_score: float = 0.35
     min_resolution_score: float = 0.5

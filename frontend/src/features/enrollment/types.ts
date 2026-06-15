@@ -29,6 +29,8 @@ export interface EnrollFaceResult {
   embeddings_stored: number
   enrollment_score?: number
   average_quality_score?: number
+  error?: string
+  rejected?: { pose_type: string; reason: string }[]
 }
 
 export interface SimpleEnrollResult {
@@ -82,6 +84,10 @@ export const REASON_LABELS: Record<string, string> = {
   glasses_detected: 'Remove glasses for this step',
   wrong_pose: 'Pose does not match instruction',
   validation_error: 'Validation failed',
+  spoof_detected: 'Liveness check failed — use a natural, evenly lit pose',
+  liveness_failed: 'Liveness check failed — use a natural, evenly lit pose',
+  heuristic_failed: 'Liveness check failed — avoid screen glare; use a real face',
+  multiple_or_no_face: 'Make sure exactly one face is in frame',
 }
 
 const POSE_HINTS: Record<string, string> = {

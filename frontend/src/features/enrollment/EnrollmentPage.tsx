@@ -114,6 +114,30 @@ export default function EnrollmentPage() {
   const allComplete = requiredPoses.length > 0 && completedCount === requiredPoses.length
   const canSubmit = allComplete && employeeId && !submitting
 
+  // Flag only the server-rejected poses for retake (keeping every other
+  // accepted capture intact) and jump to the first one, so a failed submit
+  // never forces re-capturing the whole set.
+  const flagRejectedPoses = (rejected: { pose_type: string; reason: string }[]) => {
+    setPoses((prev) => {
+      const next = { ...prev }
+      for (const r of rejected) {
+        const existing = next[r.pose_type]
+        if (existing) next[r.pose_type] = { ...existing, accepted: false, reason: r.reason }
+      }
+      return next
+    })
+    const firstFailedIdx = requiredPoses.findIndex((p) => rejected.some((r) => r.pose_type === p))
+    if (firstFailedIdx >= 0) setStepIndex(firstFailedIdx)
+  }
+
+  const showRejections = (rejected: { pose_type: string; reason: string }[]) => {
+    flagRejectedPoses(rejected)
+    setMessage({
+      tone: 'error',
+      text: rejected.map((r) => `${poseLabel(r.pose_type)}: ${reasonLabel(r.reason)}`).join('; '),
+    })
+  }
+
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
@@ -126,6 +150,15 @@ export default function EnrollmentPage() {
     setMessage(null)
     try {
       const data = await enrollFace.mutateAsync({ employeeId, poses: posePayload })
+
+      // Per-pose failures come back as HTTP 200 with success:false, so they
+      // land here rather than in catch. Treat them as a failure: preserve the
+      // accepted poses and only mark the rejected ones for retake.
+      if (!data.success) {
+        if (data.rejected?.length) showRejections(data.rejected)
+        else setMessage({ tone: 'error', text: data.error ?? 'Enrollment failed' })
+        return
+      }
 
       setMessage({
         tone: 'ok',
@@ -140,16 +173,8 @@ export default function EnrollmentPage() {
     } catch (err: unknown) {
       const body = (err as { response?: { data?: { error?: string; rejected?: { pose_type: string; reason: string }[] } } })
         ?.response?.data
-      if (body?.rejected?.length) {
-        setMessage({
-          tone: 'error',
-          text: body.rejected
-            .map((r) => `${poseLabel(r.pose_type)}: ${reasonLabel(r.reason)}`)
-            .join('; '),
-        })
-      } else {
-        setMessage({ tone: 'error', text: body?.error ?? 'Enrollment failed' })
-      }
+      if (body?.rejected?.length) showRejections(body.rejected)
+      else setMessage({ tone: 'error', text: body?.error ?? 'Enrollment failed' })
     }
   }
 

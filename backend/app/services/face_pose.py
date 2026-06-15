@@ -42,7 +42,7 @@ PITCH_FRONTAL_BASELINE = 0.57
 
 YAW_TURN_THRESHOLD = 0.14   # |yaw| at/beyond this = head turned left/right
 PITCH_UP_THRESHOLD = -0.12  # re-centered pitch at/below this = looking up
-PITCH_DOWN_THRESHOLD = 0.14  # re-centered pitch at/above this = looking down
+PITCH_DOWN_THRESHOLD = 0.1  # re-centered pitch at/above this = looking down
 SMILE_THRESHOLD = 0.92      # smile_ratio at/above this = smiling
 SMILE_MIN_FOR_SMILING_SLOT = 0.90  # slight margin so a clear smile passes
 
