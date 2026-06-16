@@ -153,6 +153,50 @@ class FaceImageProcessor:
         return cv2.bilateralFilter(image, d=5, sigmaColor=50, sigmaSpace=50)
 
 
+def enhance_low_light(
+    image: np.ndarray,
+    *,
+    target_luminance: float = 110.0,
+    max_gain: float = 2.5,
+    clahe_clip_limit: float = 2.0,
+    clahe_tile_grid: tuple[int, int] = (8, 8),
+) -> np.ndarray:
+    """Adaptively brighten a dark frame before detection/recognition.
+
+    Works in LAB so only the L (luminance) channel is scaled — chroma is left
+    alone — then CLAHE restores the local contrast a flat gain washes out. This
+    is the same brightness+CLAHE technique ``FaceImageProcessor._enhance`` uses
+    for enrollment crops, lifted to operate on a full frame.
+
+    It is a NO-OP for frames already at or above ``target_luminance`` (so
+    well-lit scenes are never altered and the normal-lighting case can't
+    regress) and for near-black frames where gain would only amplify noise.
+    Returns the input array unchanged in those cases.
+
+    Note: the gain is driven by the whole-frame mean, so a strongly backlit
+    scene (bright background, dark face) is only partially helped — CLAHE still
+    lifts local contrast in the dark region, but per-face brightness handling is
+    a separate concern from this global pre-pass.
+    """
+    if image is None or image.size == 0 or image.ndim != 3:
+        return image
+
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    l_channel = lab[:, :, 0]
+    mean_l = float(np.mean(l_channel))
+
+    if mean_l >= target_luminance or mean_l < 1.0:
+        return image
+
+    gain = min(max_gain, target_luminance / mean_l)
+    boosted = np.clip(l_channel.astype(np.float32) * gain, 0, 255).astype(np.uint8)
+
+    clahe = cv2.createCLAHE(clipLimit=clahe_clip_limit, tileGridSize=clahe_tile_grid)
+    lab[:, :, 0] = clahe.apply(boosted)
+
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
 _processor: FaceImageProcessor | None = None
 
 

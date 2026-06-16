@@ -525,9 +525,12 @@ export default function RecognitionEnginePage() {
         </div>
       </section>
 
-      {/* Local webcam monitor (self-contained card) */}
+      {/* Live detection monitor (self-contained card) */}
       <section>
-        <SectionHeading title="Live monitor" description="Spot-check a local webcam or preview a registered stream" />
+        <SectionHeading
+          title="Live AI detection"
+          description="Watch a registered camera with real-time face boxes and identities, or spot-check a local webcam"
+        />
         <WebcamMonitor />
       </section>
 

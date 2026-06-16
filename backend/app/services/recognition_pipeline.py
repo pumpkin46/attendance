@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from app.core.config import settings
+from app.services.face_image_processor import enhance_low_light
 from app.services.face_quality import validate_face_image
 from app.services.face_service import (
     _analyze_image,
@@ -80,6 +81,19 @@ def recognize(
     pipeline.append(
         _stage("video_stream", t0, {"width": w, "height": h, "source": source})
     )
+
+    # Brighten dark frames before detection so the SAME enhanced frame feeds
+    # detection + the embedding (one InsightFace pass below), the quality check
+    # and liveness — mirroring the camera engine. Shares the ENGINE_LOW_LIGHT_*
+    # knobs so low-light behavior is tuned in one place. No-op for well-lit
+    # frames (see enhance_low_light).
+    if settings.engine_low_light_enabled:
+        img = enhance_low_light(
+            img,
+            target_luminance=settings.engine_low_light_target_luminance,
+            max_gain=settings.engine_low_light_max_gain,
+            clahe_clip_limit=settings.engine_low_light_clahe_clip,
+        )
 
     # 2. Face detection
     t1 = time.perf_counter()

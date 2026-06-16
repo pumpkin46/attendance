@@ -45,9 +45,28 @@ from app.engine.quality_assessor import get_quality_assessor
 from app.engine.stream_manager import StreamManager, get_stream_manager
 from app.engine.unknown_detector import get_unknown_detector
 from app.engine.vector_search import MatchAction, get_vector_search
+from app.services.face_image_processor import enhance_low_light
 from app.services.face_utils import decode_image
 
 logger = logging.getLogger(__name__)
+
+# Pipeline reasons that mean a presentation attack / failed liveness, used to
+# colour a live face box red. Mirrors the frontend's SPOOF_REASONS so the
+# overlay and the kiosk agree on what counts as a spoof.
+_SPOOF_REASONS = frozenset({
+    "spoof_detected",
+    "liveness_failed",
+    "heuristic_failed",
+    "blink_not_detected",
+    "head_movement_not_detected",
+    "active_liveness_failed",
+    "antispoof_model_unavailable",
+})
+
+# A track whose last sighting is older than this is treated as gone, so the
+# overlay drops its box instead of showing a stale rectangle once the person
+# leaves view or frames stop flowing.
+_DETECTION_STALE_SECONDS = 1.5
 
 
 @dataclass
@@ -138,11 +157,34 @@ class RecognitionEngine:
         await self._stream_manager.stop()
         logger.info("Recognition Engine stopped")
 
+    def _prepare_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Adaptively brighten a dark frame before detection.
+
+        Applied once at every entry point so the SAME enhanced frame feeds
+        detection + the ArcFace embedding (both produced by one InsightFace
+        ``app.get`` call) and the downstream quality gate + liveness. Enhancing
+        only inside detection would leave the quality gate rejecting the dark
+        original as ``underexposed``; enhancing only here would never reach the
+        embedding. A no-op for well-lit frames (see ``enhance_low_light``).
+        """
+        enh = self._config.enhancement
+        if not enh.low_light_enabled:
+            return frame
+        return enhance_low_light(
+            frame,
+            target_luminance=enh.target_luminance,
+            max_gain=enh.max_gain,
+            clahe_clip_limit=enh.clahe_clip_limit,
+        )
+
     async def _process_frame(
         self, camera_id: int, frame: np.ndarray, timestamp: float
     ) -> None:
         """Process a single frame through the full pipeline."""
         try:
+            # Brighten dark frames once, off the event loop, then reuse the same
+            # enhanced frame for detection AND the per-face recognition below.
+            frame = await asyncio.to_thread(self._prepare_frame, frame)
             detection = await asyncio.to_thread(self._detector.detect, frame)
             self._metrics.record_detection(detection.face_count)
             self._metrics.record_pipeline_stage(
@@ -199,7 +241,9 @@ class RecognitionEngine:
 
             self._tracker.mark_recognized(
                 camera_id, track_id,
-                result.employee_id, result.confidence
+                result.employee_id, result.confidence,
+                liveness_passed=result.liveness_passed,
+                reason=result.reason,
             )
 
             if result.matched:
@@ -452,6 +496,10 @@ class RecognitionEngine:
                 reason="invalid_image",
             )
 
+        # Brighten dark frames before detection so the same enhanced frame is
+        # used by detection, embedding, the quality gate and liveness.
+        frame = self._prepare_frame(frame)
+
         # Stage 2: Face Detection
         t1 = time.perf_counter()
         detection = self._detector.detect(frame)
@@ -524,7 +572,7 @@ class RecognitionEngine:
                 processing_ms=capture.get("processing_ms", 0),
             )
 
-        frame = capture["frame"]
+        frame = self._prepare_frame(capture["frame"])
         detection = self._detector.detect(frame)
         if detection.face_count == 0:
             return RecognitionResult(
@@ -549,6 +597,7 @@ class RecognitionEngine:
         if frame is None:
             return {"success": False, "faces": [], "face_count": 0}
 
+        frame = self._prepare_frame(frame)
         result = self._detector.detect(frame)
         return {
             "success": True,
@@ -557,6 +606,61 @@ class RecognitionEngine:
             "detection_ms": result.detection_ms,
             "frame_width": result.frame_width,
             "frame_height": result.frame_height,
+        }
+
+    def get_camera_detections(self, camera_id: int) -> dict:
+        """Live per-face detection snapshot for one camera (for the UI overlay).
+
+        Reads the tracker — the merge point where the asynchronous recognition
+        results land — together with the stream's current frame resolution, and
+        returns each on-screen face as a box normalised to [0, 1] plus a derived
+        display status. ``employee_id`` is the raw FAISS identity; the API layer
+        resolves it to a tenant-gated name before it reaches the browser.
+
+        Pure in-memory reads with no awaits, so it stays atomic against the
+        engine's own coroutines on the event loop — call it directly, never via
+        a worker thread (which could iterate the tracks dict mid-mutation).
+        """
+        stream = self._stream_manager.get_stream(camera_id)
+        width, height = (stream.health.resolution if stream else (0, 0)) or (0, 0)
+        now = time.time()
+        faces: list[dict] = []
+        for track in self._tracker.get_camera_tracks(camera_id).values():
+            if now - track.last_seen > _DETECTION_STALE_SECONDS:
+                continue
+            if track.employee_id is not None:
+                status = "recognized"
+            elif track.reason in _SPOOF_REASONS:
+                status = "spoof"
+            elif track.is_unknown:
+                status = "unknown"
+            else:
+                status = "detecting"
+            x1, y1, x2, y2 = track.bbox
+            if width and height:
+                bbox = [
+                    max(0.0, min(1.0, x1 / width)),
+                    max(0.0, min(1.0, y1 / height)),
+                    max(0.0, min(1.0, x2 / width)),
+                    max(0.0, min(1.0, y2 / height)),
+                ]
+            else:
+                bbox = [0.0, 0.0, 0.0, 0.0]
+            faces.append({
+                "track_id": track.track_id,
+                "bbox": [round(v, 4) for v in bbox],
+                "status": status,
+                "employee_id": track.employee_id,
+                "confidence": round(track.confidence, 4) if track.employee_id else None,
+                "liveness_passed": track.liveness_passed,
+                "reason": track.reason if status in ("unknown", "spoof") else None,
+            })
+        return {
+            "camera_id": camera_id,
+            "running": self._running,
+            "frame_width": width,
+            "frame_height": height,
+            "faces": faces,
         }
 
     def get_engine_status(self) -> dict:

@@ -116,3 +116,29 @@ export interface IdentifyResult {
   attendance?: { action: string; employee_id?: number }
 }
 
+// ── Live detection overlay (server-stream camera panel) ──────────────────────
+
+export type DetectionStatus = 'recognized' | 'unknown' | 'spoof' | 'detecting'
+
+export interface LiveDetectionFace {
+  track_id: number
+  /** Bounding box normalized to [0,1] as [x1, y1, x2, y2]. */
+  bbox: [number, number, number, number]
+  status: DetectionStatus
+  /** Tenant-gated display name (recognized faces only). */
+  name?: string | null
+  code?: string | null
+  confidence?: number | null
+  liveness_passed?: boolean | null
+  reason?: string | null
+}
+
+export interface LiveDetectionFrame {
+  type: 'detections'
+  camera_id: number
+  running: boolean
+  frame_width: number
+  frame_height: number
+  faces: LiveDetectionFace[]
+}
+

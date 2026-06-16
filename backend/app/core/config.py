@@ -305,6 +305,16 @@ class Settings(BaseSettings):
     # real employees as unknown.
     engine_auto_accept_threshold: float = 0.5
     engine_review_threshold: float = 0.4
+    # Adaptive low-light enhancement: brighten dark frames before detection so
+    # the camera engine still recognizes faces in dim conditions. The same
+    # brightened frame feeds detection, the ArcFace embedding, the quality gate
+    # and liveness. No-op when a frame is already at/above the target luminance
+    # (well-lit scenes are left untouched). target_luminance is mean L (0-255);
+    # max_gain caps the boost so noise in near-dark frames isn't blown up.
+    engine_low_light_enabled: bool = True
+    engine_low_light_target_luminance: float = 110.0
+    engine_low_light_max_gain: float = 2.5
+    engine_low_light_clahe_clip: float = 2.0
 
     @property
     def upload_dir(self) -> str:

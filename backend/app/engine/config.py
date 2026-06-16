@@ -69,6 +69,20 @@ class QualityConfig:
 
 
 @dataclass
+class EnhancementConfig:
+    # Adaptive low-light pre-pass applied to the frame BEFORE detection, so the
+    # SAME brightened frame feeds detection + the ArcFace embedding (both come
+    # from one InsightFace app.get call) and the downstream quality gate +
+    # liveness. Without it a dim frame either embeds poorly or is rejected as
+    # "underexposed" before recognition ever runs. A no-op for frames already
+    # at/above target_luminance (well-lit scenes are untouched).
+    low_light_enabled: bool = True
+    target_luminance: float = 110.0
+    max_gain: float = 2.5
+    clahe_clip_limit: float = 2.0
+
+
+@dataclass
 class LivenessConfig:
     enabled: bool = True
     min_score: float = 0.85
@@ -160,6 +174,7 @@ class EngineConfig:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
+    enhancement: EnhancementConfig = field(default_factory=EnhancementConfig)
     liveness: LivenessConfig = field(default_factory=LivenessConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     verification: VerificationConfig = field(default_factory=VerificationConfig)
@@ -188,6 +203,10 @@ def configure_from_settings(cfg: EngineConfig | None = None) -> EngineConfig:
     cfg = cfg or engine_config
     cfg.search.auto_accept_threshold = settings.engine_auto_accept_threshold
     cfg.search.review_threshold = settings.engine_review_threshold
+    cfg.enhancement.low_light_enabled = settings.engine_low_light_enabled
+    cfg.enhancement.target_luminance = settings.engine_low_light_target_luminance
+    cfg.enhancement.max_gain = settings.engine_low_light_max_gain
+    cfg.enhancement.clahe_clip_limit = settings.engine_low_light_clahe_clip
     cfg.liveness.min_score = settings.engine_liveness_threshold
     cfg.attendance.duplicate_window_seconds = settings.engine_duplicate_window_seconds
     cfg.tracking.max_tracks = settings.engine_max_tracks_per_camera

@@ -33,6 +33,10 @@ class FaceTrack:
     confidence: float = 0.0
     is_unknown: bool = False
     lost_frames: int = 0
+    # Last recognition outcome, kept so a live overlay can colour the box
+    # (recognized / unknown / spoof) without re-running the pipeline.
+    liveness_passed: bool | None = None
+    reason: str | None = None
 
     @property
     def age_seconds(self) -> float:
@@ -152,7 +156,14 @@ class MultiCameraTracker:
         return results
 
     def mark_recognized(
-        self, camera_id: int, track_id: int, employee_id: str | None, confidence: float
+        self,
+        camera_id: int,
+        track_id: int,
+        employee_id: str | None,
+        confidence: float,
+        *,
+        liveness_passed: bool | None = None,
+        reason: str | None = None,
     ) -> None:
         tracks = self._tracks.get(camera_id, {})
         track = tracks.get(track_id)
@@ -161,6 +172,8 @@ class MultiCameraTracker:
             track.employee_id = employee_id
             track.confidence = confidence
             track.is_unknown = employee_id is None
+            track.liveness_passed = liveness_passed
+            track.reason = reason
 
     def get_track(self, camera_id: int, track_id: int) -> FaceTrack | None:
         return self._tracks.get(camera_id, {}).get(track_id)

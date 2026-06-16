@@ -166,6 +166,124 @@ async def stream_ws(websocket: WebSocket, camera_id: int) -> None:
         receiver.cancel()
 
 
+# How long a resolved (or "not visible to this tenant") identity label is reused
+# before re-querying — a recognized track persists across many ticks, so this
+# keeps the detections feed off the database on all but the first sighting.
+_DETECTION_LABEL_TTL_SECONDS = 10.0
+
+
+async def _label_detections(
+    faces: list[dict], org_id: int | None, cache: dict[str, tuple]
+) -> None:
+    """Attach tenant-gated display names to recognized faces, in place.
+
+    The engine hands us the raw FAISS identity per recognized face. We resolve
+    it through ``authorize_match`` (the same tenancy gate the kiosk uses), drop
+    the raw identity from the wire, and add ``name``/``code``. An identity not
+    visible to ``org_id`` is downgraded to "unknown" so neither the name nor the
+    existence of a cross-tenant match leaks.
+    """
+    from time import monotonic
+
+    now = monotonic()
+    pending = {
+        f["employee_id"]
+        for f in faces
+        if f.get("status") == "recognized"
+        and f.get("employee_id")
+        and cache.get(f["employee_id"], (None, None, 0.0))[2] < now
+    }
+    if pending:
+        from app.services.recognition_service import authorize_match
+
+        async with async_session_factory() as db:
+            for identity in pending:
+                row = await authorize_match(db, identity, org_id)
+                if row is None:
+                    cache[identity] = (None, None, now + _DETECTION_LABEL_TTL_SECONDS)
+                    continue
+                name = getattr(row, "name", None) or " ".join(
+                    p
+                    for p in (getattr(row, "first_name", None), getattr(row, "last_name", None))
+                    if p
+                ).strip()
+                code = getattr(row, "employee_code", None)
+                cache[identity] = (name or None, code, now + _DETECTION_LABEL_TTL_SECONDS)
+
+    for face in faces:
+        identity = face.pop("employee_id", None)  # never expose the raw pk/identity
+        if face.get("status") != "recognized":
+            face["name"] = None
+            face["code"] = None
+            continue
+        entry = cache.get(identity)
+        if entry is not None and entry[0] is None and entry[1] is None:
+            # Resolved but not visible to this tenant — show as a plain unknown.
+            face["status"] = "unknown"
+            face["confidence"] = None
+            face["name"] = None
+            face["code"] = None
+        elif entry is not None:
+            face["name"] = entry[0]
+            face["code"] = entry[1]
+        else:
+            face["name"] = None
+            face["code"] = None
+
+
+async def _send_camera_detections(
+    websocket: WebSocket, camera_id: int, org_id: int | None, fps: int = 5
+) -> None:
+    """Push the camera's live per-face detection state as JSON, capped at ``fps``.
+
+    Companion channel to the raw-JPEG preview: the browser draws boxes + labels
+    from this while showing pixels from ``/ws``. Each message is the engine's
+    ``get_camera_detections`` snapshot (normalised boxes + derived status) with
+    tenant-gated names merged in.
+    """
+    from app.engine.recognition_engine import get_recognition_engine
+
+    engine = get_recognition_engine()
+    interval = 1.0 / max(fps, 1)
+    label_cache: dict[str, tuple] = {}
+    while True:
+        # Direct call (not a thread): the snapshot is a pure in-memory read and
+        # must stay atomic against the engine's coroutines on this same loop.
+        snapshot = engine.get_camera_detections(camera_id)
+        await _label_detections(snapshot["faces"], org_id, label_cache)
+        await websocket.send_json({"type": "detections", **snapshot})
+        await asyncio.sleep(interval)
+
+
+@router.websocket("/api/v1/engine/streams/{camera_id}/detections/ws")
+async def stream_detections_ws(websocket: WebSocket, camera_id: int) -> None:
+    """Live per-face detection metadata (boxes + identity) for one camera."""
+    if not _origin_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    token = _extract_token(websocket)
+    identity = await _resolve_identity(token, websocket.query_params.get("org"))
+    if identity is None:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    _user_id, org_id = identity
+
+    await websocket.accept(subprotocol=_BEARER_SUBPROTOCOL)
+
+    sender = asyncio.create_task(_send_camera_detections(websocket, camera_id, org_id))
+    receiver = asyncio.create_task(_drain_incoming(websocket))
+    try:
+        _, pending = await asyncio.wait({sender, receiver}, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        sender.cancel()
+        receiver.cancel()
+
+
 async def _push_engine_status(websocket: WebSocket, period: float = 2.0) -> None:
     """Push engine status + stream telemetry as JSON on a fixed cadence.
 

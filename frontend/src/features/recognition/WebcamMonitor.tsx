@@ -5,9 +5,12 @@ import { Button } from '@/shared/ui/Button'
 import { Combobox } from '@/shared/ui/Combobox'
 import { detectFaces, identifyFace } from '@/features/recognition/api/recognitionApi'
 import { useEngineStreams } from '@/features/recognition/api/queries'
+import { useStreamDetections } from '@/features/recognition/useStreamDetections'
+import { DetectionOverlay } from '@/features/recognition/DetectionOverlay'
+import { faceLabel } from '@/features/recognition/detectionLabels'
 import { useCameras } from '@/features/cameras/api/queries'
 import { initialsOf } from '@/shared/lib/format'
-import type { IdentifyResult } from '@/features/recognition/types'
+import type { DetectionStatus, IdentifyResult, LiveDetectionFace } from '@/features/recognition/types'
 
 /**
  * Recognition monitor embedded in the AI Engine page. Two sources:
@@ -96,6 +99,29 @@ function ConfidenceBar({ value }: { value: number }) {
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-700">
         <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${pct}%` }} />
       </div>
+    </div>
+  )
+}
+
+const DETECTION_DOT: Record<DetectionStatus, string> = {
+  recognized: 'bg-emerald-400',
+  unknown: 'bg-amber-400',
+  spoof: 'bg-red-400',
+  detecting: 'bg-sky-400',
+}
+
+const DETECTION_TALLY_TONE: Record<DetectionStatus, string> = {
+  recognized: 'text-emerald-400',
+  unknown: 'text-amber-400',
+  spoof: 'text-red-400',
+  detecting: 'text-sky-400',
+}
+
+function DetectionTally({ label, value, tone }: { label: string; value: number; tone: DetectionStatus }) {
+  return (
+    <div className="rounded-lg border border-slate-700/60 bg-slate-800/30 px-2.5 py-1.5">
+      <div className={`text-lg font-semibold tabular-nums ${DETECTION_TALLY_TONE[tone]}`}>{value}</div>
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
     </div>
   )
 }
@@ -238,6 +264,16 @@ export default function WebcamMonitor() {
     deps: [source],
   })
 
+  // Live per-face detection metadata for the selected server stream (boxes +
+  // tenant-gated identities), streamed alongside the JPEG preview.
+  const detection = useStreamDetections(typeof source === 'number' ? source : null)
+  const detectFacesList: LiveDetectionFace[] = detection?.faces ?? []
+  const detectionCounts = detectFacesList.reduce(
+    (acc, f) => ({ ...acc, [f.status]: acc[f.status] + 1 }),
+    { recognized: 0, unknown: 0, spoof: 0, detecting: 0 } as Record<DetectionStatus, number>
+  )
+  const engineIdle = detection != null && !detection.running
+
   // Keep the fullscreen label in sync with reality (covers Esc / OS exits).
   useEffect(() => {
     const onChange = () => setIsFullscreen(document.fullscreenElement === videoBoxRef.current)
@@ -297,9 +333,9 @@ export default function WebcamMonitor() {
             {ScanIcon}
           </span>
           <div>
-            <h2 className="text-base font-semibold text-slate-100">Webcam monitor</h2>
+            <h2 className="text-base font-semibold text-slate-100">Live detection monitor</h2>
             <p className="text-xs text-slate-400">
-              Local camera spot-check, or a live view of a registered stream.
+              Local camera spot-check, or a registered stream with live AI detection overlay.
             </p>
           </div>
         </div>
@@ -326,7 +362,14 @@ export default function WebcamMonitor() {
               <Button onClick={handleStart}>Start camera</Button>
             )
           ) : (
-            <StatusPill status={streamImg ? 'recognized' : 'idle'} />
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300">
+              <span className={`h-1.5 w-1.5 rounded-full ${streamImg ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+              {engineIdle
+                ? 'Engine stopped'
+                : streamImg
+                  ? `Live · ${detectFacesList.length} ${detectFacesList.length === 1 ? 'face' : 'faces'}`
+                  : 'Connecting…'}
+            </span>
           )}
         </div>
       </div>
@@ -352,7 +395,16 @@ export default function WebcamMonitor() {
               )}
             </>
           ) : streamImg ? (
-            <img src={streamImg} alt={`Camera ${source}`} className={mediaClass} />
+            <div className="absolute inset-0">
+              <img src={streamImg} alt={`Camera ${source}`} className="h-full w-full object-contain" />
+              {detection && detectFacesList.length > 0 && (
+                <DetectionOverlay
+                  faces={detectFacesList}
+                  frameWidth={detection.frame_width}
+                  frameHeight={detection.frame_height}
+                />
+              )}
+            </div>
           ) : (
             <div className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-400">
               <span className="inline-flex items-center gap-2">
@@ -382,10 +434,22 @@ export default function WebcamMonitor() {
             </button>
           )}
 
-          {/* Live badge for server streams */}
+          {/* Live badge + detection summary for server streams */}
           {!isWebcam && streamImg && (
-            <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-3 py-1 text-sm font-medium text-white">
-              ● Live · Camera #{source}
+            <span className="absolute left-2 top-2 inline-flex items-center gap-2 rounded-full bg-black/55 px-3 py-1 text-sm font-medium text-white">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                </span>
+                Live
+              </span>
+              <span className="text-white/70">Camera #{source}</span>
+              {detectFacesList.length > 0 && (
+                <span className="text-white/70">
+                  · {detectFacesList.length} {detectFacesList.length === 1 ? 'face' : 'faces'}
+                </span>
+              )}
             </span>
           )}
 
@@ -437,25 +501,50 @@ export default function WebcamMonitor() {
         <div className="flex flex-col rounded-lg border border-slate-700/60 bg-slate-800/30 p-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              {isWebcam ? 'Recognition result' : 'Stream info'}
+              {isWebcam ? 'Recognition result' : 'Live detection'}
             </h3>
             {isWebcam && <StatusPill status={status} />}
           </div>
 
           <div className="flex flex-1 flex-col justify-center">
             {!isWebcam ? (
-              <div className="space-y-3 text-sm text-slate-400">
+              <div className="flex h-full flex-col gap-3 text-sm">
                 <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${streamImg ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                  <span className={`h-2 w-2 rounded-full ${streamImg && !engineIdle ? 'bg-emerald-400' : 'bg-slate-500'}`} />
                   <span className="font-medium text-slate-200">
-                    {streamImg ? 'Live preview' : 'Connecting'} · Camera #{source}
+                    {engineIdle ? 'Engine stopped' : streamImg ? 'Live AI detection' : 'Connecting'} · Camera #{source}
                   </span>
                 </div>
-                <p className="text-xs leading-relaxed">
-                  Recognition and attendance for registered streams are handled by the engine
-                  pipeline — use “Start engine” and start this stream below. This panel is a live
-                  preview only.
-                </p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <DetectionTally label="Recognized" value={detectionCounts.recognized} tone="recognized" />
+                  <DetectionTally label="Unknown" value={detectionCounts.unknown} tone="unknown" />
+                  <DetectionTally label="Spoof" value={detectionCounts.spoof} tone="spoof" />
+                  <DetectionTally label="Detecting" value={detectionCounts.detecting} tone="detecting" />
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-auto">
+                  {detectFacesList.length > 0 ? (
+                    <ul className="space-y-1.5">
+                      {detectFacesList.map((f) => (
+                        <li
+                          key={f.track_id}
+                          className="flex items-center gap-2 rounded-lg bg-slate-800/40 px-2.5 py-1.5"
+                        >
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${DETECTION_DOT[f.status]}`} />
+                          <span className="truncate text-slate-200">{faceLabel(f)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs leading-relaxed text-slate-500">
+                      {engineIdle
+                        ? 'The engine is stopped — start it (and this stream) to see live detections.'
+                        : 'No faces in view. Boxes and identities appear here as the engine detects faces on this camera.'}
+                    </p>
+                  )}
+                </div>
+
                 {streamErr && <p className="text-xs text-amber-400">{streamErr}</p>}
               </div>
             ) : camError ? (
