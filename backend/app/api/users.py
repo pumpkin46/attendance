@@ -24,6 +24,7 @@ from app.core.dependencies import (
 )
 from app.core.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from app.core.security import hash_password
+from app.middleware.tenant import apply_tenant_filter
 from app.models.user import Permission, Role, User, role_user
 from app.schemas.users import (
     AdminCreateUserRequest,
@@ -83,13 +84,9 @@ async def list_users(
 ):
     stmt = select(User).options(selectinload(User.roles).selectinload(Role.permissions))
 
-    is_super = user.has_role(settings.super_admin_role)
-    if is_super:
-        if org_id is not None:
-            stmt = stmt.where(User.organization_id == org_id)
-    else:
-        # Tenant scoping: org admins manage only accounts inside their org.
-        stmt = stmt.where(User.organization_id == user.organization_id)
+    # Tenant boundary: org admins manage only accounts inside their company;
+    # a global super admin (org_id None) sees all.
+    stmt = apply_tenant_filter(stmt, org_id, User.organization_id)
 
     if search:
         like = f"%{search.strip()}%"
@@ -171,22 +168,23 @@ async def update_user(
     request: Request,
     db: DbSession,
     user: require_permission("users.manage"),
+    org_id: TenantOrgId,
 ):
+    is_super = user.has_role(settings.super_admin_role)
     stmt = (
         select(User)
         .options(selectinload(User.roles).selectinload(Role.permissions))
         .where(User.id == user_id)
     )
+    if not is_super:
+        # Org admins manage only accounts inside their company.
+        stmt = apply_tenant_filter(stmt, org_id, User.organization_id)
     target = (await db.execute(stmt)).scalar_one_or_none()
     if target is None:
         raise NotFoundError("User not found")
 
-    is_super = user.has_role(settings.super_admin_role)
-    if not is_super:
-        if target.organization_id != user.organization_id:
-            raise NotFoundError("User not found")
-        if target.has_role(settings.super_admin_role):
-            raise PermissionDeniedError("Only a super admin can modify a super admin account")
+    if not is_super and target.has_role(settings.super_admin_role):
+        raise PermissionDeniedError("Only a super admin can modify a super admin account")
 
     changes: dict[str, object] = {}
 

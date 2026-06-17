@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# ── Organization ────────────────────────────────────────────────────────────
+# ── Organization (company root) ───────────────────────────────────────────────
 
 class OrganizationOut(BaseModel):
     id: int
@@ -38,101 +40,84 @@ class OrganizationUpdate(BaseModel):
 
 
 class OrganizationWithCounts(OrganizationOut):
-    """Organization plus computed related-entity counts."""
+    """Organization (company root) plus computed related-entity counts.
 
-    branches_count: int = 0
-    departments_count: int = 0
+    ``nodes_count`` counts sub-units (departments/teams/branches) under the root,
+    excluding the root itself. ``employees_count`` is the whole-tenant total.
+    """
+
+    nodes_count: int = 0
     employees_count: int = 0
 
 
-# ── Branch ──────────────────────────────────────────────────────────────────
+# ── Org-tree nodes ────────────────────────────────────────────────────────────
 
-class BranchOut(BaseModel):
+class OrgNodeBrief(BaseModel):
+    """Minimal node summary for embedding in other payloads."""
+
     id: int
-    organization_id: int
+    name: str
+    node_type: str
+
+
+class OrgNodeOut(BaseModel):
+    id: int
     name: str
     code: str
-    address: str | None = None
+    node_type: str
+    parent_id: int | None = None
+    # depth / path / root_organization_id are derived (the row no longer stores
+    # them); they are computed while assembling a response. depth is relative to
+    # the returned top node and path is the chain of ancestor ids.
+    root_organization_id: int
     timezone: str
+    depth: int = 0
+    path: str = ""
     is_active: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Populated only by the tree endpoint; flat listings leave it None.
+    children: list["OrgNodeOut"] | None = None
 
     class Config:
         from_attributes = True
 
 
-class BranchCreate(BaseModel):
+class OrgNodeDetail(OrgNodeOut):
+    """A single node plus its ancestor breadcrumb (root → … → parent)."""
+
+    breadcrumb: list[OrgNodeBrief] = []
+
+
+class OrgNodeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     code: str = Field(min_length=1, max_length=255)
-    address: str | None = None
+    # The node this one hangs under. Required — a node always has a parent
+    # (root companies are created via the organizations endpoint).
+    parent_id: int
+    node_type: str = Field(default="department", min_length=1, max_length=32)
     timezone: str = "UTC"
-    # Super admins operating without a tenant header pick the target org here;
-    # for tenant-scoped users the header/org context always wins.
-    organization_id: int | None = None
 
 
-class BranchUpdate(BaseModel):
-    """Partial update — only fields present in the request body are applied."""
+class OrgNodeUpdate(BaseModel):
+    """Partial update. Reparenting is done via the dedicated move endpoint."""
 
     name: str | None = Field(None, min_length=1, max_length=255)
     code: str | None = Field(None, min_length=1, max_length=255)
-    address: str | None = None
+    node_type: str | None = Field(None, min_length=1, max_length=32)
     timezone: str | None = None
     is_active: bool | None = None
 
 
-# ── Department ──────────────────────────────────────────────────────────────
-
-class DepartmentOut(BaseModel):
-    id: int
-    organization_id: int
-    branch_id: int | None = None
-    name: str
-    code: str
-    is_active: bool
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
+class OrgNodeMove(BaseModel):
+    new_parent_id: int
 
 
-class DepartmentCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    code: str = Field(min_length=1, max_length=255)
-    branch_id: int | None = None
-    # Super admins operating without a tenant header pick the target org here;
-    # for tenant-scoped users the header/org context always wins.
-    organization_id: int | None = None
-
-
-class DepartmentUpdate(BaseModel):
-    """Partial update — only fields present in the request body are applied."""
-
-    name: str | None = Field(None, min_length=1, max_length=255)
-    code: str | None = Field(None, min_length=1, max_length=255)
-    branch_id: int | None = None
-    is_active: bool | None = None
-
-
-class BranchBrief(BaseModel):
-    id: int
-    name: str
-
-
-class DepartmentWithBranch(DepartmentOut):
-    """Department plus an embedded branch summary when available."""
-
-    branch: BranchBrief | None = None
-
-
-# ── Location ────────────────────────────────────────────────────────────────
+# ── Location ──────────────────────────────────────────────────────────────────
 
 class LocationOut(BaseModel):
     id: int
     organization_id: int
-    branch_id: int | None = None
     name: str
     address: str | None = None
     timezone: str
@@ -152,17 +137,10 @@ class LocationBrief(BaseModel):
     address: str | None = None
 
 
-class LocationWithBranch(LocationOut):
-    """Location plus an embedded branch summary when available."""
-
-    branch: BranchBrief | None = None
-
-
 class LocationCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     address: str | None = None
     timezone: str = "UTC"
-    branch_id: int | None = None
     # Super admins operating without a tenant header pick the target org here;
     # for tenant-scoped users the header/org context always wins.
     organization_id: int | None = None
@@ -174,7 +152,6 @@ class LocationUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     address: str | None = None
     timezone: str | None = None
-    branch_id: int | None = None
     is_active: bool | None = None
 
 

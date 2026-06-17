@@ -122,9 +122,16 @@ async def get_single_org_id(db: AsyncSession) -> int | None:
     """
     from app.models.organization import Organization
 
+    # Count only company ROOTS (parent_id IS NULL). Post org-tree-merge the
+    # table also holds department/team nodes; without this guard a single-tenant
+    # deployment with several nodes would see 2+ rows, return None, and turn
+    # apply_tenant_filter into a no-op — a cross-everything leak.
     stmt = (
         select(Organization.id)
-        .where(Organization.is_active == True)  # noqa: E712
+        .where(
+            Organization.is_active == True,  # noqa: E712
+            Organization.parent_id.is_(None),
+        )
         .order_by(Organization.id)
         .limit(2)
     )
@@ -140,30 +147,26 @@ async def get_tenant_org_id(
     if user.has_role(settings.super_admin_role):
         header_val = request.headers.get(settings.tenant_header)
         if header_val:
+            # The selection is persisted client-side and can outlive the org (it
+            # was deleted, or the value is a node id / id from another
+            # deployment). The header may name ANY node (a company root or a
+            # sub-unit); the tenant boundary is always that node's company ROOT,
+            # derived from the node itself — never the raw header value — so a
+            # selected department still feeds apply_tenant_filter the company root.
+            org_id: int | None
             try:
                 org_id = int(header_val)
             except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid {settings.tenant_header} header",
-                )
-            # The scope is persisted client-side and can outlive the org (e.g.
-            # the org was deleted) — reject it up front with a clear message
-            # instead of letting writes die on foreign-key violations.
-            from app.models.organization import Organization
+                org_id = None
+            if org_id is not None:
+                from app.middleware.tenant import root_id_of
 
-            exists = await db.scalar(
-                select(Organization.id).where(Organization.id == org_id)
-            )
-            if exists is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "The selected organization no longer exists — clear or "
-                        "switch the tenant context and try again"
-                    ),
-                )
-            return org_id
+                root_id = await root_id_of(db, org_id)
+                if root_id is not None:
+                    return root_id
+            # A stale or unparseable selection must not brick every request:
+            # fall back to the single-org / global scope a super admin gets with
+            # no header at all. The client can re-select a valid tenant.
         return await get_single_org_id(db)
     if user.organization_id is None:
         # None means validated global scope (super admin only). A tenant user

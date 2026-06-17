@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { getApiErrorMessage } from '@/shared/api/client'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
-import { Input } from '@/shared/ui/Input'
+import { Textarea } from '@/shared/ui/Textarea'
 import { Combobox } from '@/shared/ui/Combobox'
 import { DatePicker } from '@/shared/ui/DatePicker'
 import { DateRangePicker } from '@/shared/ui/DateRangePicker'
@@ -238,10 +238,12 @@ export default function AttendancePage() {
           </Label>
           <Label className="sm:col-span-2">
             Notes
-            <Input
+            <Textarea
               value={manual.notes}
               onChange={(e) => setManual({ ...manual, notes: e.target.value })}
               placeholder="Reason for manual entry"
+              maxLength={500}
+              showCount
             />
           </Label>
         </form>

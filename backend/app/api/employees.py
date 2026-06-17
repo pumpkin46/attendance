@@ -25,14 +25,12 @@ async def list_employees(
     pag: PaginationDep,
 ):
     # EmployeeOut is flat (FK ids only); skip the lazy="selectin" relationship
-    # loads (organization/location/branch/department_rel) the response never reads.
+    # loads (organization/location) the response never reads.
     stmt = (
         select(Employee)
         .options(
             lazyload(Employee.organization),
             lazyload(Employee.location),
-            lazyload(Employee.branch),
-            lazyload(Employee.department_rel),
         )
         .order_by(Employee.last_name, Employee.first_name)
     )
@@ -48,15 +46,15 @@ async def create_employee(
     org_id: TenantOrgId,
     user: require_permission("employees.manage"),
 ):
-    effective_org_id = body.organization_id or org_id
+    # Tenant context wins over the request body — a tenant-scoped caller can
+    # never plant an employee in another organization (IDOR guard).
+    effective_org_id = org_id if org_id is not None else body.organization_id
     if effective_org_id is None:
         raise ValidationError("Organization context required")
 
     emp = Employee(
         organization_id=effective_org_id,
         location_id=body.location_id,
-        branch_id=body.branch_id,
-        department_id=body.department_id,
         employee_code=body.employee_code,
         first_name=body.first_name,
         last_name=body.last_name,
@@ -104,8 +102,8 @@ async def update_employee(
 ):
     emp = await _get_employee_or_404(db, employee_id, org_id)
 
-    old_values = {}
     update_data = body.model_dump(exclude_unset=True)
+    old_values = {}
     for field, value in update_data.items():
         old_values[field] = getattr(emp, field)
         setattr(emp, field, value)

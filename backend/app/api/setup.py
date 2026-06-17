@@ -164,6 +164,8 @@ async def run_setup(body: SetupRequest, request: Request, db: DbSession):
             name=body.organization_name,
             code=_org_code(body.organization_name),
             timezone=body.timezone,
+            node_type="company",
+            parent_id=None,
         )
         db.add(org)
         await db.flush()

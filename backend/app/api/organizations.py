@@ -1,24 +1,28 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, status
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.dependencies import (
+    CurrentUser,
+    DbSession,
+    TenantOrgId,
+    require_any_permission,
+    require_permission,
+)
 from app.schemas.organization import (
-    BranchCreate,
-    BranchOut,
-    BranchUpdate,
-    DepartmentCreate,
-    DepartmentOut,
-    DepartmentUpdate,
-    DepartmentWithBranch,
     LocationCreate,
+    LocationOut,
     LocationUpdate,
-    LocationWithBranch,
     OrganizationCreate,
     OrganizationOut,
     OrganizationUpdate,
     OrganizationWithCounts,
+    OrgNodeCreate,
+    OrgNodeDetail,
+    OrgNodeMove,
+    OrgNodeOut,
+    OrgNodeUpdate,
     SecurityConfigResponse,
 )
 from app.services import organization_service as service
@@ -26,7 +30,7 @@ from app.services import organization_service as service
 router = APIRouter(prefix="/api/v1", tags=["organizations"])
 
 
-# ── Organizations ───────────────────────────────────────────────────────────
+# ── Organizations (company roots) ─────────────────────────────────────────────
 
 
 @router.get("/organizations", response_model=list[OrganizationWithCounts])
@@ -90,125 +94,95 @@ async def delete_organization(
     )
 
 
-# ── Branches ────────────────────────────────────────────────────────────────
+# ── Org-tree nodes ────────────────────────────────────────────────────────────
 
 
-@router.get("/branches", response_model=list[BranchOut])
-async def list_branches(
-    db: DbSession,
-    user: CurrentUser,
-    org_id: TenantOrgId,
-    organization_id: int | None = Query(None),
-):
-    branches = await service.list_branches(db, org_id, organization_id)
-    return [BranchOut.model_validate(b, from_attributes=True) for b in branches]
-
-
-@router.post("/branches", response_model=BranchOut, status_code=status.HTTP_201_CREATED)
-async def create_branch(
-    body: BranchCreate,
+@router.get("/org-nodes/tree", response_model=list[OrgNodeOut])
+async def get_org_tree(
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("branches.manage"),
+    user: require_any_permission("org_nodes.manage", "org_nodes.view"),
 ):
-    branch = await service.create_branch(db, org_id, body)
-    return BranchOut.model_validate(branch, from_attributes=True)
+    return await service.get_tree(db, org_id)
 
 
-@router.patch("/branches/{branch_id}", response_model=BranchOut)
-async def update_branch(
-    branch_id: int,
-    body: BranchUpdate,
+@router.get("/org-nodes/{node_id}", response_model=OrgNodeDetail)
+async def get_org_node(
+    node_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("branches.manage"),
+    user: require_any_permission("org_nodes.manage", "org_nodes.view"),
 ):
-    branch = await service.update_branch(db, org_id, branch_id, body)
-    return BranchOut.model_validate(branch, from_attributes=True)
+    return await service.get_node(db, org_id, node_id)
 
 
-@router.delete("/branches/{branch_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_branch(
-    branch_id: int,
+@router.post("/org-nodes", response_model=OrgNodeOut, status_code=status.HTTP_201_CREATED)
+async def create_org_node(
+    body: OrgNodeCreate,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("branches.manage"),
+    user: require_permission("org_nodes.manage"),
 ):
-    await service.delete_branch(db, org_id, branch_id)
+    return await service.create_node(db, org_id, body)
 
 
-# ── Departments ─────────────────────────────────────────────────────────────
-
-
-@router.get("/departments", response_model=list[DepartmentWithBranch])
-async def list_departments(
-    db: DbSession,
-    user: CurrentUser,
-    org_id: TenantOrgId,
-    organization_id: int | None = Query(None),
-    branch_id: int | None = Query(None),
-):
-    return await service.list_departments(db, org_id, organization_id, branch_id)
-
-
-@router.post("/departments", response_model=DepartmentOut, status_code=status.HTTP_201_CREATED)
-async def create_department(
-    body: DepartmentCreate,
+@router.patch("/org-nodes/{node_id}", response_model=OrgNodeOut)
+async def update_org_node(
+    node_id: int,
+    body: OrgNodeUpdate,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("departments.manage"),
+    user: require_permission("org_nodes.manage"),
 ):
-    dept = await service.create_department(db, org_id, body)
-    return DepartmentOut.model_validate(dept, from_attributes=True)
+    return await service.update_node(db, org_id, node_id, body)
 
 
-@router.patch("/departments/{department_id}", response_model=DepartmentOut)
-async def update_department(
-    department_id: int,
-    body: DepartmentUpdate,
+@router.post("/org-nodes/{node_id}/move", response_model=OrgNodeOut)
+async def move_org_node(
+    node_id: int,
+    body: OrgNodeMove,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("departments.manage"),
+    user: require_permission("org_nodes.manage"),
 ):
-    dept = await service.update_department(db, org_id, department_id, body)
-    return DepartmentOut.model_validate(dept, from_attributes=True)
+    return await service.move_node(db, org_id, node_id, body)
 
 
-@router.delete("/departments/{department_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_department(
-    department_id: int,
+@router.delete("/org-nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_org_node(
+    node_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("departments.manage"),
+    user: require_permission("org_nodes.manage"),
 ):
-    await service.delete_department(db, org_id, department_id)
+    await service.delete_node(db, org_id, node_id)
 
 
 # ── Locations ───────────────────────────────────────────────────────────────
 
 
-@router.get("/locations", response_model=list[LocationWithBranch])
+@router.get("/locations", response_model=list[LocationOut])
 async def list_locations(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
     return await service.list_locations(db, org_id)
 
 
-@router.post("/locations", response_model=LocationWithBranch, status_code=status.HTTP_201_CREATED)
+@router.post("/locations", response_model=LocationOut, status_code=status.HTTP_201_CREATED)
 async def create_location(
     body: LocationCreate,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("branches.manage"),
+    user: require_permission("org_nodes.manage"),
 ):
     return await service.create_location(db, org_id, body)
 
 
-@router.patch("/locations/{location_id}", response_model=LocationWithBranch)
+@router.patch("/locations/{location_id}", response_model=LocationOut)
 async def update_location(
     location_id: int,
     body: LocationUpdate,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("branches.manage"),
+    user: require_permission("org_nodes.manage"),
 ):
     return await service.update_location(db, org_id, location_id, body)
 
@@ -218,7 +192,7 @@ async def delete_location(
     location_id: int,
     db: DbSession,
     org_id: TenantOrgId,
-    user: require_permission("branches.manage"),
+    user: require_permission("org_nodes.manage"),
 ):
     await service.delete_location(db, org_id, location_id)
 
@@ -258,8 +232,8 @@ async def security_config(user: require_permission("security.view")):
             "isolation_enabled": settings.tenant_isolation_enabled,
             "supports": {
                 "unlimited_organizations": True,
-                "unlimited_branches": True,
-                "unlimited_departments": True,
+                "unlimited_org_nodes": True,
+                "arbitrary_depth_tree": True,
             },
         },
     }

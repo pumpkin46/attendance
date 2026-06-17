@@ -29,6 +29,7 @@ export interface Employee {
   first_name: string
   last_name: string
   email?: string
+  /** Free-text department label. */
   department?: string
   job_title?: string
   hire_date?: string
@@ -36,7 +37,7 @@ export interface Employee {
   face_enrolled: boolean
   face_enrolled_at?: string
   active_rfid_cards_count?: number
-  location?: { id: number; name: string }
+  location_id?: number | null
 }
 
 export interface RfidReader {

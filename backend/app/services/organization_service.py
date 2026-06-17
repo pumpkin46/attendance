@@ -1,105 +1,99 @@
-"""Organization / branch / department / location business logic."""
+"""Organization-tree and location business logic.
+
+The ``organizations`` table is a plain ``parent_id`` adjacency-list tree. A
+company *root* (``parent_id IS NULL``) is the tenant; its descendant nodes
+(departments, teams, branches, ...) are sub-units — a structural org chart.
+Members (employees/users/locations) belong to the company via
+``organization_id`` (the tenant root); they are not assigned to individual
+nodes. A node's company root and sub-tree are derived by walking ``parent_id``
+with the recursive helpers in ``app.middleware.tenant``. The tree endpoints
+expose ``depth``/``path``/``root_organization_id`` as values COMPUTED while
+assembling a response.
+"""
 
 from __future__ import annotations
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
-from app.middleware.tenant import apply_tenant_filter
+from app.core.errors import (
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
+from app.middleware.tenant import (
+    ancestor_chain,
+    apply_tenant_filter,
+    descendant_ids,
+    fetch_subtree,
+    root_id_of,
+)
 from app.models.employee import Employee
 from app.models.location import Location
-from app.models.organization import Branch, Department, Organization
+from app.models.organization import Organization
 from app.schemas.organization import (
-    BranchBrief,
-    BranchCreate,
-    BranchUpdate,
-    DepartmentCreate,
-    DepartmentOut,
-    DepartmentUpdate,
-    DepartmentWithBranch,
     LocationCreate,
     LocationOut,
     LocationUpdate,
-    LocationWithBranch,
     OrganizationCreate,
     OrganizationOut,
     OrganizationUpdate,
     OrganizationWithCounts,
+    OrgNodeBrief,
+    OrgNodeCreate,
+    OrgNodeDetail,
+    OrgNodeMove,
+    OrgNodeOut,
+    OrgNodeUpdate,
 )
 
 
-async def _count_by_org(db: AsyncSession, model, org_ids: list[int]) -> dict[int, int]:
-    if not org_ids:
-        return {}
-    stmt = (
-        select(model.organization_id, func.count())
-        .where(model.organization_id.in_(org_ids))
-        .group_by(model.organization_id)
-    )
-    return {org_id: count for org_id, count in (await db.execute(stmt)).all()}
+# ── Shared helpers ─────────────────────────────────────────────────────────────
 
 
-async def _employee_count(db: AsyncSession, column, value: int) -> int:
-    stmt = select(func.count()).select_from(Employee).where(column == value)
+async def _count_where(db: AsyncSession, model, column, value: int) -> int:
+    stmt = select(func.count()).select_from(model).where(column == value)
     return (await db.execute(stmt)).scalar_one()
 
 
-async def _ensure_unique_org_code(db: AsyncSession, code: str, *, exclude_id: int | None = None) -> None:
-    stmt = select(Organization.id).where(Organization.code == code)
+async def _node_out(db: AsyncSession, node: Organization) -> OrgNodeOut:
+    """Build an OrgNodeOut for a single node, computing depth/path/root."""
+    chain = await ancestor_chain(db, node.id, include_self=True)  # root → … → node
+    depth = max(0, len(chain) - 1)
+    path = "/" + "/".join(str(o.id) for o in chain) + "/" if chain else f"/{node.id}/"
+    root_id = chain[0].id if chain else node.id
+    return OrgNodeOut(
+        id=node.id,
+        name=node.name,
+        code=node.code,
+        node_type=node.node_type,
+        parent_id=node.parent_id,
+        root_organization_id=root_id,
+        timezone=node.timezone,
+        depth=depth,
+        path=path,
+        is_active=node.is_active,
+        created_at=node.created_at,
+        updated_at=node.updated_at,
+        children=None,
+    )
+
+
+# ── Organizations (company roots) ───────────────────────────────────────────────
+
+
+async def _ensure_unique_root_code(
+    db: AsyncSession, code: str, *, exclude_id: int | None = None
+) -> None:
+    """Company codes stay globally unique (app-layer; roots only)."""
+    stmt = select(Organization.id).where(
+        Organization.code == code, Organization.parent_id.is_(None)
+    )
     if exclude_id is not None:
         stmt = stmt.where(Organization.id != exclude_id)
     if (await db.execute(stmt)).first() is not None:
         raise ConflictError(f"Organization code '{code}' is already in use")
-
-
-async def _ensure_unique_code_in_org(
-    db: AsyncSession, model, organization_id: int, code: str, *, exclude_id: int | None = None
-) -> None:
-    stmt = select(model.id).where(model.organization_id == organization_id, model.code == code)
-    if exclude_id is not None:
-        stmt = stmt.where(model.id != exclude_id)
-    if (await db.execute(stmt)).first() is not None:
-        label = "Branch" if model is Branch else "Department"
-        raise ConflictError(f"{label} code '{code}' is already in use in this organization")
-
-
-async def _resolve_target_org_id(
-    db: AsyncSession, tenant_org_id: int | None, body_org_id: int | None
-) -> int:
-    """Pick the org a new branch/department belongs to.
-
-    The tenant context (header or the user's own org) always wins; only a super
-    admin without a tenant header may choose the org through the request body.
-    """
-    org_id = tenant_org_id if tenant_org_id is not None else body_org_id
-    if org_id is None:
-        raise ValidationError("Organization context required")
-    exists = (
-        await db.execute(select(Organization.id).where(Organization.id == org_id))
-    ).first()
-    if exists is None:
-        raise NotFoundError("Organization not found")
-    return org_id
-
-
-async def _validate_branch_in_org(db: AsyncSession, branch_id: int, organization_id: int) -> None:
-    stmt = select(Branch.id).where(Branch.id == branch_id, Branch.organization_id == organization_id)
-    if (await db.execute(stmt)).first() is None:
-        raise ValidationError("Branch does not belong to this organization")
-
-
-def _format_department(dept: Department) -> DepartmentWithBranch:
-    base = DepartmentOut.model_validate(dept, from_attributes=True)
-    branch = (
-        BranchBrief(id=dept.branch.id, name=dept.branch.name)
-        if dept.branch is not None
-        else None
-    )
-    return DepartmentWithBranch(**base.model_dump(), branch=branch)
-
-
-# ── Organizations ─────────────────────────────────────────────────────────────
 
 
 async def list_organizations(
@@ -109,27 +103,29 @@ async def list_organizations(
     user_org_id: int | None,
     tenant_org_id: int | None,
 ) -> list[OrganizationWithCounts]:
-    stmt = select(Organization).order_by(Organization.name)
+    stmt = (
+        select(Organization)
+        .where(Organization.parent_id.is_(None))
+        .order_by(Organization.name)
+    )
     if not is_super_admin:
         stmt = stmt.where(Organization.id == user_org_id)
-    else:
-        stmt = apply_tenant_filter(stmt, tenant_org_id, Organization.id)
-    orgs = list((await db.execute(stmt)).scalars().all())
-    org_ids = [o.id for o in orgs]
+    elif tenant_org_id is not None:
+        stmt = stmt.where(Organization.id == tenant_org_id)
+    roots = list((await db.execute(stmt)).scalars().all())
 
-    branch_counts = await _count_by_org(db, Branch, org_ids)
-    dept_counts = await _count_by_org(db, Department, org_ids)
-    emp_counts = await _count_by_org(db, Employee, org_ids)
-
-    return [
-        OrganizationWithCounts(
-            **OrganizationOut.model_validate(org, from_attributes=True).model_dump(),
-            branches_count=branch_counts.get(org.id, 0),
-            departments_count=dept_counts.get(org.id, 0),
-            employees_count=emp_counts.get(org.id, 0),
+    result: list[OrganizationWithCounts] = []
+    for root in roots:
+        descendants = await descendant_ids(db, root.id, include_self=False)
+        employees = await _count_where(db, Employee, Employee.organization_id, root.id)
+        result.append(
+            OrganizationWithCounts(
+                **OrganizationOut.model_validate(root, from_attributes=True).model_dump(),
+                nodes_count=len(descendants),
+                employees_count=employees,
+            )
         )
-        for org in orgs
-    ]
+    return result
 
 
 async def create_organization(
@@ -137,9 +133,14 @@ async def create_organization(
 ) -> Organization:
     if not is_super_admin:
         raise PermissionDeniedError("Only super admins can create organizations")
-    await _ensure_unique_org_code(db, body.code)
+    await _ensure_unique_root_code(db, body.code)
     org = Organization(
-        name=body.name, code=body.code, timezone=body.timezone, settings=body.settings
+        name=body.name,
+        code=body.code,
+        timezone=body.timezone,
+        settings=body.settings,
+        node_type="company",
+        parent_id=None,
     )
     db.add(org)
     await db.flush()
@@ -153,7 +154,11 @@ async def get_organization(
     if not is_super_admin and user_org_id != target_org_id:
         raise PermissionDeniedError("Access denied")
     org = (
-        await db.execute(select(Organization).where(Organization.id == target_org_id))
+        await db.execute(
+            select(Organization).where(
+                Organization.id == target_org_id, Organization.parent_id.is_(None)
+            )
+        )
     ).scalar_one_or_none()
     if org is None:
         raise NotFoundError("Organization not found")
@@ -173,7 +178,7 @@ async def update_organization(
     )
     changes = body.model_dump(exclude_unset=True)
     if "code" in changes and changes["code"] != org.code:
-        await _ensure_unique_org_code(db, changes["code"], exclude_id=org.id)
+        await _ensure_unique_root_code(db, changes["code"], exclude_id=org.id)
     for field, value in changes.items():
         setattr(org, field, value)
     await db.flush()
@@ -187,178 +192,217 @@ async def delete_organization(
     if not is_super_admin:
         raise PermissionDeniedError("Only super admins can delete organizations")
     org = (
-        await db.execute(select(Organization).where(Organization.id == target_org_id))
+        await db.execute(
+            select(Organization).where(
+                Organization.id == target_org_id, Organization.parent_id.is_(None)
+            )
+        )
     ).scalar_one_or_none()
     if org is None:
         raise NotFoundError("Organization not found")
-    employees = await _employee_count(db, Employee.organization_id, org.id)
+
+    descendants = await descendant_ids(db, org.id, include_self=False)
+    if descendants:
+        raise ConflictError(
+            f"Organization still has {len(descendants)} sub-unit(s); remove them first"
+        )
+    employees = await _count_where(db, Employee, Employee.organization_id, org.id)
     if employees:
         raise ConflictError(
             f"Organization still has {employees} employee(s); reassign or remove them first"
         )
-    # Branches and departments cascade at the database level.
     await db.delete(org)
     await db.flush()
 
 
-# ── Branches ──────────────────────────────────────────────────────────────────
+# ── Org-tree nodes ───────────────────────────────────────────────────────────
 
 
-async def list_branches(
-    db: AsyncSession, org_id: int | None, organization_id: int | None
-) -> list[Branch]:
-    stmt = select(Branch).order_by(Branch.name)
-    if organization_id is not None:
-        stmt = stmt.where(Branch.organization_id == organization_id)
-    stmt = apply_tenant_filter(stmt, org_id, Branch.organization_id)
-    return list((await db.execute(stmt)).scalars().all())
+async def _ensure_unique_sibling_code(
+    db: AsyncSession, parent_id: int, code: str, *, exclude_id: int | None = None
+) -> None:
+    stmt = select(Organization.id).where(
+        Organization.parent_id == parent_id, Organization.code == code
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Organization.id != exclude_id)
+    if (await db.execute(stmt)).first() is not None:
+        raise ConflictError(f"Code '{code}' is already in use under this parent")
 
 
-async def create_branch(db: AsyncSession, org_id: int | None, body: BranchCreate) -> Branch:
-    target_org_id = await _resolve_target_org_id(db, org_id, body.organization_id)
-    await _ensure_unique_code_in_org(db, Branch, target_org_id, body.code)
-    branch = Branch(
-        organization_id=target_org_id,
+async def _get_node_in_tenant(
+    db: AsyncSession, tenant_org_id: int | None, node_id: int
+) -> Organization:
+    """Load a node belonging to the caller's tenant (or any node when global)."""
+    node = (
+        await db.execute(select(Organization).where(Organization.id == node_id))
+    ).scalar_one_or_none()
+    if node is None:
+        raise NotFoundError("Organization node not found")
+    if tenant_org_id is not None and await root_id_of(db, node.id) != tenant_org_id:
+        raise NotFoundError("Organization node not found")
+    return node
+
+
+async def get_tree(db: AsyncSession, tenant_org_id: int | None) -> list[OrgNodeOut]:
+    """Return the tenant's org tree as nested OrgNodeOut roots.
+
+    depth/path/root_organization_id are computed during assembly. For a global
+    super admin (tenant_org_id None) every company is returned.
+    """
+    if tenant_org_id is not None:
+        rows = await fetch_subtree(db, tenant_org_id)
+        top_ids = [tenant_org_id]
+    else:
+        rows = list((await db.execute(select(Organization))).scalars().all())
+        top_ids = [r.id for r in rows if r.parent_id is None]
+    if not rows:
+        return []
+
+    by_id = {r.id: r for r in rows}
+    by_parent: dict[int | None, list[Organization]] = {}
+    for r in rows:
+        by_parent.setdefault(r.parent_id, []).append(r)
+
+    def build(node: Organization, parent_path: str, depth: int, root_resp: int) -> OrgNodeOut:
+        path = f"{parent_path}{node.id}/"
+        kids = sorted(by_parent.get(node.id, []), key=lambda o: o.name)
+        return OrgNodeOut(
+            id=node.id,
+            name=node.name,
+            code=node.code,
+            node_type=node.node_type,
+            parent_id=node.parent_id,
+            root_organization_id=root_resp,
+            timezone=node.timezone,
+            depth=depth,
+            path=path,
+            is_active=node.is_active,
+            created_at=node.created_at,
+            updated_at=node.updated_at,
+            children=[build(k, path, depth + 1, root_resp) for k in kids],
+        )
+
+    out: list[OrgNodeOut] = []
+    for top_id in top_ids:
+        top = by_id.get(top_id)
+        if top is None:
+            continue
+        root_resp = tenant_org_id if tenant_org_id is not None else top.id
+        out.append(build(top, "/", 0, root_resp))
+    return out
+
+
+async def get_node(db: AsyncSession, tenant_org_id: int | None, node_id: int) -> OrgNodeDetail:
+    node = await _get_node_in_tenant(db, tenant_org_id, node_id)
+    base = await _node_out(db, node)
+    breadcrumb_rows = await ancestor_chain(db, node.id, include_self=False)
+    breadcrumb = [
+        OrgNodeBrief(id=o.id, name=o.name, node_type=o.node_type) for o in breadcrumb_rows
+    ]
+    return OrgNodeDetail(**base.model_dump(), breadcrumb=breadcrumb)
+
+
+async def create_node(
+    db: AsyncSession, tenant_org_id: int | None, body: OrgNodeCreate
+) -> OrgNodeOut:
+    parent = await _get_node_in_tenant(db, tenant_org_id, body.parent_id)
+    await _ensure_unique_sibling_code(db, parent.id, body.code)
+    node = Organization(
         name=body.name,
         code=body.code,
-        address=body.address,
+        node_type=body.node_type,
+        parent_id=parent.id,
         timezone=body.timezone,
     )
-    db.add(branch)
+    db.add(node)
     await db.flush()
-    await db.refresh(branch)
-    return branch
+    await db.refresh(node)
+    return await _node_out(db, node)
 
 
-async def _get_branch(db: AsyncSession, org_id: int | None, branch_id: int) -> Branch:
-    stmt = select(Branch).where(Branch.id == branch_id)
-    stmt = apply_tenant_filter(stmt, org_id, Branch.organization_id)
-    branch = (await db.execute(stmt)).scalar_one_or_none()
-    if branch is None:
-        raise NotFoundError("Branch not found")
-    return branch
-
-
-async def update_branch(
-    db: AsyncSession, org_id: int | None, branch_id: int, body: BranchUpdate
-) -> Branch:
-    branch = await _get_branch(db, org_id, branch_id)
+async def update_node(
+    db: AsyncSession, tenant_org_id: int | None, node_id: int, body: OrgNodeUpdate
+) -> OrgNodeOut:
+    node = await _get_node_in_tenant(db, tenant_org_id, node_id)
+    if node.parent_id is None:
+        raise ValidationError("Use the organizations endpoint to edit a company root")
     changes = body.model_dump(exclude_unset=True)
-    if "code" in changes and changes["code"] != branch.code:
-        await _ensure_unique_code_in_org(
-            db, Branch, branch.organization_id, changes["code"], exclude_id=branch.id
-        )
+    if "code" in changes and changes["code"] != node.code:
+        await _ensure_unique_sibling_code(db, node.parent_id, changes["code"], exclude_id=node.id)
     for field, value in changes.items():
-        setattr(branch, field, value)
+        setattr(node, field, value)
     await db.flush()
-    await db.refresh(branch)
-    return branch
+    await db.refresh(node)
+    return await _node_out(db, node)
 
 
-async def delete_branch(db: AsyncSession, org_id: int | None, branch_id: int) -> None:
-    branch = await _get_branch(db, org_id, branch_id)
-    employees = await _employee_count(db, Employee.branch_id, branch.id)
-    if employees:
+async def move_node(
+    db: AsyncSession, tenant_org_id: int | None, node_id: int, body: OrgNodeMove
+) -> OrgNodeOut:
+    node = await _get_node_in_tenant(db, tenant_org_id, node_id)
+    if node.parent_id is None:
+        raise ValidationError("A company root cannot be moved")
+    new_parent = await _get_node_in_tenant(db, tenant_org_id, body.new_parent_id)
+
+    if await root_id_of(db, new_parent.id) != await root_id_of(db, node.id):
+        raise ValidationError("Cannot move a node to a different organization")
+    if new_parent.id == node.parent_id:
+        await db.refresh(node)
+        return await _node_out(db, node)
+    # Cycle guard: the new parent must not be the node itself or a descendant.
+    blocked = await descendant_ids(db, node.id, include_self=True)
+    if new_parent.id in blocked:
+        raise ValidationError("Cannot move a node beneath itself")
+    await _ensure_unique_sibling_code(db, new_parent.id, node.code, exclude_id=node.id)
+
+    node.parent_id = new_parent.id
+    await db.flush()
+    await db.refresh(node)
+    return await _node_out(db, node)
+
+
+async def delete_node(db: AsyncSession, tenant_org_id: int | None, node_id: int) -> None:
+    node = await _get_node_in_tenant(db, tenant_org_id, node_id)
+    if node.parent_id is None:
+        raise ValidationError("Use the organizations endpoint to delete a company root")
+    child_nodes = await _count_where(db, Organization, Organization.parent_id, node.id)
+    if child_nodes:
         raise ConflictError(
-            f"Branch still has {employees} employee(s); reassign or remove them first"
+            f"Node still has {child_nodes} sub-unit(s); remove or move them first"
         )
-    # Departments that pointed here are detached (branch_id SET NULL) by the database.
-    await db.delete(branch)
-    await db.flush()
-
-
-# ── Departments ───────────────────────────────────────────────────────────────
-
-
-async def list_departments(
-    db: AsyncSession,
-    org_id: int | None,
-    organization_id: int | None,
-    branch_id: int | None,
-) -> list[DepartmentWithBranch]:
-    stmt = select(Department).order_by(Department.name)
-    if organization_id is not None:
-        stmt = stmt.where(Department.organization_id == organization_id)
-    if branch_id is not None:
-        stmt = stmt.where(Department.branch_id == branch_id)
-    stmt = apply_tenant_filter(stmt, org_id, Department.organization_id)
-    return [_format_department(d) for d in (await db.execute(stmt)).scalars().all()]
-
-
-async def create_department(
-    db: AsyncSession, org_id: int | None, body: DepartmentCreate
-) -> Department:
-    target_org_id = await _resolve_target_org_id(db, org_id, body.organization_id)
-    await _ensure_unique_code_in_org(db, Department, target_org_id, body.code)
-    if body.branch_id is not None:
-        await _validate_branch_in_org(db, body.branch_id, target_org_id)
-    dept = Department(
-        organization_id=target_org_id, branch_id=body.branch_id, name=body.name, code=body.code
-    )
-    db.add(dept)
-    await db.flush()
-    await db.refresh(dept)
-    return dept
-
-
-async def _get_department(db: AsyncSession, org_id: int | None, department_id: int) -> Department:
-    stmt = select(Department).where(Department.id == department_id)
-    stmt = apply_tenant_filter(stmt, org_id, Department.organization_id)
-    dept = (await db.execute(stmt)).scalar_one_or_none()
-    if dept is None:
-        raise NotFoundError("Department not found")
-    return dept
-
-
-async def update_department(
-    db: AsyncSession, org_id: int | None, department_id: int, body: DepartmentUpdate
-) -> Department:
-    dept = await _get_department(db, org_id, department_id)
-    changes = body.model_dump(exclude_unset=True)
-    if "code" in changes and changes["code"] != dept.code:
-        await _ensure_unique_code_in_org(
-            db, Department, dept.organization_id, changes["code"], exclude_id=dept.id
-        )
-    if changes.get("branch_id") is not None:
-        await _validate_branch_in_org(db, changes["branch_id"], dept.organization_id)
-    for field, value in changes.items():
-        setattr(dept, field, value)
-    await db.flush()
-    await db.refresh(dept)
-    return dept
-
-
-async def delete_department(db: AsyncSession, org_id: int | None, department_id: int) -> None:
-    dept = await _get_department(db, org_id, department_id)
-    employees = await _employee_count(db, Employee.department_id, dept.id)
-    if employees:
-        raise ConflictError(
-            f"Department still has {employees} employee(s); reassign or remove them first"
-        )
-    await db.delete(dept)
+    await db.delete(node)
     await db.flush()
 
 
 # ── Locations ─────────────────────────────────────────────────────────────────
 
 
-def _format_location(loc: Location) -> LocationWithBranch:
-    base = LocationOut.model_validate(loc, from_attributes=True)
-    branch = (
-        BranchBrief(id=loc.branch.id, name=loc.branch.name) if loc.branch is not None else None
-    )
-    return LocationWithBranch(**base.model_dump(), branch=branch)
+async def _resolve_target_org_id(
+    db: AsyncSession, tenant_org_id: int | None, body_org_id: int | None
+) -> int:
+    """The tenant root a new location belongs to (tenant context wins)."""
+    org_id = tenant_org_id if tenant_org_id is not None else body_org_id
+    if org_id is None:
+        raise ValidationError("Organization context required")
+    root_id = await root_id_of(db, org_id)
+    if root_id is None:
+        raise NotFoundError("Organization not found")
+    return root_id
 
 
-async def list_locations(db: AsyncSession, org_id: int | None) -> list[LocationWithBranch]:
+async def list_locations(db: AsyncSession, tenant_org_id: int | None) -> list[LocationOut]:
     stmt = select(Location).order_by(Location.name)
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
-    return [_format_location(loc) for loc in (await db.execute(stmt)).scalars().all()]
+    stmt = apply_tenant_filter(stmt, tenant_org_id, Location.organization_id)
+    return [
+        LocationOut.model_validate(loc, from_attributes=True)
+        for loc in (await db.execute(stmt)).scalars().all()
+    ]
 
 
-async def _get_location(db: AsyncSession, org_id: int | None, location_id: int) -> Location:
+async def _get_location(db: AsyncSession, tenant_org_id: int | None, location_id: int) -> Location:
     stmt = select(Location).where(Location.id == location_id)
-    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
+    stmt = apply_tenant_filter(stmt, tenant_org_id, Location.organization_id)
     location = (await db.execute(stmt)).scalar_one_or_none()
     if location is None:
         raise NotFoundError("Location not found")
@@ -366,14 +410,11 @@ async def _get_location(db: AsyncSession, org_id: int | None, location_id: int) 
 
 
 async def create_location(
-    db: AsyncSession, org_id: int | None, body: LocationCreate
-) -> LocationWithBranch:
-    target_org_id = await _resolve_target_org_id(db, org_id, body.organization_id)
-    if body.branch_id is not None:
-        await _validate_branch_in_org(db, body.branch_id, target_org_id)
+    db: AsyncSession, tenant_org_id: int | None, body: LocationCreate
+) -> LocationOut:
+    target_org_id = await _resolve_target_org_id(db, tenant_org_id, body.organization_id)
     location = Location(
         organization_id=target_org_id,
-        branch_id=body.branch_id,
         name=body.name,
         address=body.address,
         timezone=body.timezone,
@@ -381,21 +422,19 @@ async def create_location(
     db.add(location)
     await db.flush()
     await db.refresh(location)
-    return _format_location(location)
+    return LocationOut.model_validate(location, from_attributes=True)
 
 
 async def update_location(
-    db: AsyncSession, org_id: int | None, location_id: int, body: LocationUpdate
-) -> LocationWithBranch:
-    location = await _get_location(db, org_id, location_id)
+    db: AsyncSession, tenant_org_id: int | None, location_id: int, body: LocationUpdate
+) -> LocationOut:
+    location = await _get_location(db, tenant_org_id, location_id)
     changes = body.model_dump(exclude_unset=True)
-    if changes.get("branch_id") is not None:
-        await _validate_branch_in_org(db, changes["branch_id"], location.organization_id)
     for field, value in changes.items():
         setattr(location, field, value)
     await db.flush()
     await db.refresh(location)
-    return _format_location(location)
+    return LocationOut.model_validate(location, from_attributes=True)
 
 
 async def _location_dependents(db: AsyncSession, location_id: int) -> dict[str, int]:
@@ -413,8 +452,8 @@ async def _location_dependents(db: AsyncSession, location_id: int) -> dict[str, 
     return counts
 
 
-async def delete_location(db: AsyncSession, org_id: int | None, location_id: int) -> None:
-    location = await _get_location(db, org_id, location_id)
+async def delete_location(db: AsyncSession, tenant_org_id: int | None, location_id: int) -> None:
+    location = await _get_location(db, tenant_org_id, location_id)
 
     # Cameras, RFID readers, and edge devices cascade-delete with their
     # location — refuse instead of silently destroying device configuration.
@@ -423,7 +462,7 @@ async def delete_location(db: AsyncSession, org_id: int | None, location_id: int
         detail = ", ".join(f"{count} {label}(s)" for label, count in dependents.items())
         raise ConflictError(f"Location still has {detail}; move or remove them first")
 
-    employees = await _employee_count(db, Employee.location_id, location.id)
+    employees = await _count_where(db, Employee, Employee.location_id, location.id)
     if employees:
         raise ConflictError(
             f"Location still has {employees} employee(s); reassign or remove them first"

@@ -7,54 +7,48 @@ from app.models.base import Base, TimestampMixin
 
 
 class Organization(Base, TimestampMixin):
+    """A node in the organization tree (a plain ``parent_id`` adjacency list).
+
+    A root node (``parent_id IS NULL``) is a *company* and the tenant boundary;
+    its descendants (departments, teams, branches, ...) are sub-units of that
+    same company. A node's company root and its sub-tree are derived by walking
+    ``parent_id`` (see ``app.middleware.tenant`` recursive helpers); they are
+    not denormalized onto the row.
+    """
+
     __tablename__ = "organizations"
+    __table_args__ = (
+        # Sibling nodes (and root companies among themselves) can't share a code.
+        UniqueConstraint("parent_id", "code", name="uq_org_parent_code"),
+        Index("ix_org_parent", "parent_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
-    code: Mapped[str] = mapped_column(String(255), unique=True)
+    code: Mapped[str] = mapped_column(String(255))
+
+    # Tree link. parent_id NULL marks a root (company). RESTRICT so a node can
+    # never be deleted out from under its descendants — deletes are guarded in
+    # the service layer with a clear 409 (organization_service.delete_node).
+    parent_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True
+    )
+    # Free-form label ('company' is reserved for roots, e.g. 'department',
+    # 'team', 'branch'). Kept as a string so new levels need no migration.
+    node_type: Mapped[str] = mapped_column(String(32), server_default="company")
+
     timezone: Mapped[str] = mapped_column(String(255), server_default="UTC")
     settings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="1")
 
-    branches: Mapped[list[Branch]] = relationship(back_populates="organization", lazy="selectin")
-    departments: Mapped[list[Department]] = relationship(back_populates="organization", lazy="selectin")
-
-
-class Branch(Base, TimestampMixin):
-    __tablename__ = "branches"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "code"),
+    parent: Mapped[Organization | None] = relationship(
+        "Organization",
+        remote_side=[id],
+        back_populates="children",
+        lazy="noload",
     )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    organization_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("organizations.id", ondelete="CASCADE")
+    children: Mapped[list[Organization]] = relationship(
+        "Organization",
+        back_populates="parent",
+        lazy="noload",
     )
-    name: Mapped[str] = mapped_column(String(255))
-    code: Mapped[str] = mapped_column(String(255))
-    address: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    timezone: Mapped[str] = mapped_column(String(255), server_default="UTC")
-    is_active: Mapped[bool] = mapped_column(Boolean, server_default="1")
-
-    organization: Mapped[Organization] = relationship(back_populates="branches", lazy="selectin")
-
-
-class Department(Base, TimestampMixin):
-    __tablename__ = "departments"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "code"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    organization_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("organizations.id", ondelete="CASCADE")
-    )
-    branch_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("branches.id", ondelete="SET NULL"), nullable=True
-    )
-    name: Mapped[str] = mapped_column(String(255))
-    code: Mapped[str] = mapped_column(String(255))
-    is_active: Mapped[bool] = mapped_column(Boolean, server_default="1")
-
-    organization: Mapped[Organization] = relationship(back_populates="departments", lazy="selectin")
-    branch: Mapped[Branch | None] = relationship(lazy="selectin")

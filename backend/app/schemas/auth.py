@@ -82,8 +82,6 @@ class RoleOut(BaseModel):
 class UserOut(BaseModel):
     id: int
     organization_id: int | None = None
-    branch_id: int | None = None
-    department_id: int | None = None
     name: str
     email: str
     email_verified_at: datetime | None = None

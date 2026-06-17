@@ -1,5 +1,5 @@
 from app.models.base import Base, TimestampMixin
-from app.models.organization import Organization, Branch, Department
+from app.models.organization import Organization
 from app.models.location import Location
 from app.models.user import User, Role, Permission, role_permission, role_user
 from app.models.employee import Employee
@@ -46,8 +46,6 @@ __all__ = [
     "Base",
     "TimestampMixin",
     "Organization",
-    "Branch",
-    "Department",
     "Location",
     "User",
     "Role",

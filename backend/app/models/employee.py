@@ -33,12 +33,6 @@ class Employee(Base, TimestampMixin):
     location_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True
     )
-    branch_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("branches.id", ondelete="SET NULL"), nullable=True
-    )
-    department_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
-    )
     employee_code: Mapped[str] = mapped_column(String(255))
     first_name: Mapped[str] = mapped_column(String(255))
     last_name: Mapped[str] = mapped_column(String(255))
@@ -54,8 +48,6 @@ class Employee(Base, TimestampMixin):
 
     organization: Mapped["Organization"] = relationship(lazy="selectin")
     location: Mapped["Location | None"] = relationship(lazy="selectin")
-    branch: Mapped["Branch | None"] = relationship(lazy="selectin")
-    department_rel: Mapped["Department | None"] = relationship(lazy="selectin")
     face_embeddings: Mapped[list["FaceEmbedding"]] = relationship(
         "FaceEmbedding", back_populates="employee", lazy="noload"
     )

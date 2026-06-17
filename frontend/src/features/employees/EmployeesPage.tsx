@@ -82,6 +82,10 @@ export default function EmployeesPage() {
   const { data, isPending: loading } = useEmployees(debouncedSearch)
   const employees = data?.data ?? []
   const { data: locations = [] } = useEmployeeLocations()
+  // The employee list returns location_id only; resolve names from the
+  // locations the form picker already loads.
+  const locationName = (id: number | null | undefined) =>
+    id == null ? undefined : locations.find((l) => l.id === id)?.name
 
   const saveEmployee = useSaveEmployee()
   const deleteMutation = useDeleteEmployee()
@@ -108,10 +112,9 @@ export default function EmployeesPage() {
       first_name: e.first_name,
       last_name: e.last_name,
       email: e.email ?? '',
-      department: e.department ?? '',
       job_title: e.job_title ?? '',
       hire_date: e.hire_date ?? '',
-      location_id: e.location?.id ? String(e.location.id) : '',
+      location_id: e.location_id ? String(e.location_id) : '',
       is_active: String(e.is_active),
     })
     setFormOpen(true)
@@ -241,13 +244,6 @@ export default function EmployeesPage() {
             />
           </Label>
           <Label>
-            Department
-            <Input
-              value={form.department}
-              onChange={(e) => setForm({ ...form, department: e.target.value })}
-            />
-          </Label>
-          <Label>
             Job title
             <Input
               value={form.job_title}
@@ -310,18 +306,11 @@ export default function EmployeesPage() {
             ),
           },
           {
-            key: 'department',
-            header: 'Department',
-            sortable: true,
-            sortValue: (e) => e.department ?? '',
-            cell: (e) => e.department ?? <span className="text-slate-600">—</span>,
-          },
-          {
             key: 'location',
             header: 'Location',
             sortable: true,
-            sortValue: (e) => e.location?.name ?? '',
-            cell: (e) => e.location?.name ?? <span className="text-slate-600">—</span>,
+            sortValue: (e) => locationName(e.location_id) ?? '',
+            cell: (e) => locationName(e.location_id) ?? <span className="text-slate-600">—</span>,
           },
           {
             key: 'face_enrolled',

@@ -41,7 +41,7 @@ from app.models.audit import AuditLog
 from app.models.camera import Camera, CameraDirection, CameraStatus, DeploymentMode
 from app.models.employee import Employee
 from app.models.location import Location
-from app.models.organization import Branch, Department, Organization
+from app.models.organization import Organization
 from app.models.recognition import RecognitionEvent, RecognitionResult
 from app.models.user import User
 
@@ -108,14 +108,6 @@ async def seed() -> None:
             print("[loadtest] No organization found. Run `python seed.py` first.")
             return
 
-        branch = (
-            await db.execute(select(Branch).where(Branch.organization_id == org.id).limit(1))
-        ).scalar_one_or_none()
-        department = (
-            await db.execute(
-                select(Department).where(Department.organization_id == org.id).limit(1)
-            )
-        ).scalar_one_or_none()
         location = (
             await db.execute(
                 select(Location).where(Location.organization_id == org.id).limit(1)
@@ -142,8 +134,6 @@ async def seed() -> None:
             print("[loadtest] No admin user found. Run `python seed.py` first.")
             return
 
-        branch_id = branch.id if branch else None
-        department_id = department.id if department else None
 
         existing_ids = list(
             (
@@ -195,7 +185,6 @@ async def seed() -> None:
         extra_locations = [
             {
                 "organization_id": org.id,
-                "branch_id": branch_id,
                 "name": name,
                 "address": f"{i} Load Test Ave",
                 "timezone": "UTC",
@@ -222,8 +211,6 @@ async def seed() -> None:
                 {
                     "organization_id": org.id,
                     "location_id": RNG.choice(location_ids),
-                    "branch_id": branch_id,
-                    "department_id": department_id,
                     "employee_code": f"{EMP_CODE_PREFIX}{i:07d}",
                     "first_name": f"Load{i}",
                     "last_name": RNG.choice(["Tester", "Demo", "Sample", "Bench"]),

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { clearOrg, selectOrgId, setOrg } from '@/features/tenant/tenantSlice'
 import { useAuth } from '@/features/auth/AuthProvider'
@@ -10,12 +10,12 @@ import { Combobox } from '@/shared/ui/Combobox'
 import { cn } from '@/shared/lib/cn'
 import { TenancyDirectory } from '@/features/security/components/TenancyDirectory'
 import {
-  useBranches,
-  useDepartments,
   useLocations,
   useOrganizations,
+  useOrgTree,
   useSecurityConfig,
 } from '@/features/security/api/queries'
+import { flattenTree } from '@/features/security/lib/tree'
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
@@ -130,14 +130,19 @@ export default function SecurityTenancyPage() {
   const currentOrgId = useAppSelector(selectOrgId)
   const { data: security } = useSecurityConfig(hasPermission('security.view'))
   const { data: organizations } = useOrganizations()
-  const { data: branches } = useBranches()
-  const { data: departments } = useDepartments()
+  const { data: tree } = useOrgTree()
   const { data: locations } = useLocations()
 
   const [tenantOrgId, setTenantOrgId] = useState(() => currentOrgId ?? '')
 
   const orgs = organizations ?? []
-  const employeesTotal = orgs.reduce((total, o) => total + (o.employees_count ?? 0), 0)
+  const treeRoots = useMemo(() => tree ?? [], [tree])
+  const allNodes = useMemo(() => flattenTree(treeRoots), [treeRoots])
+  // Every non-root unit across the tree.
+  const unitsCount = allNodes.filter((n) => n.parent_id !== null).length
+  const departmentsCount = allNodes.filter((n) => n.node_type === 'department').length
+  // Company-wide employee total, summed from the per-company counts.
+  const employeesTotal = orgs.reduce((sum, o) => sum + (o.employees_count ?? 0), 0)
   const contextOrgName = currentOrgId
     ? orgs.find((o) => String(o.id) === currentOrgId)?.name ?? `Organization #${currentOrgId}`
     : null
@@ -161,8 +166,8 @@ export default function SecurityTenancyPage() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <StatTile label="Organizations" value={orgs.length} dot="bg-blue-400" accent="border-l-blue-500" />
-        <StatTile label="Branches" value={(branches ?? []).length} dot="bg-violet-400" accent="border-l-violet-500" />
-        <StatTile label="Departments" value={(departments ?? []).length} dot="bg-cyan-400" accent="border-l-cyan-500" />
+        <StatTile label="Org units" value={unitsCount} dot="bg-violet-400" accent="border-l-violet-500" />
+        <StatTile label="Departments" value={departmentsCount} dot="bg-cyan-400" accent="border-l-cyan-500" />
         <StatTile label="Locations" value={(locations ?? []).length} dot="bg-amber-400" accent="border-l-amber-500" />
         <StatTile label="Employees" value={employeesTotal} dot="bg-emerald-400" accent="border-l-emerald-500" />
       </div>
@@ -311,7 +316,7 @@ export default function SecurityTenancyPage() {
         <div className="mb-4">
           <h2 className="text-lg font-semibold text-slate-100">Organization directory</h2>
           <p className="mt-0.5 text-sm text-slate-400">
-            Manage your organization&apos;s name, branches, departments, and locations.
+            Manage your organization&apos;s name, org-unit tree, and locations.
           </p>
         </div>
         <TenancyDirectory />

@@ -28,12 +28,17 @@ class _OrgSession:
         self._existing = existing_org_ids
 
     async def scalar(self, stmt):
-        # Used by the "does this org id exist" check; return the id if known.
+        # Used by single-row lookups; return the id if known.
         return self._existing[0] if self._existing else None
 
     async def execute(self, stmt):
-        rows = [(i,) for i in self._existing]
-        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [r[0] for r in rows]))
+        existing = list(self._existing)
+        # Supports both get_single_org_id (.scalars().all()) and root_id_of
+        # (.scalar_one_or_none()), which is the recursive root-of-node walk.
+        return SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: existing),
+            scalar_one_or_none=lambda: (existing[0] if existing else None),
+        )
 
 
 def _user(*, super_admin: bool, org_id):
@@ -80,22 +85,25 @@ class TestSuperAdmin:
         assert result == 3
 
     @pytest.mark.asyncio
-    async def test_unknown_org_header_rejected(self):
+    async def test_unknown_org_header_falls_back(self):
+        # A stale selection (the org was deleted) must not brick every request:
+        # fall back to the single-org / global scope rather than 400. Here no
+        # org exists, so the fallback yields global scope (None).
         user = _user(super_admin=True, org_id=None)
-        with pytest.raises(HTTPException) as exc:
-            await get_tenant_org_id(
-                _request({settings.tenant_header: "999"}), user, db=_OrgSession([])
-            )
-        assert exc.value.status_code == 400
+        result = await get_tenant_org_id(
+            _request({settings.tenant_header: "999"}), user, db=_OrgSession([])
+        )
+        assert result is None
 
     @pytest.mark.asyncio
-    async def test_non_integer_header_rejected(self):
+    async def test_non_integer_header_falls_back(self):
+        # A garbage header degrades to the no-header behaviour instead of 400 —
+        # with exactly one org, that single org.
         user = _user(super_admin=True, org_id=None)
-        with pytest.raises(HTTPException) as exc:
-            await get_tenant_org_id(
-                _request({settings.tenant_header: "abc"}), user, db=_OrgSession([1])
-            )
-        assert exc.value.status_code == 400
+        result = await get_tenant_org_id(
+            _request({settings.tenant_header: "abc"}), user, db=_OrgSession([1])
+        )
+        assert result == 1
 
     @pytest.mark.asyncio
     async def test_no_header_falls_back_to_single_org(self):

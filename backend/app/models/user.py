@@ -65,12 +65,6 @@ class User(Base, TimestampMixin):
     organization_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
     )
-    branch_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("branches.id", ondelete="SET NULL"), nullable=True
-    )
-    department_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
-    )
     name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(255), unique=True)
     email_verified_at: Mapped[datetime | None] = mapped_column(
@@ -91,8 +85,6 @@ class User(Base, TimestampMixin):
     )
 
     organization: Mapped["Organization | None"] = relationship(lazy="selectin")
-    branch: Mapped["Branch | None"] = relationship(lazy="selectin")
-    department: Mapped["Department | None"] = relationship(lazy="selectin")
     roles: Mapped[list[Role]] = relationship(secondary=role_user, lazy="selectin")
 
     def has_role(self, role_name: str) -> bool:

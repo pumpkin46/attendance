@@ -41,8 +41,24 @@ def _seed_password(env_var: str, label: str) -> str:
     return _DEFAULT_SEED_PASSWORD
 
 
+async def _add_node(db, *, parent, name, code, node_type, timezone="UTC"):
+    """Create a child org-tree node under ``parent``."""
+    from app.models.organization import Organization
+
+    node = Organization(
+        name=name,
+        code=code,
+        node_type=node_type,
+        parent_id=parent.id,
+        timezone=timezone,
+    )
+    db.add(node)
+    await db.flush()
+    return node
+
+
 async def seed():
-    from app.models.organization import Organization, Branch, Department
+    from app.models.organization import Organization
     from app.models.location import Location
     from app.models.user import User
     from app.models.employee import Employee
@@ -55,19 +71,22 @@ async def seed():
             print("Database already seeded (organizations exist). Skipping.")
             return
 
-        org = Organization(name="Demo Corporation", code="DEMO", timezone="UTC")
+        # Company root: parent_id NULL marks it as the tenant.
+        org = Organization(
+            name="Demo Corporation", code="DEMO", timezone="UTC",
+            node_type="company", parent_id=None,
+        )
         db.add(org)
         await db.flush()
 
-        branch = Branch(organization_id=org.id, name="Head Office Branch", code="HQ", address="100 Main Street", timezone="UTC")
-        db.add(branch)
-        await db.flush()
+        # A small tree: Demo Corporation > Technology > Backend Team.
+        technology = await _add_node(db, parent=org, name="Technology", code="TECH", node_type="department")
+        backend_team = await _add_node(db, parent=technology, name="Backend Team", code="BACKEND", node_type="team")
 
-        department = Department(organization_id=org.id, branch_id=branch.id, name="Operations", code="OPS")
-        db.add(department)
-        await db.flush()
-
-        location = Location(organization_id=org.id, branch_id=branch.id, name="Head Office", address="100 Main Street", timezone="UTC")
+        location = Location(
+            organization_id=org.id,
+            name="Head Office", address="100 Main Street", timezone="UTC",
+        )
         db.add(location)
         await db.flush()
 
@@ -86,8 +105,6 @@ async def seed():
 
         admin = User(
             organization_id=org.id,
-            branch_id=branch.id,
-            department_id=department.id,
             name="Organization Admin",
             email="admin@attendance.local",
             password=hash_password(_seed_password("SEED_ADMIN_PASSWORD", "admin@attendance.local")),
@@ -133,13 +150,11 @@ async def seed():
             emp = Employee(
                 organization_id=org.id,
                 location_id=location.id,
-                branch_id=branch.id,
-                department_id=department.id,
                 employee_code=f"EMP{i:04d}",
                 first_name=f"Employee{i}",
                 last_name="Demo",
                 email=f"emp{i}@demo.local",
-                department="Operations",
+                department="Backend Team",
                 hire_date=date.today() - timedelta(days=365),
             )
             db.add(emp)

@@ -1,21 +1,19 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { api } from '@/shared/api/client'
+import { api, getApiErrorMessage } from '@/shared/api/client'
 import { STATIC_STALE_MS, useApiQuery } from '@/shared/hooks/useApiQuery'
 import type {
-  Branch,
-  CreateBranchPayload,
-  CreateDepartmentPayload,
   CreateLocationPayload,
   CreateOrganizationPayload,
-  Department,
+  CreateOrgNodePayload,
   Location,
+  MoveOrgNodePayload,
   Organization,
+  OrgNode,
   SecurityConfig,
-  UpdateBranchPayload,
-  UpdateDepartmentPayload,
   UpdateLocationPayload,
   UpdateOrganizationPayload,
+  UpdateOrgNodePayload,
 } from '@/features/security/types'
 
 export const securityKeys = {
@@ -26,11 +24,14 @@ export const securityKeys = {
 export const organizationKeys = {
   all: ['organizations'] as const,
   list: ['organizations', 'list'] as const,
-  branches: ['organizations', 'branches'] as const,
-  departments: ['organizations', 'departments'] as const,
   // Deliberately the same key the employee form's location dropdown uses
   // (employeeKeys.locations), so location changes refresh both surfaces.
   locations: ['locations'] as const,
+}
+
+export const orgNodeKeys = {
+  all: ['org-nodes'] as const,
+  tree: ['org-nodes', 'tree'] as const,
 }
 
 export function useSecurityConfig(enabled: boolean) {
@@ -45,12 +46,9 @@ export function useOrganizations() {
   return useApiQuery<Organization[]>(organizationKeys.list, '/organizations')
 }
 
-export function useBranches() {
-  return useApiQuery<Branch[]>(organizationKeys.branches, '/branches')
-}
-
-export function useDepartments() {
-  return useApiQuery<Department[]>(organizationKeys.departments, '/departments')
+/** Top-level company roots, each nested via a `children` array. */
+export function useOrgTree() {
+  return useApiQuery<OrgNode[]>(orgNodeKeys.tree, '/org-nodes/tree')
 }
 
 export function useLocations() {
@@ -63,14 +61,16 @@ export function useInvalidateOrganizationList() {
 }
 
 /**
- * Branch / department mutations also touch the org list because it embeds
- * per-org branch / department counts.
+ * Org-node and location mutations touch the tree, the org list (it embeds
+ * per-org node / employee counts) and the location list (locations reference
+ * org nodes). One invalidator keeps every surface in sync.
  */
-function useInvalidateTenancy(key: readonly unknown[]) {
+export function useInvalidateOrgTree() {
   const qc = useQueryClient()
   return () => {
-    qc.invalidateQueries({ queryKey: key })
+    qc.invalidateQueries({ queryKey: orgNodeKeys.tree })
     qc.invalidateQueries({ queryKey: organizationKeys.list })
+    qc.invalidateQueries({ queryKey: organizationKeys.locations })
   }
 }
 
@@ -82,6 +82,7 @@ export function useCreateOrganization() {
       toast.success('Organization created')
       invalidate()
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
@@ -94,6 +95,7 @@ export function useUpdateOrganization() {
       toast.success('Organization updated')
       invalidate()
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
@@ -105,111 +107,93 @@ export function useDeleteOrganization() {
       toast.success('Organization deleted')
       invalidate()
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
-export function useCreateBranch() {
-  const invalidate = useInvalidateTenancy(organizationKeys.branches)
+export function useCreateOrgNode() {
+  const invalidate = useInvalidateOrgTree()
   return useMutation({
-    mutationFn: (payload: CreateBranchPayload) => api.post('/branches', payload),
+    mutationFn: (payload: CreateOrgNodePayload) => api.post('/org-nodes', payload),
     onSuccess: () => {
-      toast.success('Branch created')
+      toast.success('Org unit created')
       invalidate()
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
-export function useUpdateBranch() {
-  const invalidate = useInvalidateTenancy(organizationKeys.branches)
+export function useUpdateOrgNode() {
+  const invalidate = useInvalidateOrgTree()
   return useMutation({
-    mutationFn: ({ id, ...payload }: UpdateBranchPayload & { id: number }) =>
-      api.patch(`/branches/${id}`, payload),
+    mutationFn: ({ id, ...payload }: UpdateOrgNodePayload & { id: number }) =>
+      api.patch(`/org-nodes/${id}`, payload),
     onSuccess: () => {
-      toast.success('Branch updated')
+      toast.success('Org unit updated')
       invalidate()
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
-export function useDeleteBranch() {
-  // Deleting a branch detaches its departments (branch_id → null), so the
-  // departments list is stale too.
-  const invalidate = useInvalidateTenancy(organizationKeys.branches)
-  const qc = useQueryClient()
+export function useMoveOrgNode() {
+  const invalidate = useInvalidateOrgTree()
   return useMutation({
-    mutationFn: (id: number) => api.delete(`/branches/${id}`),
+    mutationFn: ({ id, ...payload }: MoveOrgNodePayload & { id: number }) =>
+      api.post(`/org-nodes/${id}/move`, payload),
     onSuccess: () => {
-      toast.success('Branch deleted')
+      toast.success('Org unit moved')
       invalidate()
-      qc.invalidateQueries({ queryKey: organizationKeys.departments })
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
-export function useCreateDepartment() {
-  const invalidate = useInvalidateTenancy(organizationKeys.departments)
+export function useDeleteOrgNode() {
+  const invalidate = useInvalidateOrgTree()
   return useMutation({
-    mutationFn: (payload: CreateDepartmentPayload) => api.post('/departments', payload),
+    mutationFn: (id: number) => api.delete(`/org-nodes/${id}`),
     onSuccess: () => {
-      toast.success('Department created')
+      toast.success('Org unit deleted')
       invalidate()
     },
-  })
-}
-
-export function useUpdateDepartment() {
-  const invalidate = useInvalidateTenancy(organizationKeys.departments)
-  return useMutation({
-    mutationFn: ({ id, ...payload }: UpdateDepartmentPayload & { id: number }) =>
-      api.patch(`/departments/${id}`, payload),
-    onSuccess: () => {
-      toast.success('Department updated')
-      invalidate()
-    },
-  })
-}
-
-export function useDeleteDepartment() {
-  const invalidate = useInvalidateTenancy(organizationKeys.departments)
-  return useMutation({
-    mutationFn: (id: number) => api.delete(`/departments/${id}`),
-    onSuccess: () => {
-      toast.success('Department deleted')
-      invalidate()
-    },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
 export function useCreateLocation() {
-  const qc = useQueryClient()
+  const invalidate = useInvalidateOrgTree()
   return useMutation({
     mutationFn: (payload: CreateLocationPayload) => api.post('/locations', payload),
     onSuccess: () => {
       toast.success('Location created')
-      qc.invalidateQueries({ queryKey: organizationKeys.locations })
+      invalidate()
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
 export function useUpdateLocation() {
-  const qc = useQueryClient()
+  const invalidate = useInvalidateOrgTree()
   return useMutation({
     mutationFn: ({ id, ...payload }: UpdateLocationPayload & { id: number }) =>
       api.patch(`/locations/${id}`, payload),
     onSuccess: () => {
       toast.success('Location updated')
-      qc.invalidateQueries({ queryKey: organizationKeys.locations })
+      invalidate()
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }
 
 export function useDeleteLocation() {
-  const qc = useQueryClient()
+  const invalidate = useInvalidateOrgTree()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/locations/${id}`),
     onSuccess: () => {
       toast.success('Location deleted')
-      qc.invalidateQueries({ queryKey: organizationKeys.locations })
+      invalidate()
     },
+    onError: (e) => toast.error(getApiErrorMessage(e)),
   })
 }

@@ -1,4 +1,4 @@
-﻿export interface SecurityConfig {
+export interface SecurityConfig {
   authentication: {
     jwt: { enabled: boolean; token_type: string }
     oauth2: { enabled: boolean; providers: string[] }
@@ -24,50 +24,74 @@ export interface Organization {
   timezone: string
   is_active: boolean
   created_at?: string | null
-  branches_count?: number
-  departments_count?: number
+  nodes_count?: number
   employees_count?: number
 }
 
-export interface Branch {
+/** A node in the self-referential organization tree (company → sub-units). */
+export interface OrgNode {
   id: number
   name: string
   code: string
-  organization_id: number
-  address?: string | null
+  node_type: string
+  parent_id: number | null
+  root_organization_id: number
   timezone: string
+  depth: number
+  path: string
   is_active: boolean
   created_at?: string | null
+  updated_at?: string | null
+  children?: OrgNode[] | null
 }
 
-export interface Department {
+export interface OrgNodeBreadcrumb {
   id: number
   name: string
+  node_type: string
+}
+
+export interface OrgNodeDetail extends OrgNode {
+  /** Ancestors root→parent, excludes self. */
+  breadcrumb: OrgNodeBreadcrumb[]
+}
+
+export interface CreateOrgNodePayload {
+  name: string
   code: string
-  organization_id: number
-  branch_id?: number | null
-  is_active: boolean
-  created_at?: string | null
-  branch?: { id: number; name: string } | null
+  parent_id: number
+  node_type?: string
+  timezone?: string
+}
+
+export interface UpdateOrgNodePayload {
+  name?: string
+  code?: string
+  node_type?: string
+  timezone?: string
+  is_active?: boolean
+}
+
+export interface MoveOrgNodePayload {
+  new_parent_id: number
 }
 
 export interface Location {
   id: number
   name: string
   organization_id: number
-  branch_id?: number | null
   address?: string | null
   timezone: string
   is_active: boolean
   created_at?: string | null
-  branch?: { id: number; name: string } | null
+  updated_at?: string | null
 }
 
 export interface CreateLocationPayload {
   name: string
   address?: string | null
   timezone: string
-  branch_id?: number | null
+  org_node_id?: number | null
   /** Only honoured for super admins operating without a tenant header. */
   organization_id?: number
 }
@@ -76,7 +100,7 @@ export interface UpdateLocationPayload {
   name?: string
   address?: string | null
   timezone?: string
-  branch_id?: number | null
+  org_node_id?: number | null
   is_active?: boolean
 }
 
@@ -90,37 +114,5 @@ export interface UpdateOrganizationPayload {
   name?: string
   code?: string
   timezone?: string
-  is_active?: boolean
-}
-
-export interface CreateBranchPayload {
-  name: string
-  code: string
-  address?: string | null
-  timezone: string
-  /** Only honoured for super admins operating without a tenant header. */
-  organization_id?: number
-}
-
-export interface UpdateBranchPayload {
-  name?: string
-  code?: string
-  address?: string | null
-  timezone?: string
-  is_active?: boolean
-}
-
-export interface CreateDepartmentPayload {
-  name: string
-  code: string
-  branch_id?: number | null
-  /** Only honoured for super admins operating without a tenant header. */
-  organization_id?: number
-}
-
-export interface UpdateDepartmentPayload {
-  name?: string
-  code?: string
-  branch_id?: number | null
   is_active?: boolean
 }

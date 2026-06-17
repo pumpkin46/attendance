@@ -7,8 +7,6 @@ class EmployeeOut(BaseModel):
     id: int
     organization_id: int
     location_id: int | None = None
-    branch_id: int | None = None
-    department_id: int | None = None
     employee_code: str
     first_name: str
     last_name: str
@@ -32,8 +30,6 @@ class EmployeeOut(BaseModel):
 class EmployeeCreate(BaseModel):
     organization_id: int | None = None
     location_id: int | None = None
-    branch_id: int | None = None
-    department_id: int | None = None
     employee_code: str
     first_name: str
     last_name: str
@@ -45,8 +41,6 @@ class EmployeeCreate(BaseModel):
 
 class EmployeeUpdate(BaseModel):
     location_id: int | None = None
-    branch_id: int | None = None
-    department_id: int | None = None
     employee_code: str | None = None
     first_name: str | None = None
     last_name: str | None = None
