@@ -72,19 +72,37 @@ async def create_policy(
     return policy
 
 
-async def get_policy(db: AsyncSession, policy_id: int) -> AttendancePolicy:
-    policy = (
-        await db.execute(select(AttendancePolicy).where(AttendancePolicy.id == policy_id))
-    ).scalar_one_or_none()
+async def _require_org_employee(
+    db: AsyncSession, employee_id: int, org_id: int | None
+) -> None:
+    """Reject an employee id that is not in the caller's tenant.
+
+    Closes the cross-tenant write IDOR where a client-supplied ``employee_id``
+    could attach a shift assignment / leave request to another org's employee.
+    No-op tenant check when ``org_id`` is None (validated super-admin scope),
+    but still verifies the employee exists.
+    """
+    stmt = select(Employee.id).where(Employee.id == employee_id)
+    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is None:
+        raise NotFoundError("Employee not found")
+
+
+async def get_policy(
+    db: AsyncSession, policy_id: int, org_id: int | None
+) -> AttendancePolicy:
+    stmt = select(AttendancePolicy).where(AttendancePolicy.id == policy_id)
+    stmt = apply_tenant_filter(stmt, org_id, AttendancePolicy.organization_id)
+    policy = (await db.execute(stmt)).scalar_one_or_none()
     if not policy:
         raise NotFoundError("Policy not found")
     return policy
 
 
 async def update_policy(
-    db: AsyncSession, policy_id: int, body: AttendancePolicyCreate
+    db: AsyncSession, policy_id: int, body: AttendancePolicyCreate, org_id: int | None
 ) -> AttendancePolicy:
-    policy = await get_policy(db, policy_id)
+    policy = await get_policy(db, policy_id, org_id)
     if body.is_default:
         await _clear_default_policies(db, policy.organization_id, exclude_id=policy_id)
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -115,17 +133,19 @@ async def create_shift(db: AsyncSession, org_id: int | None, body: ShiftCreate) 
     return shift
 
 
-async def get_shift(db: AsyncSession, shift_id: int) -> Shift:
-    shift = (
-        await db.execute(select(Shift).where(Shift.id == shift_id))
-    ).scalar_one_or_none()
+async def get_shift(db: AsyncSession, shift_id: int, org_id: int | None) -> Shift:
+    stmt = select(Shift).where(Shift.id == shift_id)
+    stmt = apply_tenant_filter(stmt, org_id, Shift.organization_id)
+    shift = (await db.execute(stmt)).scalar_one_or_none()
     if not shift:
         raise NotFoundError("Shift not found")
     return shift
 
 
-async def update_shift(db: AsyncSession, shift_id: int, body: ShiftCreate) -> Shift:
-    shift = await get_shift(db, shift_id)
+async def update_shift(
+    db: AsyncSession, shift_id: int, body: ShiftCreate, org_id: int | None
+) -> Shift:
+    shift = await get_shift(db, shift_id, org_id)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(shift, field, value)
     await db.flush()
@@ -133,16 +153,17 @@ async def update_shift(db: AsyncSession, shift_id: int, body: ShiftCreate) -> Sh
     return shift
 
 
-async def deactivate_shift(db: AsyncSession, shift_id: int) -> None:
-    shift = await get_shift(db, shift_id)
+async def deactivate_shift(db: AsyncSession, shift_id: int, org_id: int | None) -> None:
+    shift = await get_shift(db, shift_id, org_id)
     shift.is_active = False
     await db.flush()
 
 
 async def assign_shift(
-    db: AsyncSession, shift_id: int, body: ShiftAssignRequest
+    db: AsyncSession, shift_id: int, body: ShiftAssignRequest, org_id: int | None
 ) -> ShiftAssignment:
-    await get_shift(db, shift_id)
+    await get_shift(db, shift_id, org_id)
+    await _require_org_employee(db, body.employee_id, org_id)
     assignment = ShiftAssignment(
         shift_id=shift_id,
         employee_id=body.employee_id,
@@ -189,8 +210,10 @@ def leave_requests_query(org_id: int | None) -> Select:
 
 
 async def create_leave_request(
-    db: AsyncSession, body: LeaveRequestCreate
+    db: AsyncSession, body: LeaveRequestCreate, org_id: int | None
 ) -> LeaveRequest:
+    if body.employee_id is not None:
+        await _require_org_employee(db, body.employee_id, org_id)
     leave = LeaveRequest(
         employee_id=body.employee_id,
         type=body.type,
@@ -205,11 +228,18 @@ async def create_leave_request(
 
 
 async def decide_leave_request(
-    db: AsyncSession, leave_id: int, body: LeaveRequestUpdate, approver_id: int
+    db: AsyncSession,
+    leave_id: int,
+    body: LeaveRequestUpdate,
+    approver_id: int,
+    org_id: int | None,
 ) -> LeaveRequest:
-    leave = (
-        await db.execute(select(LeaveRequest).where(LeaveRequest.id == leave_id))
-    ).scalar_one_or_none()
+    # LeaveRequest has no organization_id; scope it through the employee's org.
+    stmt = select(LeaveRequest).where(LeaveRequest.id == leave_id)
+    if org_id is not None:
+        emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
+        stmt = stmt.where(LeaveRequest.employee_id.in_(emp_ids))
+    leave = (await db.execute(stmt)).scalar_one_or_none()
     if not leave:
         raise NotFoundError("Leave request not found")
     leave.status = body.status

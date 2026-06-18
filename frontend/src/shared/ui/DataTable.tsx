@@ -114,6 +114,14 @@ const alignClass: Record<Align, string> = {
 
 const accessor = <T,>(row: T, key: string): unknown => (row as Record<string, unknown>)[key]
 
+/** Stringify a cell/sort value safely (objects have no meaningful default text). */
+function toText(v: unknown): string {
+  if (v == null) return ''
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v)
+  return ''
+}
+
 function SortIcon({ dir }: { dir: 'asc' | 'desc' | null }) {
   return (
     <span className="inline-flex flex-col leading-[0]">
@@ -166,7 +174,7 @@ export function DataTable<T>({
       if (bv == null) return -1
       let cmp: number
       if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv
-      else cmp = String(av).localeCompare(String(bv), undefined, { numeric: true })
+      else cmp = toText(av).localeCompare(toText(bv), undefined, { numeric: true })
       return sort.dir === 'asc' ? cmp : -cmp
     })
     return copy
@@ -225,7 +233,7 @@ export function DataTable<T>({
                     col.headerClassName
                   )}
                   onClick={col.sortable ? () => toggleSort(col.key) : undefined}
-                  aria-sort={active ? (sort!.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                  aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
                 >
                   <span
                     className={cn(
@@ -234,7 +242,7 @@ export function DataTable<T>({
                     )}
                   >
                     {col.header}
-                    {col.sortable && <SortIcon dir={active ? sort!.dir : null} />}
+                    {col.sortable && <SortIcon dir={active ? sort.dir : null} />}
                   </span>
                 </th>
               )
@@ -283,7 +291,7 @@ export function DataTable<T>({
                     const align = col.align ?? 'left'
                     return (
                       <td key={col.key} className={cn(cellPad, alignClass[align], col.className)}>
-                        {col.cell ? col.cell(row, index) : String(accessor(row, col.key) ?? '')}
+                        {col.cell ? col.cell(row, index) : toText(accessor(row, col.key))}
                       </td>
                     )
                   })}

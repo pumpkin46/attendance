@@ -1,7 +1,15 @@
+import logging
+
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SECRET_KEY = "change-me-in-production"
+
+# Only these environments may boot with the built-in default / a weak secret
+# (developer convenience). Every other env — production, staging, qa, demo, ... —
+# must set a strong SECRET_KEY or the app refuses to start, because the secret is
+# the symmetric HS256 signing key and a known value makes every JWT forgeable.
+_DEV_SECRET_ENVS = {"local", "dev", "development", "test", "testing", "ci"}
 
 
 class Settings(BaseSettings):
@@ -250,6 +258,21 @@ class Settings(BaseSettings):
     antispoof_model_url: str = (
         "https://github.com/yakhyo/face-anti-spoofing/releases/download/weights/MiniFASNetV2.onnx"
     )
+    # SHA-256 of the expected MiniFASNetV2.onnx. The model is fetched over an
+    # unauthenticated URL and then executed in-process, so a MITM / changed
+    # upstream / corrupted download could swap in an attacker-influenced graph
+    # that decides liveness. The download (and any on-disk file) is verified
+    # against this digest and rejected on mismatch. Set empty to disable
+    # verification (e.g. when deploying a custom model with a different hash).
+    antispoof_model_sha256: str = (
+        "b32929adc2d9c34b9486f8c4c7bc97c1b69bc0ea9befefc380e4faae4e463907"
+    )
+    # Pixel scale applied to the face crop before MiniFASNet inference. 1.0 feeds
+    # raw 0-255 values (current behavior). The Silent-Face/MiniFASNet lineage is
+    # often trained with ToTensor() ([0,1]); if validation against the reference
+    # weights shows that is required, set this to 0.00392156862 (1/255) without a
+    # code change. Left at 1.0 by default pending that validation.
+    antispoof_input_scale: float = 1.0
     antispoof_crop_scale: float = 2.7
     antispoof_real_threshold: float = 0.5
     antispoof_heuristic_threshold: float = 0.35
@@ -295,6 +318,10 @@ class Settings(BaseSettings):
     engine_max_concurrent_recognitions: int = 50
     engine_snapshot_dir: str = "data/snapshots/unknown"
     engine_liveness_threshold: float = 0.85
+    # Require temporal (blink/head-movement) liveness on the live camera path,
+    # not just the single-frame passive anti-spoof model. Default off (a passive
+    # entry camera cannot demand an interactive blink). See LivenessConfig.
+    engine_live_active_liveness: bool = False
     engine_duplicate_window_seconds: int = 300
     engine_unknown_alert_cooldown: int = 300
     engine_max_tracks_per_camera: int = 200
@@ -329,24 +356,36 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _enforce_production_security(self) -> "Settings":
-        """Fail closed on insecure defaults when running in production."""
+        """Fail closed on insecure secrets outside explicit dev environments."""
+        env = self.app_env.strip().lower()
+        # Reject the default, any "change-me*" placeholder variant (the exact-
+        # string check was bypassed by a placeholder that merely differed from
+        # the default), and anything too short to be a real key.
+        secret = self.secret_key.strip()
+        secret_is_weak = (
+            not secret
+            or secret.lower().startswith("change-me")
+            or len(secret) < 32
+        )
+        if secret_is_weak and env not in _DEV_SECRET_ENVS:
+            raise ValueError(
+                "SECRET_KEY must be a strong, unique value of at least 32 "
+                f"characters when APP_ENV={self.app_env!r} (a known/placeholder "
+                "key makes every JWT forgeable). Only these environments may use "
+                f"the built-in default: {', '.join(sorted(_DEV_SECRET_ENVS))}. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(64))"'
+            )
+        if secret_is_weak:
+            # A dev env is allowed the default, but make it loud so it is never
+            # mistaken for a hardened deployment.
+            logging.getLogger(__name__).warning(
+                "Running with the built-in default SECRET_KEY (APP_ENV=%s); "
+                "JWTs are forgeable. Set a strong SECRET_KEY before exposing this "
+                "instance.",
+                self.app_env,
+            )
+
         if self.is_production:
-            # Reject the default, any "change-me*" placeholder variant (the
-            # exact-string check was bypassed by a placeholder that merely
-            # differed from the default), and anything too short to be a real
-            # key.
-            secret = self.secret_key.strip()
-            if (
-                not secret
-                or secret.lower().startswith("change-me")
-                or len(secret) < 32
-            ):
-                raise ValueError(
-                    "SECRET_KEY must be a strong, unique value of at least 32 "
-                    "characters when APP_ENV=production (placeholders make "
-                    "JWTs forgeable). Generate one with: "
-                    'python -c "import secrets; print(secrets.token_hex(64))"'
-                )
             if "*" in self.cors_origins:
                 raise ValueError(
                     "CORS_ALLOW_ORIGINS must not contain '*' when APP_ENV=production; "

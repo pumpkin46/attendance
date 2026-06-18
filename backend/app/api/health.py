@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
@@ -20,13 +21,26 @@ def _liveness_status() -> dict:
     model_loaded = verifier.session is not None
     insightface_loaded = face_service._get_face_app() is not None
 
+    # Report the ACTUAL runtime anti-spoof posture, not a static string keyed on
+    # the enabled flag: if the model failed to download/verify, the engine is on
+    # coarse heuristics (a sharp print/screen can defeat it) — operators must be
+    # able to see that instead of assuming "MiniFASNetV2" is running.
+    if not settings.antispoof_enabled:
+        antispoof_mode = "disabled"
+    elif model_loaded:
+        antispoof_mode = "model"
+    else:
+        antispoof_mode = "heuristic_only"
+
     return {
         "liveness_enabled": settings.liveness_enabled,
         "active_liveness_enabled": settings.active_liveness_enabled,
         "antispoof_model_loaded": model_loaded,
+        "antispoof_mode": antispoof_mode,
+        "antispoof_fail_without_model": settings.antispoof_fail_without_model,
         "insightface_loaded": insightface_loaded,
         "liveness_methods": {
-            "ai_model": "MiniFASNetV2" if settings.antispoof_enabled else "disabled",
+            "ai_model": "MiniFASNetV2" if antispoof_mode == "model" else antispoof_mode,
             "blink_detection": settings.active_liveness_enabled,
             "head_movement": settings.active_liveness_enabled,
             "spoof_types": list(SPOOF_TYPES),
@@ -76,7 +90,10 @@ async def build_health_response() -> dict:
         try:
             from app.celery_app import celery_app
 
-            replies = celery_app.control.ping(timeout=1.0)
+            # control.ping is a synchronous broker broadcast that blocks until a
+            # reply or the timeout; run it off the event loop so a slow/absent
+            # worker cannot stall every other request on the single worker.
+            replies = await asyncio.to_thread(celery_app.control.ping, timeout=0.25)
             if replies:
                 checks["celery"] = {"status": "healthy", "workers": len(replies)}
             else:

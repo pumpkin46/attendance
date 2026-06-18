@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, JSON, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -20,6 +20,16 @@ class Organization(Base, TimestampMixin):
     __table_args__ = (
         # Sibling nodes (and root companies among themselves) can't share a code.
         UniqueConstraint("parent_id", "code", name="uq_org_parent_code"),
+        # Company roots have parent_id IS NULL, which the constraint above treats
+        # as distinct in Postgres — so a partial unique index is needed to keep
+        # root codes (the company identifier) unique at the DB level.
+        Index(
+            "uq_org_root_code",
+            "code",
+            unique=True,
+            postgresql_where=text("parent_id IS NULL"),
+            sqlite_where=text("parent_id IS NULL"),
+        ),
         Index("ix_org_parent", "parent_id"),
     )
 

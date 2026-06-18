@@ -68,9 +68,9 @@ export function useInvalidateOrganizationList() {
 export function useInvalidateOrgTree() {
   const qc = useQueryClient()
   return () => {
-    qc.invalidateQueries({ queryKey: orgNodeKeys.tree })
-    qc.invalidateQueries({ queryKey: organizationKeys.list })
-    qc.invalidateQueries({ queryKey: organizationKeys.locations })
+    void qc.invalidateQueries({ queryKey: orgNodeKeys.tree })
+    void qc.invalidateQueries({ queryKey: organizationKeys.list })
+    void qc.invalidateQueries({ queryKey: organizationKeys.locations })
   }
 }
 
@@ -80,7 +80,7 @@ export function useCreateOrganization() {
     mutationFn: (payload: CreateOrganizationPayload) => api.post('/organizations', payload),
     onSuccess: () => {
       toast.success('Organization created')
-      invalidate()
+      void invalidate()
     },
     onError: (e) => toast.error(getApiErrorMessage(e)),
   })
@@ -93,7 +93,7 @@ export function useUpdateOrganization() {
       api.patch(`/organizations/${id}`, payload),
     onSuccess: () => {
       toast.success('Organization updated')
-      invalidate()
+      void invalidate()
     },
     onError: (e) => toast.error(getApiErrorMessage(e)),
   })
@@ -105,7 +105,7 @@ export function useDeleteOrganization() {
     mutationFn: (id: number) => api.delete(`/organizations/${id}`),
     onSuccess: () => {
       toast.success('Organization deleted')
-      invalidate()
+      void invalidate()
     },
     onError: (e) => toast.error(getApiErrorMessage(e)),
   })

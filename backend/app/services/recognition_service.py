@@ -296,7 +296,9 @@ async def _record_employee_match(
     )
     db.add(event)
     await db.flush()
-    snapshot = _save_event_snapshot(image_b64, event.id)
+    # Offload the base64 decode + disk write so a full-res frame (or a slow /
+    # network snapshot mount) cannot stall the event loop on the identify path.
+    snapshot = await asyncio.to_thread(_save_event_snapshot, image_b64, event.id)
     if snapshot:
         event.snapshot_path = snapshot
         await db.flush()
@@ -378,7 +380,9 @@ async def _record_no_match(
     )
     db.add(event)
     await db.flush()
-    snapshot = _save_event_snapshot(image_b64, event.id)
+    # Offload the base64 decode + disk write so a full-res frame (or a slow /
+    # network snapshot mount) cannot stall the event loop on the identify path.
+    snapshot = await asyncio.to_thread(_save_event_snapshot, image_b64, event.id)
     if snapshot:
         event.snapshot_path = snapshot
         await db.flush()

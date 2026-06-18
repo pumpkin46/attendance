@@ -1,6 +1,6 @@
 # AI Attendance Platform
 
-Enterprise-grade attendance system with face recognition, liveness detection, RBAC, multi-location support, and automated check-in/out. Runs locally without Docker.
+Enterprise-grade attendance system with face recognition, liveness detection, RBAC, a structural organization tree (companies and their sub-units), and automated check-in/out. Runs locally without Docker.
 
 > **Using the app?** The [User Guide](docs/USER_GUIDE.md) is a step-by-step walkthrough of every screen — first-run setup, sign-in, face enrollment, the check-in kiosk, attendance, devices, reports, and administration.
 
@@ -73,7 +73,7 @@ UI runs at **http://127.0.0.1:5173** (proxies API to port 8000 via `VITE_API_URL
 | Module | Description |
 |--------|-------------|
 | Authentication & RBAC | JWT tokens, roles, permissions |
-| Employee Management | CRUD, departments, locations |
+| Employee Management | CRUD, organization-tree assignment, free-text department label |
 | Face Enrollment | Upload photo → embedding → FAISS index |
 | Face Recognition | Identify + liveness → auto attendance |
 | RFID Integration | Card tap at readers → auto check-in/out |

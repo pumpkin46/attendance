@@ -12,8 +12,6 @@ from app.core.timeutil import local_date, local_day_bounds_utc
 from app.models.employee import Employee
 from app.models.visitor import (
     ApprovalStatus,
-    BlacklistReason,
-    DocumentType,
     IdType,
     NotificationChannel,
     VisitType,
@@ -135,6 +133,20 @@ def _parse_enum(enum_cls, value):
     return enum_cls(value)
 
 
+async def is_org_employee(
+    db: AsyncSession, employee_id: int, org_id: int | None
+) -> bool:
+    """Whether ``employee_id`` belongs to ``org_id``.
+
+    Used to reject a client-supplied host_employee_id that points at another
+    tenant's employee (cross-tenant FK write + host-PII leak in the response).
+    """
+    stmt = select(Employee.id).where(Employee.id == employee_id)
+    if org_id is not None:
+        stmt = stmt.where(Employee.organization_id == org_id)
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
+
+
 async def create_visitor(
     db: AsyncSession,
     org_id: int,
@@ -150,6 +162,10 @@ async def create_visitor(
     )
     if blocked:
         raise ValueError(f"Visitor is blacklisted: {blocked.reason.value}")
+
+    host_id = body.get("host_employee_id")
+    if host_id is not None and not await is_org_employee(db, host_id, org_id):
+        raise ValueError("Host employee not found in this organization")
 
     now = _now()
     visit_start = body.get("visit_start_at") or now
@@ -542,16 +558,17 @@ async def get_dashboard_stats(db: AsyncSession, org_id: int) -> dict:
         )
     )).scalar() or 0
 
+    # "Today" is the local calendar day, not UTC midnight (which would shift the
+    # window by the UTC offset and disagree with get_daily_report). checked_in_at
+    # is a UTC timestamp, so filter by the local day's UTC interval.
+    day_start, _day_end = local_day_bounds_utc(local_date(now))
+
     checked_in_today = (await db.execute(
-        base.where(
-            Visitor.checked_in_at >= now.replace(hour=0, minute=0, second=0, microsecond=0)
-        )
+        base.where(Visitor.checked_in_at >= day_start)
     )).scalar() or 0
 
     checked_out_today = (await db.execute(
-        base.where(
-            Visitor.checked_out_at >= now.replace(hour=0, minute=0, second=0, microsecond=0)
-        )
+        base.where(Visitor.checked_out_at >= day_start)
     )).scalar() or 0
 
     overdue = (await db.execute(

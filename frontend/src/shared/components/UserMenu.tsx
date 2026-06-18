@@ -137,7 +137,7 @@ export function UserMenu({
             type="button"
             onClick={() => {
               setOpen(false)
-              navigate('/profile')
+              void navigate('/profile')
             }}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-800"
           >

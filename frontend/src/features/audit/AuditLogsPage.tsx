@@ -101,7 +101,9 @@ function ActorIdentity({ log, large }: { log: AuditLog; large?: boolean }) {
 const fmtValue = (v: unknown): string => {
   if (v == null || v === '') return '—'
   if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v)
+  return JSON.stringify(v)
 }
 
 interface FieldChange {

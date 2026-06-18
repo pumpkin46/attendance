@@ -52,7 +52,7 @@ export function useCreateReader() {
     },
     onSuccess: () => {
       toast.success('Reader registered')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -77,7 +77,7 @@ export function useDeleteReader() {
     mutationFn: (readerId: number) => api.delete(`/rfid-readers/${readerId}`),
     onSuccess: () => {
       toast.success('Reader deactivated')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -89,7 +89,7 @@ export function useAssignCard() {
       api.post(`/employees/${employeeId}/rfid-cards`, { uid, label: label || null }),
     onSuccess: (_data, { employeeId }) => {
       toast.success('Card assigned')
-      qc.invalidateQueries({ queryKey: rfidKeys.cards(employeeId) })
+      void qc.invalidateQueries({ queryKey: rfidKeys.cards(employeeId) })
     },
   })
 }
@@ -101,7 +101,7 @@ export function useRevokeCard() {
     mutationFn: (cardId: number) => api.delete(`/rfid-cards/${cardId}`),
     onSuccess: () => {
       toast.success('Card revoked')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -118,8 +118,8 @@ export function useSimulateTap() {
     },
     onSuccess: () => {
       // A tap adds an event and bumps the reader's taps-today counter.
-      qc.invalidateQueries({ queryKey: rfidKeys.events })
-      qc.invalidateQueries({ queryKey: rfidKeys.readers })
+      void qc.invalidateQueries({ queryKey: rfidKeys.events })
+      void qc.invalidateQueries({ queryKey: rfidKeys.readers })
     },
   })
 }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import lazyload
@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
 from app.core.errors import NotFoundError, ValidationError
 from app.core.timeutil import local_date
-from app.core.pagination import PaginatedResponse, PaginationParams, paginate, PaginationDep
+from app.core.pagination import PaginatedResponse, paginate, PaginationDep
 from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord
 from app.models.employee import Employee
@@ -22,6 +22,7 @@ from app.schemas.attendance import (
     AttendanceRecordOut,
     TodaySummary,
 )
+from app.services import attendance_service
 
 router = APIRouter(prefix="/api/v1", tags=["attendance"])
 
@@ -139,50 +140,26 @@ async def create_manual_attendance(
 ):
     # Tenant scope: an org admin must not be able to write attendance for an
     # employee in another org. Loading the employee through the tenant filter
-    # also gives a clean 404 instead of an orphaned record on a bad id.
-    emp_stmt = select(Employee.id).where(Employee.id == body.employee_id)
+    # gives a clean 404 instead of an orphaned record on a bad id, and its org
+    # drives the shift/policy used to classify the entry.
+    emp_stmt = select(Employee).where(Employee.id == body.employee_id)
     emp_stmt = apply_tenant_filter(emp_stmt, org_id, Employee.organization_id)
-    if (await db.execute(emp_stmt)).scalar_one_or_none() is None:
+    employee = (await db.execute(emp_stmt)).scalar_one_or_none()
+    if employee is None:
         raise NotFoundError("Employee not found")
 
-    stmt = select(AttendanceRecord).where(
-        AttendanceRecord.employee_id == body.employee_id,
-        AttendanceRecord.work_date == body.work_date,
-    )
-    result = await db.execute(stmt)
-    record = result.scalar_one_or_none()
-
-    if record is None:
-        record = AttendanceRecord(
-            employee_id=body.employee_id,
-            work_date=body.work_date,
-            status="absent",
-        )
-        db.add(record)
-        await db.flush()
-
     # check_in_at / check_out_at arrive already tz-aware (the schema coerces
-    # naive UI input to the app timezone), so the arithmetic below is safe.
-    if body.check_in_at:
-        record.check_in_at = body.check_in_at
-        record.check_in_method = "manual"
-        record.status = "present"
-        record.attendance_type = "present"
-
-    if body.check_out_at:
-        record.check_out_at = body.check_out_at
-        record.check_out_method = "manual"
-        if record.check_in_at and record.check_out_at:
-            diff = (record.check_out_at - record.check_in_at).total_seconds()
-            record.worked_minutes = max(0, int(diff / 60) - settings.attendance_break_minutes)
-            record.overtime_minutes = max(
-                0, record.worked_minutes - settings.attendance_overtime_threshold_minutes
-            )
-
-    if body.notes:
-        record.notes = body.notes
-
-    await db.flush()
-    await db.refresh(record)
+    # naive UI input to the app timezone). The service derives status from the
+    # employee's shift/policy (lateness, half_day/early_leave) instead of
+    # hardcoding 'present', and recovers from a concurrent-insert race.
+    record = await attendance_service.apply_manual_attendance(
+        db,
+        employee_id=employee.id,
+        organization_id=employee.organization_id,
+        work_date=body.work_date,
+        check_in_at=body.check_in_at,
+        check_out_at=body.check_out_at,
+        notes=body.notes,
+    )
 
     return AttendanceRecordOut.model_validate(record, from_attributes=True)

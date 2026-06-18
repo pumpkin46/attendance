@@ -39,7 +39,7 @@ export function useRecordManualAttendance() {
       }),
     onSuccess: () => {
       toast.success('Attendance recorded')
-      qc.invalidateQueries({ queryKey: attendanceKeys.all })
+      void qc.invalidateQueries({ queryKey: attendanceKeys.all })
     },
     onError: (err) => toast.error(getApiErrorMessage(err)),
   })

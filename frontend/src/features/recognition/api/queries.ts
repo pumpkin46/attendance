@@ -129,8 +129,8 @@ export function useInvalidateEngine() {
 function useInvalidateStreams() {
   const qc = useQueryClient()
   return () => {
-    qc.invalidateQueries({ queryKey: engineKeys.streams })
-    qc.invalidateQueries({ queryKey: engineKeys.status })
+    void qc.invalidateQueries({ queryKey: engineKeys.streams })
+    void qc.invalidateQueries({ queryKey: engineKeys.status })
   }
 }
 
@@ -196,7 +196,7 @@ export function useReloadIndex() {
     onSuccess: () => {
       toast.success('Vector index reloaded')
       // A reload only changes the search_index stats reported in engine status.
-      qc.invalidateQueries({ queryKey: engineKeys.status })
+      void qc.invalidateQueries({ queryKey: engineKeys.status })
     },
     onError,
   })
@@ -236,7 +236,7 @@ export function useEventFeedback() {
     },
     onSuccess: () => {
       toast.success('Feedback recorded — accuracy metrics updated')
-      qc.invalidateQueries({ queryKey: complianceKey })
+      void qc.invalidateQueries({ queryKey: complianceKey })
     },
     onError,
   })
@@ -251,7 +251,7 @@ export function useSaveEngineConfig() {
       toast.success('Engine configuration updated')
       // Status and streams refresh live over the WebSocket; only the config
       // snapshot needs refetching.
-      qc.invalidateQueries({ queryKey: engineKeys.config })
+      void qc.invalidateQueries({ queryKey: engineKeys.config })
     },
     onError,
   })

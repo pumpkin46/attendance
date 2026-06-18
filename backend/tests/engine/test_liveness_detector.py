@@ -16,7 +16,17 @@ def test_liveness_disabled_passes(sample_frame, make_face):
     assert result.score == 1.0
 
 
-def test_passive_check_detects_live_texture(sample_frame, make_face):
+def test_passive_check_detects_live_texture(sample_frame, make_face, monkeypatch):
+    # This test covers the classical heuristic passive path. Force the
+    # MiniFASNetV2 model to be unavailable so the detector falls back to the
+    # heuristic deterministically: the real model would (correctly) reject the
+    # synthetic random-noise fixture as a spoof, which is model behaviour, not
+    # what this test asserts.
+    def _no_model():
+        raise RuntimeError("anti-spoof model disabled for heuristic test")
+
+    monkeypatch.setattr("app.services.antispoof.get_antispoof_verifier", _no_model)
+
     detector = LivenessDetector()
     engine_config.liveness.enabled = True
     engine_config.liveness.passive_enabled = True

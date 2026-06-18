@@ -9,6 +9,7 @@ its grants would only mislead.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy import func, or_, select
@@ -204,6 +205,10 @@ async def update_user(
 
     if body.password is not None:
         target.password = hash_password(body.password)
+        # Bump the revocation stamp so every JWT the target already holds is
+        # rejected (get_current_user compares the token's pwd_at against this).
+        # Without it an admin reset of a compromised user revokes nothing.
+        target.password_changed_at = datetime.now(timezone.utc)
         changes["password"] = "reset"
 
     if body.is_active is not None and body.is_active != target.is_active:

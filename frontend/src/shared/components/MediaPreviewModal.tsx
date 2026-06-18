@@ -86,10 +86,10 @@ export function MediaPreviewModal({
     let cancelled = false
     let objectUrl: string | null = null
     api
-      .get(toApiPath(current.url), { responseType: 'blob' })
+      .get<Blob>(toApiPath(current.url), { responseType: 'blob' })
       .then((res) => {
         if (cancelled) return
-        const blob: Blob = res.data
+        const blob = res.data
         objectUrl = URL.createObjectURL(blob)
         setBlobUrl(objectUrl)
         setKind(blob.type === 'application/pdf' ? 'pdf' : blob.type.startsWith('image/') ? 'image' : 'other')

@@ -194,7 +194,7 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
     absent = max(0, active_employees - present - on_leave)
 
     unknown_stmt = select(func.count()).select_from(RecognitionEvent).where(
-        RecognitionEvent.result == RecognitionResult.unknown,
+        RecognitionEvent.result == RecognitionResult.unknown.value,
         RecognitionEvent.recognized_at >= day_start_utc,
         RecognitionEvent.recognized_at < day_end_utc,
     )

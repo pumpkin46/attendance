@@ -247,6 +247,7 @@ export function TreeGrid<T>({
         // Type-ahead: jump to the next row whose label starts with the buffer.
         if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) break
         e.preventDefault()
+        // eslint-disable-next-line react-hooks/purity -- runs in a keydown handler, not during render
         const now = Date.now()
         const ta = typeAhead.current
         ta.buffer = now - ta.at > 600 ? e.key : ta.buffer + e.key
@@ -347,8 +348,10 @@ export function TreeGrid<T>({
                 <tr
                   key={row.id}
                   ref={(el) => {
-                    if (el) rowRefs.current.set(row.id, el)
-                    else rowRefs.current.delete(row.id)
+                    // eslint-disable-next-line react-hooks/refs -- ref callback runs at commit, not during render
+                    const map = rowRefs.current
+                    if (el) map.set(row.id, el)
+                    else map.delete(row.id)
                   }}
                   role="row"
                   aria-level={row.depth + 1}

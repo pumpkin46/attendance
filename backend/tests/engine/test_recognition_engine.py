@@ -133,6 +133,51 @@ def test_recognize_face_unknown_person(engine, sample_frame, make_face, sample_e
     mock_unknown.assert_called_once()
 
 
+def test_recognize_face_forwards_require_active_to_liveness(
+    engine, sample_frame, make_face, sample_embedding, temp_faiss_paths
+):
+    # The live path (when ENGINE_LIVE_ACTIVE_LIVENESS is on) must hand the
+    # buffered frames and require_active flag to the liveness detector, instead
+    # of the previously hardcoded passive-only call.
+    face = make_face(embedding=sample_embedding)
+    quality = QualityAssessment(
+        accepted=True, quality_score=0.92, blur_score=0.8, brightness_score=0.8,
+        resolution_score=0.8, occlusion_score=0.8, angle_valid=True,
+        yaw=0.0, pitch=0.0, roll=0.0, assessment_ms=5,
+    )
+    liveness = LivenessResult(passed=True, score=0.91, is_live=True, verification_ms=10)
+    search = SearchResult(
+        top_match=SearchMatch("EMP001", 0.96, 1),
+        matches=[SearchMatch("EMP001", 0.96, 1)],
+        action=MatchAction.AUTO_ACCEPT, search_ms=3, index_size=1,
+    )
+    engine._quality_assessor.assess = MagicMock(return_value=quality)
+    engine._liveness_detector.verify = MagicMock(return_value=liveness)
+    engine._vector_search.search = MagicMock(return_value=search)
+    engine._vector_search.add_embedding("EMP001", sample_embedding)
+
+    frames = [sample_frame, sample_frame, sample_frame]
+    engine.recognize_face(
+        sample_frame, face, camera_id=2, liveness_frames=frames, require_active=True
+    )
+
+    _, kwargs = engine._liveness_detector.verify.call_args
+    assert kwargs.get("require_active") is True
+    assert kwargs.get("liveness_frames") == frames
+
+
+def test_engine_status_reports_live_liveness_mode():
+    cfg = EngineConfig()
+    eng = RecognitionEngine(config=cfg)
+    assert eng.get_engine_status()["liveness"]["live_mode"] == "passive_only"
+
+    cfg.liveness.live_active_required = True
+    assert eng.get_engine_status()["liveness"]["live_mode"] == "passive+active"
+
+    cfg.liveness.enabled = False
+    assert eng.get_engine_status()["liveness"]["live_mode"] == "disabled"
+
+
 def test_detect_faces_returns_structured_payload(engine, sample_frame, make_face, monkeypatch):
     face = make_face()
     monkeypatch.setattr(

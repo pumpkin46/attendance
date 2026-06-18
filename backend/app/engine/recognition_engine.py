@@ -19,9 +19,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
 
 import numpy as np
 
@@ -32,17 +31,16 @@ from app.engine.attendance_generator import (
 )
 from app.engine.config import EngineConfig, engine_config
 from app.engine.embedding_generator import get_embedding_generator
-from app.engine.face_detector import DetectedFace, DetectionResult, get_detector
+from app.engine.face_detector import DetectedFace, get_detector
 from app.engine.face_tracker import get_tracker
 from app.engine.identity_verifier import (
     VerificationContext,
-    VerificationLevel,
     get_identity_verifier,
 )
 from app.engine.liveness_detector import get_liveness_detector
 from app.engine.metrics import get_metrics
 from app.engine.quality_assessor import get_quality_assessor
-from app.engine.stream_manager import StreamManager, get_stream_manager
+from app.engine.stream_manager import get_stream_manager
 from app.engine.unknown_detector import get_unknown_detector
 from app.engine.vector_search import MatchAction, get_vector_search
 from app.services.face_image_processor import enhance_low_light
@@ -139,6 +137,11 @@ class RecognitionEngine:
         self._max_concurrent_recognitions = 2
         self._inflight_recognitions = 0
         self._recognition_tasks: set[asyncio.Task] = set()
+        # Recent frames per (camera_id, track_id) for the optional temporal
+        # liveness check. Only populated when liveness.live_active_required is on
+        # (default off), and pruned to the live track set each frame so it never
+        # grows unbounded.
+        self._frame_buffers: dict[tuple[int, int], deque] = {}
 
     @property
     def is_running(self) -> bool:
@@ -196,16 +199,29 @@ class RecognitionEngine:
 
             track_results = self._tracker.update(camera_id, detection.faces)
 
+            buffer_active = (
+                self._config.liveness.live_active_required
+                and self._config.liveness.active_enabled
+            )
+            if buffer_active:
+                self._buffer_frames(camera_id, track_results, frame)
+
             for face, track_info in track_results:
                 if not track_info.needs_recognition:
                     continue
                 if self._inflight_recognitions >= self._max_concurrent_recognitions:
                     continue
 
+                liveness_frames = None
+                if buffer_active:
+                    buf = self._frame_buffers.get((camera_id, track_info.track_id))
+                    liveness_frames = list(buf) if buf else None
+
                 self._inflight_recognitions += 1
                 task = asyncio.create_task(
                     self._recognize_tracked_face(
-                        frame, face, track_info.track_id, camera_id, timestamp
+                        frame, face, track_info.track_id, camera_id, timestamp,
+                        liveness_frames=liveness_frames,
                     )
                 )
                 self._recognition_tasks.add(task)
@@ -214,6 +230,26 @@ class RecognitionEngine:
         except Exception as e:
             logger.error("Frame processing error on camera %d: %s", camera_id, e)
 
+    def _buffer_frames(self, camera_id: int, track_results, frame: np.ndarray) -> None:
+        """Append the current frame to each live track's ring buffer.
+
+        Only called when temporal liveness is enabled. Buffers are pruned to the
+        set of tracks present this frame so they never accumulate for tracks the
+        tracker has dropped.
+        """
+        maxlen = self._config.liveness.live_frame_buffer
+        live_keys = set()
+        for _face, track_info in track_results:
+            key = (camera_id, track_info.track_id)
+            live_keys.add(key)
+            buf = self._frame_buffers.get(key)
+            if buf is None or buf.maxlen != maxlen:
+                buf = deque(maxlen=maxlen)
+                self._frame_buffers[key] = buf
+            buf.append(frame)
+        for key in [k for k in self._frame_buffers if k[0] == camera_id and k not in live_keys]:
+            del self._frame_buffers[key]
+
     async def _recognize_tracked_face(
         self,
         frame: np.ndarray,
@@ -221,6 +257,7 @@ class RecognitionEngine:
         track_id: int,
         camera_id: int,
         timestamp: float,
+        liveness_frames: list[np.ndarray] | None = None,
     ) -> None:
         """Run the full recognition pipeline on a tracked face."""
         try:
@@ -237,6 +274,8 @@ class RecognitionEngine:
                 location_id=stream.location_id if stream else None,
                 zone=stream.zone if stream else None,
                 direction=stream.direction if stream else None,
+                liveness_frames=liveness_frames,
+                require_active=self._config.liveness.live_active_required,
             )
 
             self._tracker.mark_recognized(
@@ -267,6 +306,7 @@ class RecognitionEngine:
         direction: str | None = None,
         rfid_employee_id: str | None = None,
         liveness_frames: list[np.ndarray] | None = None,
+        require_active: bool = False,
         enqueue: bool = True,
     ) -> RecognitionResult:
         """Run full recognition pipeline on a single detected face.
@@ -303,7 +343,7 @@ class RecognitionEngine:
         # Stage 5: Liveness Detection
         t1 = time.perf_counter()
         liveness = self._liveness_detector.verify(
-            frame, face, liveness_frames=liveness_frames
+            frame, face, liveness_frames=liveness_frames, require_active=require_active
         )
         liveness_ms = int((time.perf_counter() - t1) * 1000)
         pipeline.append({
@@ -664,6 +704,15 @@ class RecognitionEngine:
         }
 
     def get_engine_status(self) -> dict:
+        lcfg = self._config.liveness
+        # Make the live-path liveness posture explicit so operators do not
+        # assume temporal/replay protection that is not actually enforced.
+        if not lcfg.enabled:
+            live_mode = "disabled"
+        elif lcfg.live_active_required and lcfg.active_enabled:
+            live_mode = "passive+active"
+        else:
+            live_mode = "passive_only"
         return {
             "running": self._running,
             "streams": self._stream_manager.get_all_status(),
@@ -673,6 +722,13 @@ class RecognitionEngine:
             "unknown_persons": self._unknown_detector.stats,
             "metrics": self._metrics.get_performance_summary(),
             "sla_compliance": self._metrics.get_sla_compliance(),
+            "liveness": {
+                "enabled": lcfg.enabled,
+                "live_mode": live_mode,
+                "passive_enabled": lcfg.passive_enabled,
+                "active_enabled": lcfg.active_enabled,
+                "live_active_required": lcfg.live_active_required,
+            },
         }
 
 

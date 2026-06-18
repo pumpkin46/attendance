@@ -1,4 +1,4 @@
-import { forwardRef, useRef, type MutableRefObject } from 'react'
+import { forwardRef, useRef } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { inputClass } from '@/shared/lib/inputClass'
 
@@ -33,7 +33,7 @@ const NumberInput = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLI
     const setRefs = (node: HTMLInputElement | null) => {
       innerRef.current = node
       if (typeof ref === 'function') ref(node)
-      else if (ref) (ref as MutableRefObject<HTMLInputElement | null>).current = node
+      else if (ref) (ref).current = node
     }
 
     const nudge = (dir: 1 | -1) => {

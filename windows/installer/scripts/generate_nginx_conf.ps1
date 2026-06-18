@@ -50,6 +50,16 @@ http {
         root         "$root";
         index        index.html;
 
+        # Security headers. The CSP blunts XSS (the session JWT lives in
+        # localStorage) and forbids framing. Tuned for the Vite/React/Tailwind
+        # build: external module scripts ('self'), inline styles from the UI
+        # libs ('unsafe-inline' style), webcam frames as blob/data URLs, and
+        # same-origin API + WebSocket (connect-src 'self').
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
         # REST API + WebSocket (/api/v1/ws) - same prefix, same upstream.
         location /api/v1/ {
             proxy_pass http://127.0.0.1:$ApiPort;

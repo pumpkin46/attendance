@@ -13,16 +13,21 @@ logger = logging.getLogger(__name__)
 
 
 class FaissIndex:
-    """FAISS flat index with metadata, guarded for concurrent access.
+    """FAISS index (IndexIDMap2 over IndexFlatIP) with metadata, guarded for
+    concurrent access.
 
-    Recognition searches run on threadpool threads (FastAPI's run_in_threadpool
-    / asyncio.to_thread) while enrollment mutates the index from request
-    handlers. ``IndexFlat.add`` can reallocate storage and ``remove_employee``
-    swaps ``self.index`` wholesale, either of which corrupts a concurrent
-    ``search`` (segfault / misidentification). A single reentrant lock
-    serializes every mutation, save, and search; saves are atomic (temp file +
-    os.replace) so a crash mid-write can never leave the index and metadata
-    files out of sync.
+    Every embedding is stored under a stable, never-reused int64 id. Deleting or
+    re-enrolling one employee removes only that employee's rows via
+    ``remove_ids`` instead of reconstructing all N vectors. The previous flat
+    index had no delete, so every mutation rebuilt the entire index in Python
+    (``reconstruct`` per row + ``vstack``) under the lock — an O(total
+    embeddings) stall on the recognition hot path during routine HR operations.
+
+    Recognition searches run on threadpool threads (run_in_threadpool /
+    asyncio.to_thread) while enrollment mutates the index from request handlers.
+    A single reentrant lock serializes every mutation, save, and search; saves
+    are atomic (temp file + os.replace) so a crash mid-write can never leave the
+    index and metadata files out of sync.
     """
 
     def __init__(self) -> None:
@@ -32,99 +37,105 @@ class FaissIndex:
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
         self.id_to_employee: dict[int, str] = {}
         self.employee_to_ids: dict[str, list[int]] = {}
+        # Monotonic id allocator. Ids are never reused (a stale search result
+        # must never resolve to a different employee), so this only increases.
+        self._next_id = 0
         self._lock = threading.RLock()
         self._load()
+
+    def _new_index(self) -> faiss.Index:
+        return faiss.IndexIDMap2(faiss.IndexFlatIP(self.dim))
+
+    @staticmethod
+    def _present_ids(index: faiss.Index) -> set[int]:
+        """The set of ids currently stored in an IDMap index."""
+        if index.ntotal == 0:
+            return set()
+        return {int(i) for i in faiss.vector_to_array(index.id_map)}
+
+    def _wrap_legacy(self, flat: faiss.Index) -> faiss.Index:
+        """Migrate a pre-IDMap flat index by wrapping it in an IndexIDMap2.
+
+        Ids are assigned as the original row positions (0..ntotal-1) so the
+        existing ``id_to_employee`` metadata (which keyed on row position) stays
+        valid. One-time O(N) cost on the first load after the upgrade.
+        """
+        new = self._new_index()
+        n = flat.ntotal
+        if n > 0:
+            vectors = np.ascontiguousarray(flat.reconstruct_n(0, n), dtype=np.float32)
+            ids = np.arange(n, dtype=np.int64)
+            new.add_with_ids(vectors, ids)
+        return new
 
     def _load(self) -> None:
         """Parse and validate disk state into locals, then publish to self.
 
-        reload() runs this over the live singleton, and the files it reads
-        may be corrupt or mid-write - exactly the cases it exists to recover
-        from. Nothing on ``self`` is assigned until the locals parsed below
-        are fully validated, so any exception leaves the prior in-memory
-        state untouched (a partial load would pair a populated index with
-        empty mappings: every search returns None and the next _save would
-        persist the empty mappings, orphaning all prior embeddings).
+        reload() runs this over the live singleton, and the files it reads may
+        be corrupt or mid-write — exactly the cases it exists to recover from.
+        Nothing on ``self`` is assigned until the parsed locals are validated,
+        so any exception leaves the prior in-memory state untouched.
         """
         if not self.index_path.exists():
-            self.index = faiss.IndexFlatIP(self.dim)
+            self.index = self._new_index()
             self.id_to_employee = {}
             self.employee_to_ids = {}
+            self._next_id = 0
             return
 
         index = faiss.read_index(str(self.index_path))
         id_to_employee: dict[int, str] = {}
         employee_to_ids: dict[str, list[int]] = {}
+        persisted_next_id = 0
         if self.metadata_path.exists():
             meta = json.loads(self.metadata_path.read_text())
             id_to_employee = {int(k): v for k, v in meta.get("id_to_employee", {}).items()}
-            employee_to_ids = meta.get("employee_to_ids", {})
-
-        ntotal = index.ntotal
-        if len(id_to_employee) > ntotal:
-            logger.critical(
-                "FAISS index and metadata out of sync: index has %d vectors "
-                "but metadata maps %d rows (likely crash between the two "
-                "atomic replaces; rows may be mismapped). Ignoring mapping "
-                "entries with row id >= %d.",
-                ntotal,
-                len(id_to_employee),
-                ntotal,
-            )
-            id_to_employee = {
-                k: v for k, v in id_to_employee.items() if k < ntotal
+            employee_to_ids = {
+                k: [int(i) for i in v] for k, v in meta.get("employee_to_ids", {}).items()
             }
+            persisted_next_id = int(meta.get("next_id", 0))
+
+        # Migrate a legacy plain-flat index (written before the IDMap switch).
+        if not isinstance(index, faiss.IndexIDMap):
+            index = self._wrap_legacy(index)
+
+        present = self._present_ids(index)
+        mapped = set(id_to_employee)
+
+        # Metadata references ids the index does not contain (e.g. a crash
+        # between the two atomic replaces): drop those mapping entries.
+        missing = mapped - present
+        if missing:
+            logger.critical(
+                "FAISS index and metadata out of sync: metadata maps %d id(s) "
+                "absent from the index (e.g. %s); dropping them.",
+                len(missing), sorted(missing)[:5],
+            )
+            id_to_employee = {k: v for k, v in id_to_employee.items() if k in present}
             employee_to_ids = {
                 emp: kept
                 for emp, ids in employee_to_ids.items()
-                if (kept := [i for i in ids if i < ntotal])
+                if (kept := [i for i in ids if i in present])
             }
-        elif len(id_to_employee) < ntotal:
-            # Orphan vectors (rows with no mapping) stay searchable, and a
-            # top-1 hit on an orphan returns employee_id=None even when the
-            # true match is rank 2 - masking real matches. Rebuild the index
-            # from the mapped rows only.
+            mapped = set(id_to_employee)
+
+        # Index rows with no mapping (orphans) would win a search and return
+        # employee_id=None, masking the true rank-2 match. Remove them.
+        orphans = present - mapped
+        if orphans:
             logger.critical(
-                "FAISS index and metadata out of sync: index has %d vectors "
-                "but metadata maps only %d rows. Rebuilding index from the "
-                "mapped rows and dropping %d orphan vector(s).",
-                ntotal,
-                len(id_to_employee),
-                ntotal - len(id_to_employee),
+                "FAISS index has %d orphan vector(s) with no metadata mapping "
+                "(e.g. %s); removing them so they cannot mask a real match.",
+                len(orphans), sorted(orphans)[:5],
             )
-            index, id_to_employee, employee_to_ids = self._compact_mapped_rows(
-                index, id_to_employee
-            )
+            index.remove_ids(faiss.IDSelectorBatch(np.array(sorted(orphans), dtype=np.int64)))
 
         self.index = index
         self.id_to_employee = id_to_employee
         self.employee_to_ids = employee_to_ids
-
-    def _compact_mapped_rows(
-        self, index: faiss.Index, id_to_employee: dict[int, str]
-    ) -> tuple[faiss.Index, dict[int, str], dict[str, list[int]]]:
-        """Rebuild a flat index keeping only the rows present in the mapping.
-
-        Rows are renumbered compactly in original order. Operates purely on
-        its arguments so _load can validate locals before publishing them.
-        """
-        vectors = []
-        new_id_to_employee: dict[int, str] = {}
-        new_employee_to_ids: dict[str, list[int]] = {}
-
-        for old_idx in range(index.ntotal):
-            emp = id_to_employee.get(old_idx)
-            if emp is None:
-                continue
-            new_idx = len(vectors)
-            vectors.append(index.reconstruct(old_idx))
-            new_id_to_employee[new_idx] = emp
-            new_employee_to_ids.setdefault(emp, []).append(new_idx)
-
-        new_index = faiss.IndexFlatIP(self.dim)
-        if vectors:
-            new_index.add(np.vstack(vectors).astype(np.float32))
-        return new_index, new_id_to_employee, new_employee_to_ids
+        # Never hand out an id at or below any id ever seen (present, mapped, or
+        # the persisted high-water mark) so removed ids are not reused.
+        self._next_id = max([*present, *mapped, persisted_next_id - 1]) + 1
 
     def _save(self) -> None:
         """Persist index + metadata atomically (temp file + os.replace).
@@ -139,8 +150,9 @@ class FaissIndex:
         tmp_meta = self.metadata_path.with_suffix(self.metadata_path.suffix + ".tmp")
         tmp_meta.write_text(
             json.dumps({
-                "id_to_employee": self.id_to_employee,
+                "id_to_employee": {str(k): v for k, v in self.id_to_employee.items()},
                 "employee_to_ids": self.employee_to_ids,
+                "next_id": self._next_id,
             })
         )
         os.replace(tmp_meta, self.metadata_path)
@@ -149,23 +161,24 @@ class FaissIndex:
         with self._lock:
             embedding = embedding.astype(np.float32).reshape(1, -1)
             faiss.normalize_L2(embedding)
-            idx = self.index.ntotal
-            self.index.add(embedding)
-            self.id_to_employee[idx] = employee_id
-            self.employee_to_ids.setdefault(employee_id, []).append(idx)
+            new_id = self._next_id
+            self._next_id += 1
+            self.index.add_with_ids(embedding, np.array([new_id], dtype=np.int64))
+            self.id_to_employee[new_id] = employee_id
+            self.employee_to_ids.setdefault(employee_id, []).append(new_id)
             self._save()
-            return idx
+            return new_id
 
     def add_batch(self, employee_id: str, embeddings: list[np.ndarray]) -> list[int]:
         """Replace all embeddings for employee with a new batch.
 
-        Adds the whole batch in one ``index.add`` and saves once, instead of
-        one full index+metadata rewrite per embedding.
+        Removes the employee's existing rows via ``remove_ids`` (only their own
+        vectors, not the whole index) then adds the new batch and saves once.
         """
         with self._lock:
-            # Validate and stack the incoming batch BEFORE mutating anything:
-            # a ragged or wrong-dimension batch must raise without silently
-            # removing the employee's existing embeddings.
+            # Validate and stack the incoming batch BEFORE mutating anything: a
+            # ragged or wrong-dimension batch must raise without first removing
+            # the employee's existing embeddings.
             arr = None
             if embeddings:
                 arr = np.vstack([e.astype(np.float32).reshape(1, -1) for e in embeddings])
@@ -181,9 +194,9 @@ class FaissIndex:
                 self._save()
                 return []
 
-            start = self.index.ntotal
-            self.index.add(arr)
-            ids = list(range(start, start + len(embeddings)))
+            ids = list(range(self._next_id, self._next_id + len(embeddings)))
+            self._next_id += len(embeddings)
+            self.index.add_with_ids(arr, np.array(ids, dtype=np.int64))
             for idx in ids:
                 self.id_to_employee[idx] = employee_id
             self.employee_to_ids.setdefault(employee_id, []).extend(ids)
@@ -199,9 +212,9 @@ class FaissIndex:
             faiss.normalize_L2(embedding)
             scores, indices = self.index.search(embedding, min(k, self.index.ntotal))
 
-            best_idx = int(indices[0][0])
+            best_id = int(indices[0][0])
             confidence = float(scores[0][0])
-            employee_id = self.id_to_employee.get(best_idx)
+            employee_id = self.id_to_employee.get(best_id)
 
             return employee_id, confidence
 
@@ -223,8 +236,8 @@ class FaissIndex:
             scores, indices = self.index.search(emb, kk)
             out: list[tuple[str, float]] = []
             for rank in range(kk):
-                faiss_idx = int(indices[0][rank])
-                emp_id = self.id_to_employee.get(faiss_idx)
+                faiss_id = int(indices[0][rank])
+                emp_id = self.id_to_employee.get(faiss_id)
                 if emp_id is not None:
                     out.append((emp_id, float(scores[0][rank])))
             return out
@@ -234,10 +247,10 @@ class FaissIndex:
             self._remove_employee_locked(employee_id, save=True)
 
     def _remove_employee_locked(self, employee_id: str, *, save: bool) -> None:
-        """Rebuild index without employee (FAISS flat index has no delete).
+        """Remove an employee's vectors by id (no whole-index rebuild).
 
         Caller must hold self._lock. ``save=False`` lets add_batch reuse this
-        without an extra full rewrite (it saves once at the end).
+        without an extra save (it saves once at the end).
         """
         ids = self.employee_to_ids.pop(employee_id, [])
         if not ids:
@@ -245,11 +258,7 @@ class FaissIndex:
 
         for idx in ids:
             self.id_to_employee.pop(idx, None)
-
-        if self.index.ntotal > 0:
-            self.index, self.id_to_employee, self.employee_to_ids = (
-                self._compact_mapped_rows(self.index, self.id_to_employee)
-            )
+        self.index.remove_ids(faiss.IDSelectorBatch(np.array(ids, dtype=np.int64)))
         if save:
             self._save()
 
@@ -280,7 +289,7 @@ class FaissIndex:
                     "version": hashlib.sha256(b"empty").hexdigest()[:16],
                     "embedding_count": 0,
                     "index_b64": None,
-                    "metadata": {"id_to_employee": {}, "employee_to_ids": {}},
+                    "metadata": {"id_to_employee": {}, "employee_to_ids": {}, "next_id": self._next_id},
                 }
 
             return {
@@ -290,6 +299,7 @@ class FaissIndex:
                 "metadata": {
                     "id_to_employee": {str(k): v for k, v in self.id_to_employee.items()},
                     "employee_to_ids": self.employee_to_ids,
+                    "next_id": self._next_id,
                 },
             }
 
@@ -300,8 +310,8 @@ class FaissIndex:
             index_bytes = base64.b64decode(index_b64)
             tmp_index = self.index_path.with_suffix(self.index_path.suffix + ".tmp")
             tmp_index.write_bytes(index_bytes)
-            # Parse before replacing so a corrupt bundle cannot clobber a
-            # good on-disk index.
+            # Parse before replacing so a corrupt bundle cannot clobber a good
+            # on-disk index.
             faiss.read_index(str(tmp_index))
             os.replace(tmp_index, self.index_path)
 
@@ -310,11 +320,12 @@ class FaissIndex:
                 json.dumps({
                     "id_to_employee": metadata.get("id_to_employee", {}),
                     "employee_to_ids": metadata.get("employee_to_ids", {}),
+                    "next_id": metadata.get("next_id", 0),
                 })
             )
             os.replace(tmp_meta, self.metadata_path)
-            # Install in memory through the validated load path so a
-            # mismatched bundle is caught/normalized the same as a reload.
+            # Install in memory through the validated load path so a mismatched
+            # bundle is caught/normalized the same as a reload.
             self._load()
 
     def reload(self) -> None:

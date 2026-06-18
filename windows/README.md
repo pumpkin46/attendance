@@ -37,7 +37,7 @@ windows/
 
 ```
 Browser → nginx (:8080) ─┬─ static frontend (frontend\dist)
-                         └─ /api/v1 → uvicorn (:8000) ─┬─ PostgreSQL service (:15432)
+                         └─ /api/v1 → uvicorn (:18000) ─┬─ PostgreSQL service (:15432)
                                                        ├─ Redis service (:6379)
                                                        └─ InsightFace buffalo_l + anti-spoof (bundled)
 Celery worker + beat (background jobs) ── Redis broker (:6379)

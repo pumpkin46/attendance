@@ -110,8 +110,8 @@ export function useVisitorTimeline(id: number) {
 function useInvalidateVisitorDetail(id: number) {
   const qc = useQueryClient()
   return () => {
-    qc.invalidateQueries({ queryKey: visitorKeys.detail(id) })
-    qc.invalidateQueries({ queryKey: visitorKeys.all, refetchType: 'active' })
+    void qc.invalidateQueries({ queryKey: visitorKeys.detail(id) })
+    void qc.invalidateQueries({ queryKey: visitorKeys.all, refetchType: 'active' })
   }
 }
 
@@ -243,7 +243,7 @@ export function useRegisterVisitor() {
     mutationFn: (payload: Record<string, unknown>) => api.post('/visitors', payload),
     onSuccess: () => {
       toast.success('Visitor registered')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -254,7 +254,7 @@ export function useCheckInVisitor() {
     mutationFn: (id: number) => api.post(`/visitors/${id}/check-in`),
     onSuccess: () => {
       toast.success('Visitor checked in')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -265,7 +265,7 @@ export function useCheckOutVisitor() {
     mutationFn: (id: number) => api.post(`/visitors/${id}/check-out`),
     onSuccess: () => {
       toast.success('Visitor checked out')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -276,7 +276,7 @@ export function useCancelVisit() {
     mutationFn: (id: number) => api.post(`/visitors/${id}/cancel`),
     onSuccess: () => {
       toast.success('Visit cancelled')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -288,7 +288,7 @@ export function useEnrollVisitorFace() {
       api.post(`/visitors/${id}/enroll-face`, { image, method: 'admin' }),
     onSuccess: () => {
       toast.success('Face enrolled')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -299,7 +299,7 @@ export function useAddBlacklist() {
     mutationFn: (payload: Record<string, unknown>) => api.post('/visitor-blacklist', payload),
     onSuccess: () => {
       toast.success('Added to blacklist')
-      qc.invalidateQueries({ queryKey: blacklistKeys.list })
+      void qc.invalidateQueries({ queryKey: blacklistKeys.list })
     },
   })
 }

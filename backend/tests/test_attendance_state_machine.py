@@ -243,3 +243,72 @@ async def test_rfid_first_tap_reports_check_in(db_session, no_dup_window):
 async def test_rfid_inactive_employee_returns_none(db_session):
     emp = await _make_employee(db_session, active=False)
     assert await process_rfid_tap(db_session, emp.id, "in") is None
+
+
+@pytest.mark.asyncio
+async def test_rfid_exit_only_without_checkin_creates_no_row(db_session, no_dup_window):
+    # An exit-only reader tapped by someone who never tapped an entry reader
+    # must not create a bare status='absent' row (mirrors the face check_out path).
+    emp = await _make_employee(db_session)
+    result = await process_rfid_tap(db_session, emp.id, "out")
+    assert result is None
+
+    from sqlalchemy import func, select
+    from app.models.attendance import AttendanceRecord
+
+    count = (
+        await db_session.execute(
+            select(func.count())
+            .select_from(AttendanceRecord)
+            .where(AttendanceRecord.employee_id == emp.id)
+        )
+    ).scalar()
+    assert count == 0
+
+
+def test_resolve_checkout_status_early_leave():
+    from types import SimpleNamespace
+
+    from app.services.attendance_service import _resolve_checkout_status
+
+    policy = SimpleNamespace(half_day_minutes=120, min_work_minutes=300)
+    assert _resolve_checkout_status(100, policy, "present") == "half_day"
+    assert _resolve_checkout_status(200, policy, "present") == "early_leave"
+    assert _resolve_checkout_status(350, policy, "present") == "present"
+    assert _resolve_checkout_status(350, policy, "late") == "late"
+
+
+@pytest.mark.asyncio
+async def test_apply_manual_attendance_is_idempotent_and_computes_worked(db_session):
+    # Re-posting the same day updates the same row (no UNIQUE violation / 500),
+    # and worked minutes are computed from the supplied times.
+    from datetime import date, datetime, timezone
+
+    from app.services.attendance_service import apply_manual_attendance
+
+    emp = await _make_employee(db_session)
+    ci = datetime(2026, 1, 5, 9, 0, tzinfo=timezone.utc)
+    co = datetime(2026, 1, 5, 17, 0, tzinfo=timezone.utc)
+
+    rec = await apply_manual_attendance(
+        db_session,
+        employee_id=emp.id,
+        organization_id=emp.organization_id,
+        work_date=date(2026, 1, 5),
+        check_in_at=ci,
+        check_out_at=co,
+        notes="entered by admin",
+    )
+    assert rec.check_in_at is not None and rec.check_out_at is not None
+    assert rec.worked_minutes > 0
+
+    rec2 = await apply_manual_attendance(
+        db_session,
+        employee_id=emp.id,
+        organization_id=emp.organization_id,
+        work_date=date(2026, 1, 5),
+        check_in_at=ci,
+        check_out_at=co,
+        notes="corrected",
+    )
+    assert rec2.id == rec.id

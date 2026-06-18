@@ -23,7 +23,7 @@ function getCachedUrl(src: string): Promise<string> {
   }
 
   const promise = api
-    .get(toApiPath(src), { responseType: 'blob' })
+    .get<Blob>(toApiPath(src), { responseType: 'blob' })
     .then((r) => URL.createObjectURL(r.data))
   // Drop failures from the cache so a later mount retries instead of
   // permanently showing the error state.
@@ -105,7 +105,7 @@ export function AuthImage({
     // Uncached: this mount owns the object URL and revokes it on unmount.
     let objectUrl: string | null = null
     api
-      .get(toApiPath(src), { responseType: 'blob' })
+      .get<Blob>(toApiPath(src), { responseType: 'blob' })
       .then((res) => {
         if (cancelled) return
         objectUrl = URL.createObjectURL(res.data)

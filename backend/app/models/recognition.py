@@ -6,7 +6,6 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -20,10 +19,19 @@ from app.models.base import Base
 
 
 class RecognitionResult(enum.Enum):
+    """Canonical recognition-outcome values.
+
+    The single source of truth for recognition results — engine.py aliases this
+    (as RecognitionEventResult). Stored as varchar on both recognition_events and
+    engine_recognition_logs (not a native PG enum), so a new outcome needs no
+    ALTER TYPE migration; this enum is the validation/reference list.
+    """
+
     matched = "matched"
     unknown = "unknown"
     liveness_failed = "liveness_failed"
     low_confidence = "low_confidence"
+    quality_rejected = "quality_rejected"
 
 
 class RecognitionEvent(Base):
@@ -44,9 +52,10 @@ class RecognitionEvent(Base):
     employee_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
     )
-    result: Mapped[RecognitionResult] = mapped_column(
-        Enum(RecognitionResult, values_callable=lambda e: [x.value for x in e])
-    )
+    # Varchar (not a native PG enum) to match engine_recognition_logs.result and
+    # so a richer outcome can be written without an ALTER TYPE. Values come from
+    # RecognitionResult (store the .value).
+    result: Mapped[str] = mapped_column(String(32))
     confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     liveness_passed: Mapped[bool] = mapped_column(Boolean, server_default="0")
     processing_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)

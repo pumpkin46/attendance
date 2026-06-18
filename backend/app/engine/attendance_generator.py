@@ -18,12 +18,10 @@ liveness_score, timestamp.
 from __future__ import annotations
 
 import logging
-import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
 
 from app.engine.config import engine_config
 

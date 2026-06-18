@@ -56,7 +56,7 @@ export function useSaveEmployee() {
         : api.put(`/employees/${id}`, toEmployeePayload(form, true)),
     onSuccess: (_d, { id }) => {
       toast.success(id === null ? 'Employee created' : 'Employee updated')
-      invalidate()
+      void invalidate()
     },
     onError: (err) => toast.error(getApiErrorMessage(err)),
   })

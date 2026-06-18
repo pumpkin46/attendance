@@ -70,8 +70,8 @@ export async function fetchSecurityAlertExport(
 function useInvalidateAlerts() {
   const qc = useQueryClient()
   return () => {
-    qc.invalidateQueries({ queryKey: securityMonitoringKeys.alerts })
-    qc.invalidateQueries({ queryKey: securityMonitoringKeys.dashboard })
+    void qc.invalidateQueries({ queryKey: securityMonitoringKeys.alerts })
+    void qc.invalidateQueries({ queryKey: securityMonitoringKeys.dashboard })
   }
 }
 

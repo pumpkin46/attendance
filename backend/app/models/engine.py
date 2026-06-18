@@ -19,6 +19,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+# Single source of truth for recognition-result values; engine_recognition_logs
+# and recognition_events both store these as varchar. Aliased so existing
+# references keep working without a second, divergent enum.
+from app.models.recognition import RecognitionResult as RecognitionEventResult  # noqa: F401
 
 
 class EngineStreamStatus(enum.Enum):
@@ -28,14 +32,6 @@ class EngineStreamStatus(enum.Enum):
     interrupted = "interrupted"
     offline = "offline"
     error = "error"
-
-
-class RecognitionEventResult(enum.Enum):
-    matched = "matched"
-    unknown = "unknown"
-    liveness_failed = "liveness_failed"
-    quality_rejected = "quality_rejected"
-    low_confidence = "low_confidence"
 
 
 class VerificationLevelEnum(enum.Enum):

@@ -43,8 +43,8 @@ async def create_policy(
 
 
 @router.get("/attendance-policies/{policy_id}", response_model=AttendancePolicyOut)
-async def get_policy(policy_id: int, db: DbSession, user: CurrentUser):
-    policy = await shift_service.get_policy(db, policy_id)
+async def get_policy(policy_id: int, db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+    policy = await shift_service.get_policy(db, policy_id, org_id)
     return AttendancePolicyOut.model_validate(policy, from_attributes=True)
 
 
@@ -53,9 +53,10 @@ async def update_policy(
     policy_id: int,
     body: AttendancePolicyCreate,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("shifts.manage"),
 ):
-    policy = await shift_service.update_policy(db, policy_id, body)
+    policy = await shift_service.update_policy(db, policy_id, body, org_id)
     return AttendancePolicyOut.model_validate(policy, from_attributes=True)
 
 
@@ -80,8 +81,8 @@ async def create_shift(
 
 
 @router.get("/shifts/{shift_id}", response_model=ShiftOut)
-async def get_shift(shift_id: int, db: DbSession, user: CurrentUser):
-    shift = await shift_service.get_shift(db, shift_id)
+async def get_shift(shift_id: int, db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+    shift = await shift_service.get_shift(db, shift_id, org_id)
     return ShiftOut.model_validate(shift, from_attributes=True)
 
 
@@ -90,9 +91,10 @@ async def update_shift(
     shift_id: int,
     body: ShiftCreate,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("shifts.manage"),
 ):
-    shift = await shift_service.update_shift(db, shift_id, body)
+    shift = await shift_service.update_shift(db, shift_id, body, org_id)
     return ShiftOut.model_validate(shift, from_attributes=True)
 
 
@@ -100,9 +102,10 @@ async def update_shift(
 async def delete_shift(
     shift_id: int,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("shifts.manage"),
 ):
-    await shift_service.deactivate_shift(db, shift_id)
+    await shift_service.deactivate_shift(db, shift_id, org_id)
     return None
 
 
@@ -111,9 +114,10 @@ async def assign_shift(
     shift_id: int,
     body: ShiftAssignRequest,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("shifts.manage"),
 ):
-    assignment = await shift_service.assign_shift(db, shift_id, body)
+    assignment = await shift_service.assign_shift(db, shift_id, body, org_id)
     return ShiftAssignmentOut(
         id=assignment.id,
         shift_id=assignment.shift_id,
@@ -158,8 +162,13 @@ async def list_leave_requests(
 
 
 @router.post("/leave-requests", status_code=201, response_model=LeaveRequestOut)
-async def create_leave_request(body: LeaveRequestCreate, db: DbSession, user: CurrentUser):
-    leave = await shift_service.create_leave_request(db, body)
+async def create_leave_request(
+    body: LeaveRequestCreate,
+    db: DbSession,
+    user: CurrentUser,
+    org_id: TenantOrgId,
+):
+    leave = await shift_service.create_leave_request(db, body, org_id)
     return LeaveRequestOut.model_validate(leave, from_attributes=True)
 
 
@@ -168,7 +177,8 @@ async def update_leave_request(
     leave_id: int,
     body: LeaveRequestUpdate,
     db: DbSession,
+    org_id: TenantOrgId,
     user: require_permission("leave.approve"),
 ):
-    leave = await shift_service.decide_leave_request(db, leave_id, body, user.id)
+    leave = await shift_service.decide_leave_request(db, leave_id, body, user.id, org_id)
     return LeaveRequestOut.model_validate(leave, from_attributes=True)

@@ -1,6 +1,4 @@
-import { useMemo, useState } from 'react'
-import { useAppSelector } from '@/store/hooks'
-import { selectOrgId } from '@/features/tenant/tenantSlice'
+import { useState } from 'react'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
@@ -25,13 +23,12 @@ import {
   useUpdateLocation,
   useUpdateOrganization,
 } from '@/features/security/api/queries'
-import { flattenTree } from '@/features/security/lib/tree'
 import { OrgTreeView } from '@/features/security/components/OrgTreeView'
 
 const FORM_ID = 'tenancy-entity-form'
 const PAGE_SIZE = 8
 
-type EntityTab = 'organizations' | 'units' | 'locations'
+type EntityTab = 'organizations' | 'locations'
 
 interface PanelState {
   entity: 'organizations' | 'locations'
@@ -64,16 +61,6 @@ function ActiveField({
         label="Active"
         description={`Inactive ${entity}s are kept for history but hidden from day-to-day workflows.`}
       />
-    </div>
-  )
-}
-
-/** Read-only context line shown on edit forms (the parent org cannot be changed). */
-function OrgContextRow({ name }: { name: string }) {
-  return (
-    <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2.5">
-      <span className="text-xs uppercase tracking-wide text-slate-500">Organization</span>
-      <span className="text-sm font-medium text-slate-200">{name}</span>
     </div>
   )
 }
@@ -128,31 +115,20 @@ function OrganizationForm({
 
 function LocationForm({
   record,
-  organizations,
-  showOrgPicker,
-  defaultOrgId,
-  orgPinned,
   onSubmit,
 }: {
   record: Location | null
-  organizations: Organization[]
-  showOrgPicker: boolean
-  defaultOrgId: string
-  orgPinned: boolean
   onSubmit: (values: {
     name: string
     address: string | null
     timezone: string
-    organization_id?: number
     is_active?: boolean
   }) => void
 }) {
-  const [orgId, setOrgId] = useState(record ? String(record.organization_id) : defaultOrgId)
   const [name, setName] = useState(record?.name ?? '')
   const [address, setAddress] = useState(record?.address ?? '')
   const [timezone, setTimezone] = useState(record?.timezone ?? 'UTC')
   const [active, setActive] = useState(record?.is_active ?? true)
-  const orgName = organizations.find((o) => o.id === record?.organization_id)?.name
 
   return (
     <form
@@ -163,31 +139,10 @@ function LocationForm({
           name,
           address: address.trim() || null,
           timezone,
-          ...(record
-            ? { is_active: active }
-            : orgId
-              ? { organization_id: Number(orgId) }
-              : {}),
+          ...(record ? { is_active: active } : {}),
         })
       }}
     >
-      {record ? (
-        <OrgContextRow name={orgName ?? `Organization #${record.organization_id}`} />
-      ) : (
-        showOrgPicker && (
-          <Label>
-            Organization
-            <Combobox
-              value={orgId}
-              onChange={setOrgId}
-              required
-              disabled={orgPinned}
-              placeholder="Select organization…"
-              options={organizations.map((o) => ({ value: String(o.id), label: o.name }))}
-            />
-          </Label>
-        )
-      )}
       <Label>
         Name
         <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Head Office" />
@@ -214,7 +169,6 @@ function LocationForm({
  */
 export function TenancyDirectory() {
   const { isSuperAdmin, hasPermission } = useAuth()
-  const tenantHeaderOrg = useAppSelector(selectOrgId)
 
   const { data: organizations, isPending: orgsLoading } = useOrganizations()
   const { data: tree, isPending: treeLoading } = useOrgTree()
@@ -222,10 +176,6 @@ export function TenancyDirectory() {
   const orgs = organizations ?? []
   const treeRoots = tree ?? []
   const locationList = locations ?? []
-
-  const allNodes = useMemo(() => flattenTree(treeRoots), [treeRoots])
-  // Non-root units only — company roots are managed from the Organizations tab.
-  const unitCount = allNodes.filter((n) => n.parent_id !== null).length
 
   const [tab, setTab] = useState<EntityTab>('organizations')
   const [search, setSearch] = useState('')
@@ -259,14 +209,12 @@ export function TenancyDirectory() {
   const inOrgFilter = (organizationId: number) =>
     !orgFilter || organizationId === Number(orgFilter)
 
-  const filteredOrgs = orgs.filter((o) => matches(o.name, o.code))
   const filteredLocations = locationList.filter(
     (l) => matches(l.name, l.address ?? '') && inOrgFilter(l.organization_id)
   )
 
   const tabs: { id: EntityTab; label: string; count: number }[] = [
     { id: 'organizations', label: 'Organizations', count: orgs.length },
-    { id: 'units', label: 'Org units', count: unitCount },
     { id: 'locations', label: 'Locations', count: locationList.length },
   ]
 
@@ -336,10 +284,6 @@ export function TenancyDirectory() {
 
   const showOrgFilter = tab === 'locations' && orgs.length > 1
   const canCreateCurrent = tab === 'organizations' ? canCreateOrg : tab === 'locations' && canManageLocations
-  // Super admins pick the target org in the form unless a tenant context is pinned.
-  const showOrgPicker = isSuperAdmin() && orgs.length > 0
-  const defaultOrgId = tenantHeaderOrg ?? orgFilter
-  const orgPinned = !!tenantHeaderOrg
 
   const panelTitle = panel
     ? `${panel.record ? 'Edit' : 'New'} ${ENTITY_LABEL[panel.entity]}`
@@ -378,7 +322,7 @@ export function TenancyDirectory() {
           ))}
         </div>
 
-        {tab !== 'units' && (
+        {tab === 'locations' && (
           <SearchBox
             value={search}
             onChange={setSearch}
@@ -416,43 +360,27 @@ export function TenancyDirectory() {
       </div>
 
       {tab === 'organizations' && (
-        <DataTable
-          data={filteredOrgs}
-          rowKey={(o) => o.id}
-          loading={orgsLoading}
-          pageSize={PAGE_SIZE}
-          onRowClick={canManage.organizations ? (o) => openPanel('organizations', o) : undefined}
-          empty={query ? 'No organizations match your search' : 'No organizations yet'}
-          columns={[
-            {
-              key: 'name',
-              header: 'Name',
-              sortable: true,
-              cell: (o) => <span className="font-medium text-slate-100">{o.name}</span>,
-            },
-            {
-              key: 'code',
-              header: 'Code',
-              width: '7rem',
-              className: 'font-mono text-xs text-slate-300',
-              sortable: true,
-            },
-            { key: 'timezone', header: 'Timezone', width: '9rem', className: 'text-slate-400' },
-            { key: 'nodes_count', header: 'Org units', width: '7rem', align: 'right', sortable: true, cell: (o) => o.nodes_count ?? 0 },
-            { key: 'employees_count', header: 'Employees', width: '7rem', align: 'right', sortable: true, cell: (o) => o.employees_count ?? 0 },
-            { key: 'status', header: 'Status', width: '6.5rem', cell: (o) => <StatusBadge active={o.is_active} /> },
-            {
-              key: 'actions',
-              header: '',
-              align: 'right',
-              cell: (o) => rowActions('organizations', o, () => removeOrganization(o), canDeleteOrg),
-            },
-          ]}
+        <OrgTreeView
+          tree={treeRoots}
+          loading={treeLoading || orgsLoading}
+          canManage={canManageNodes}
+          onEditCompany={
+            canManageOrgs
+              ? (root) => {
+                  const org = orgs.find((o) => o.id === root.id)
+                  if (org) openPanel('organizations', org)
+                }
+              : undefined
+          }
+          onDeleteCompany={
+            canManageOrgs && canDeleteOrg
+              ? (root) => {
+                  const org = orgs.find((o) => o.id === root.id)
+                  if (org) void removeOrganization(org)
+                }
+              : undefined
+          }
         />
-      )}
-
-      {tab === 'units' && (
-        <OrgTreeView tree={treeRoots} loading={treeLoading} canManage={canManageNodes} />
       )}
 
       {tab === 'locations' && (
@@ -484,7 +412,7 @@ export function TenancyDirectory() {
               key: 'actions',
               header: '',
               align: 'right',
-              cell: (l) => rowActions('locations', l, () => removeLocation(l), true),
+              cell: (l) => rowActions('locations', l, () => { void removeLocation(l) }, true),
             },
           ]}
         />
@@ -528,10 +456,6 @@ export function TenancyDirectory() {
           <LocationForm
             key={(panel.record as Location | null)?.id ?? 'new'}
             record={panel.record as Location | null}
-            organizations={orgs}
-            showOrgPicker={showOrgPicker}
-            defaultOrgId={defaultOrgId}
-            orgPinned={orgPinned}
             onSubmit={(values) => {
               const record = panel.record as Location | null
               if (record)

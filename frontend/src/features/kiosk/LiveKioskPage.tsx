@@ -275,7 +275,7 @@ export default function LiveKioskPage({ fullscreen = false }: LiveKioskPageProps
     const detectTimer = setInterval(runDetect, DETECT_MS)
     const identifyTimer = setInterval(runIdentify, IDENTIFY_MS)
     const bufferTimer = setInterval(sampleForLiveness, FRAME_BUFFER_MS)
-    runDetect()
+    void runDetect()
 
     return () => {
       clearInterval(detectTimer)

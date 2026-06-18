@@ -44,7 +44,7 @@ export function useCreateCamera() {
     mutationFn: (payload: CameraPayload) => api.post('/cameras', payload),
     onSuccess: () => {
       toast.success('Camera registered')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -56,7 +56,7 @@ export function useUpdateCamera() {
       api.put(`/cameras/${id}`, payload),
     onSuccess: () => {
       toast.success('Camera updated')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -84,7 +84,7 @@ export function useCaptureFromStream() {
       return data
     },
     onSuccess: () => {
-      invalidate()
+      void invalidate()
     },
   })
 }

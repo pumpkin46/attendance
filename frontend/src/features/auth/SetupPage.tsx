@@ -143,7 +143,7 @@ export default function SetupPage() {
         /* transient — keep polling */
       }
     }
-    tick()
+    void tick()
     const id = window.setInterval(tick, 800)
     return () => {
       cancelled = true
@@ -205,7 +205,7 @@ export default function SetupPage() {
         admin_password: form.admin_password,
       })
       toast.success('Setup complete — sign in with your new administrator account.')
-      navigate('/login', { replace: true })
+      void navigate('/login', { replace: true })
     } catch (err) {
       setError(getApiErrorMessage(err, 'Setup failed. Please try again.'))
     } finally {

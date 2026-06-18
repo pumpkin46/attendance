@@ -105,13 +105,17 @@ def backfill_org_tree(conn) -> None:
         return cand
 
     def insert_node(root_id, parent_id, parent_path, node_type, name, code, address, timezone, is_active, depth):
-        conn.execute(
+        # RETURNING id captures the new row deterministically — no dependency on
+        # (root, code) being unique during the backfill window (a subtle code
+        # collision would otherwise let the re-select pick the wrong row).
+        new_id = conn.execute(
             sa.text(
                 """
                 INSERT INTO organizations
                     (name, code, parent_id, root_organization_id, node_type,
                      path, depth, timezone, address, is_active)
                 VALUES (:name, :code, :parent, :root, :ntype, '', :depth, :tz, :addr, :active)
+                RETURNING id
                 """
             ),
             {
@@ -119,13 +123,6 @@ def backfill_org_tree(conn) -> None:
                 "ntype": node_type, "depth": depth, "tz": timezone or "UTC",
                 "addr": address, "active": is_active,
             },
-        )
-        # code is now unique within the root, so this resolves to exactly one row.
-        new_id = conn.execute(
-            sa.text(
-                "SELECT id FROM organizations WHERE root_organization_id = :r AND code = :c"
-            ),
-            {"r": root_id, "c": code},
         ).scalar()
         path = f"{parent_path}{new_id}/"
         conn.execute(

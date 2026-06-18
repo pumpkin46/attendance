@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.api.users import create_user
+from app.api.users import create_user, update_user
 from app.models.organization import Organization
 from app.models.user import Role, User
-from app.schemas.users import AdminCreateUserRequest
+from app.schemas.users import AdminCreateUserRequest, AdminUpdateUserRequest
 
 _REQUEST = SimpleNamespace(client=None, headers={})
 
@@ -74,3 +74,31 @@ async def test_non_super_creator_always_inherits_own_org(db_session):
         _body(organization_id=2), _REQUEST, db_session, creator, org_id=1
     )
     assert out.organization_id == 1
+
+
+async def test_admin_password_reset_bumps_revocation_stamp(db_session):
+    # An admin password reset must establish a revocation baseline so the
+    # target's existing JWTs (pwd_at older / absent) are rejected afterwards.
+    creator = await _seed_creator(db_session, role_name="super_admin", creator_org=None)
+    target = User(
+        organization_id=1,
+        name="Target",
+        email="target@example.com",
+        password="old-hash",
+        auth_provider="local",
+        is_active=True,
+    )
+    db_session.add(target)
+    await db_session.flush()
+    assert target.password_changed_at is None
+
+    await update_user(
+        target.id,
+        AdminUpdateUserRequest(password="new-password-123"),
+        _REQUEST,
+        db_session,
+        creator,
+        org_id=1,
+    )
+    assert target.password_changed_at is not None
+    assert target.password != "old-hash"

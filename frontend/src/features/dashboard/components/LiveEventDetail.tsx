@@ -47,7 +47,7 @@ export function LiveEventDetailPanel({
   const navigate = useNavigate()
   if (!event) return null
 
-  const payload = (event.payload ?? {}) as Record<string, unknown>
+  const payload = (event.payload ?? {})
   const recognitionEventId =
     typeof payload.recognition_event_id === 'number' ? payload.recognition_event_id : null
   const hasSnapshot = recognitionEventId != null && payload.snapshot !== false

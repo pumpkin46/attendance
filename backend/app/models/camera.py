@@ -13,7 +13,6 @@ from sqlalchemy import (
     Numeric,
     SmallInteger,
     String,
-    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

@@ -12,7 +12,6 @@ from sqlalchemy import (
     String,
     Table,
     UniqueConstraint,
-    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

@@ -51,6 +51,20 @@ async def test_create_organization_is_a_root(db_session):
     assert org.node_type == "company"
 
 
+async def test_duplicate_root_code_rejected_at_db_level(db_session):
+    # Partial unique index (parent_id IS NULL) makes the DB — not just the
+    # race-prone app check — the source of truth for company-code uniqueness.
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.organization import Organization
+
+    db_session.add(Organization(name="A", code="DUP", parent_id=None))
+    await db_session.flush()
+    db_session.add(Organization(name="B", code="DUP", parent_id=None))
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+
+
 async def test_create_node_computes_path_and_depth(db_session):
     org = await _root(db_session, "Acme", "ACME")
     tech = await _node(db_session, org, "Technology", "TECH")

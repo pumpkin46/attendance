@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
+
+# Hard cap on org-tree recursion depth. Real org charts are a handful of levels
+# deep; the cap is a safety net so a malformed tree (e.g. a parent_id cycle
+# introduced by a concurrent move) makes the recursive walks terminate instead
+# of looping forever and hanging the tenant-resolution hot path.
+MAX_TREE_DEPTH = 64
 
 
 def apply_tenant_filter(stmt: Select, org_id: int | None, org_column) -> Select:
@@ -25,9 +31,16 @@ def descendants_subquery(node_id: int):
     PostgreSQL and SQLite. Anonymous CTE name so several can coexist in one
     statement. Used by the org-tree service (sub-tree fetch, delete/move guards).
     """
-    base = select(Organization.id).where(Organization.id == node_id)
+    base = select(Organization.id, literal(0).label("depth")).where(
+        Organization.id == node_id
+    )
     cte = base.cte(recursive=True)
-    cte = cte.union_all(select(Organization.id).where(Organization.parent_id == cte.c.id))
+    cte = cte.union_all(
+        select(Organization.id, (cte.c.depth + 1).label("depth")).where(
+            Organization.parent_id == cte.c.id,
+            cte.c.depth < MAX_TREE_DEPTH,
+        )
+    )
     return select(cte.c.id)
 
 
@@ -53,10 +66,17 @@ async def root_id_of(db: AsyncSession, node_id: int) -> int | None:
     Returns None when the node does not exist. Walks ``parent_id`` upward with a
     recursive CTE and picks the row whose ``parent_id`` is NULL.
     """
-    base = select(Organization.id, Organization.parent_id).where(Organization.id == node_id)
+    base = select(
+        Organization.id, Organization.parent_id, literal(0).label("depth")
+    ).where(Organization.id == node_id)
     cte = base.cte(recursive=True)
     cte = cte.union_all(
-        select(Organization.id, Organization.parent_id).where(Organization.id == cte.c.parent_id)
+        select(
+            Organization.id, Organization.parent_id, (cte.c.depth + 1).label("depth")
+        ).where(
+            Organization.id == cte.c.parent_id,
+            cte.c.depth < MAX_TREE_DEPTH,
+        )
     )
     return (
         await db.execute(select(cte.c.id).where(cte.c.parent_id.is_(None)))
@@ -67,20 +87,30 @@ async def ancestor_chain(
     db: AsyncSession, node_id: int, *, include_self: bool = False
 ) -> list[Organization]:
     """Ancestors of ``node_id`` ordered root → … → parent (and node if asked)."""
-    base = select(Organization.id, Organization.parent_id).where(Organization.id == node_id)
+    base = select(
+        Organization.id, Organization.parent_id, literal(0).label("depth")
+    ).where(Organization.id == node_id)
     cte = base.cte(recursive=True)
     cte = cte.union_all(
-        select(Organization.id, Organization.parent_id).where(Organization.id == cte.c.parent_id)
+        select(
+            Organization.id, Organization.parent_id, (cte.c.depth + 1).label("depth")
+        ).where(
+            Organization.id == cte.c.parent_id,
+            cte.c.depth < MAX_TREE_DEPTH,
+        )
     )
     ids = [row[0] for row in (await db.execute(select(cte.c.id))).all()]
     if not ids:
         return []
     rows = (await db.execute(select(Organization).where(Organization.id.in_(ids)))).scalars().all()
     by_id = {r.id: r for r in rows}
-    # Walk up from the node to assemble the ordered chain.
+    # Walk up from the node to assemble the ordered chain. ``seen`` breaks on a
+    # revisit so a parent_id cycle terminates instead of looping forever.
     chain: list[Organization] = []
     cursor: int | None = node_id
-    while cursor is not None and cursor in by_id:
+    seen: set[int] = set()
+    while cursor is not None and cursor in by_id and cursor not in seen:
+        seen.add(cursor)
         chain.append(by_id[cursor])
         cursor = by_id[cursor].parent_id
     chain.reverse()

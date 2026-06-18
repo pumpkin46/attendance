@@ -15,6 +15,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Type safety: strictNullChecks / noImplicitAny etc. The codebase already
+       compiles clean under strict, so this just locks it in. */
+    "strict": true,
+
     /* Path alias — '@/...' resolves from src/ so imports are location-independent */
     "paths": {
       "@/*": ["./src/*"]

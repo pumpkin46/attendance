@@ -23,7 +23,7 @@ const NEXT_TYPE: Record<string, string> = {
   team: 'unit',
 }
 
-export function defaultChildType(parent: OrgNode | null): string {
+function defaultChildType(parent: OrgNode | null): string {
   if (!parent) return 'department'
   return NEXT_TYPE[parent.node_type] ?? 'department'
 }

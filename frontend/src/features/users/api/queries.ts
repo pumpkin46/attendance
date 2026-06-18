@@ -50,8 +50,8 @@ export function usePermissions() {
 function useInvalidateUsersAndRoles() {
   const qc = useQueryClient()
   return () => {
-    qc.invalidateQueries({ queryKey: userAdminKeys.usersAll })
-    qc.invalidateQueries({ queryKey: userAdminKeys.roles })
+    void qc.invalidateQueries({ queryKey: userAdminKeys.usersAll })
+    void qc.invalidateQueries({ queryKey: userAdminKeys.roles })
   }
 }
 

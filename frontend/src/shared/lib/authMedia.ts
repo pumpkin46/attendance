@@ -18,7 +18,7 @@ export async function openAuthMedia(url: string) {
     window.open(url, '_blank')
     return
   }
-  const res = await api.get(toApiPath(url), { responseType: 'blob' })
+  const res = await api.get<Blob>(toApiPath(url), { responseType: 'blob' })
   const objectUrl = URL.createObjectURL(res.data)
   window.open(objectUrl, '_blank')
   setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)

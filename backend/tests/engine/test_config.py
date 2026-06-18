@@ -10,7 +10,7 @@ def test_engine_config_defaults():
     assert cfg.detection.min_face_size == 40
     assert cfg.detection.max_faces_per_frame == 100
     assert cfg.tracking.max_tracks == 200
-    assert cfg.quality.min_quality_score == 0.70
+    assert cfg.quality.min_quality_score == 0.45
     assert cfg.liveness.min_score == 0.85
     # Calibrated for ArcFace cosine similarity (genuine pairs ~0.4-0.7).
     assert cfg.search.auto_accept_threshold == 0.5

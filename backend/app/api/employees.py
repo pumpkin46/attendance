@@ -10,6 +10,7 @@ from app.core.errors import NotFoundError, ValidationError
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
+from app.models.location import Location
 from app.schemas.employee import EmployeeCreate, EmployeeOut, EmployeeUpdate
 from app.services import face_service
 from app.services.audit_service import log_action
@@ -51,6 +52,9 @@ async def create_employee(
     effective_org_id = org_id if org_id is not None else body.organization_id
     if effective_org_id is None:
         raise ValidationError("Organization context required")
+
+    if body.location_id is not None:
+        await _require_org_location(db, body.location_id, effective_org_id)
 
     emp = Employee(
         organization_id=effective_org_id,
@@ -103,6 +107,10 @@ async def update_employee(
     emp = await _get_employee_or_404(db, employee_id, org_id)
 
     update_data = body.model_dump(exclude_unset=True)
+    if update_data.get("location_id") is not None:
+        # Validate against the employee's own org so a foreign location can't be
+        # planted, even for a super-admin caller (org_id is None).
+        await _require_org_location(db, update_data["location_id"], emp.organization_id)
     old_values = {}
     for field, value in update_data.items():
         old_values[field] = getattr(emp, field)
@@ -158,6 +166,22 @@ async def delete_employee(
     emp.face_enrolled = False
     emp.face_enrolled_at = None
     await db.flush()
+
+
+async def _require_org_location(
+    db: DbSession,
+    location_id: int,
+    org_id: int | None,
+) -> None:
+    """Reject a location id that is not in the given organization.
+
+    Closes the cross-tenant write where a client-supplied location_id could
+    point an employee at another tenant's location.
+    """
+    stmt = select(Location.id).where(Location.id == location_id)
+    stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is None:
+        raise ValidationError("Location not found in this organization")
 
 
 async def _get_employee_or_404(

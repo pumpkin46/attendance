@@ -7,12 +7,13 @@ query params and wraps results. File rendering (CSV/Excel/PDF) lives in
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date
 
 from sqlalchemy import Select, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import lazyload, selectinload
 
+from app.core.timeutil import local_day_bounds_utc
 from app.middleware.tenant import apply_tenant_filter
 from app.models.attendance import AttendanceRecord
 from app.models.camera import Camera
@@ -107,19 +108,17 @@ def _unknown_conditions(
     camera_id: int | None = None,
     alerts_only: bool = False,
 ) -> list:
-    conds = [RecognitionEvent.result == RecognitionResult.unknown]
+    conds = [RecognitionEvent.result == RecognitionResult.unknown.value]
     if org_id is not None:
         conds.append(RecognitionEvent.organization_id == org_id)
+    # recognized_at is a UTC timestamp, but the requested dates are local
+    # calendar days; map each to its UTC interval so the report does not shift
+    # by the UTC offset (an evening event landing on the wrong day).
     if date_from is not None:
-        conds.append(
-            RecognitionEvent.recognized_at
-            >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
-        )
+        conds.append(RecognitionEvent.recognized_at >= local_day_bounds_utc(date_from)[0])
     if date_to is not None:
-        conds.append(
-            RecognitionEvent.recognized_at
-            <= datetime.combine(date_to, time.max, tzinfo=timezone.utc)
-        )
+        # Half-open: < start of the day after date_to.
+        conds.append(RecognitionEvent.recognized_at < local_day_bounds_utc(date_to)[1])
     if camera_id is not None:
         conds.append(RecognitionEvent.camera_id == camera_id)
     if alerts_only:

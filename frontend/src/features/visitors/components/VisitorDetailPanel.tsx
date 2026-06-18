@@ -710,7 +710,7 @@ export function VisitorDetailPanel({
               onDrop={(e) => {
                 e.preventDefault()
                 setDocDragOver(false)
-                uploadDocFiles(e.dataTransfer.files)
+                void uploadDocFiles(e.dataTransfer.files)
               }}
               className={cn(
                 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-4 py-6 text-center outline-none transition-colors',
@@ -745,7 +745,7 @@ export function VisitorDetailPanel({
                 const files = e.target.files ? Array.from(e.target.files) : null
                 // Reset so picking the same file again still fires onChange.
                 e.target.value = ''
-                uploadDocFiles(files)
+                void uploadDocFiles(files)
               }}
             />
             {documents.length === 0 ? (

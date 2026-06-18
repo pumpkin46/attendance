@@ -10,6 +10,7 @@ vi.mock('@/shared/api/client', () => ({
   api: { get: vi.fn(), post: vi.fn() },
 }))
 
+// eslint-disable-next-line @typescript-eslint/unbound-method -- api.get is a vi mock, not a bound call
 const mockedGet = vi.mocked(api.get)
 
 function Probe({ perm }: { perm: string }) {
@@ -25,7 +26,7 @@ function Probe({ perm }: { perm: string }) {
 
 function renderWithUser(user: User, perm: string) {
   localStorage.setItem('auth_token', 'token')
-  mockedGet.mockResolvedValueOnce({ data: user } as never)
+  mockedGet.mockResolvedValueOnce({ data: user })
   // Fresh store per render so auth state never leaks between tests. Created
   // after the token is set so it starts in the 'loading' state.
   const store = makeStore()

@@ -88,6 +88,16 @@ class LivenessConfig:
     min_score: float = 0.85
     passive_enabled: bool = True
     active_enabled: bool = True
+    # When True, the live RTSP path buffers recent frames per track and REQUIRES
+    # the temporal (blink/head-movement) check to pass, not just the single-frame
+    # passive anti-spoof model. Default False: a passive entry camera cannot
+    # demand an interactive blink, so requiring it would falsely reject still
+    # faces. Operators who run challenge-style cameras can opt in
+    # (ENGINE_LIVE_ACTIVE_LIVENESS). The kiosk/API path enforces active liveness
+    # independently of this flag.
+    live_active_required: bool = False
+    # Frames buffered per track to feed the active check when the flag is on.
+    live_frame_buffer: int = 12
     # NOTE: the detect_* flags below are descriptive only — the engine's
     # LivenessDetector is heuristic (texture/moire/color + blink) and does NOT
     # run a model for these categories. They are surfaced in the config API for
@@ -208,6 +218,7 @@ def configure_from_settings(cfg: EngineConfig | None = None) -> EngineConfig:
     cfg.enhancement.max_gain = settings.engine_low_light_max_gain
     cfg.enhancement.clahe_clip_limit = settings.engine_low_light_clahe_clip
     cfg.liveness.min_score = settings.engine_liveness_threshold
+    cfg.liveness.live_active_required = settings.engine_live_active_liveness
     cfg.attendance.duplicate_window_seconds = settings.engine_duplicate_window_seconds
     cfg.tracking.max_tracks = settings.engine_max_tracks_per_camera
     cfg.tracking.cooldown_seconds = settings.engine_track_cooldown_seconds

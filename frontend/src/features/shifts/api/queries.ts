@@ -61,7 +61,7 @@ export function useSaveShift() {
       id ? api.put(`/shifts/${id}`, payload) : api.post('/shifts', payload),
     onSuccess: (_d, { id }) => {
       toast.success(id ? 'Shift updated' : 'Shift created')
-      invalidate()
+      void invalidate()
     },
     onError,
   })
@@ -100,7 +100,7 @@ export function useSavePolicy() {
       id ? api.put(`/attendance-policies/${id}`, payload) : api.post('/attendance-policies', payload),
     onSuccess: (_d, { id }) => {
       toast.success(id ? 'Policy updated' : 'Policy created')
-      invalidate()
+      void invalidate()
     },
     onError,
   })
@@ -112,7 +112,7 @@ export function useCreateHoliday() {
     mutationFn: (payload: Record<string, unknown>) => api.post('/holidays', payload),
     onSuccess: () => {
       toast.success('Holiday added')
-      invalidate()
+      void invalidate()
     },
     onError,
   })
@@ -125,7 +125,7 @@ export function useDecideLeave() {
       api.patch(`/leave-requests/${id}`, { status }),
     onSuccess: (_d, { status }) => {
       toast.success(`Leave ${status}`)
-      invalidate()
+      void invalidate()
     },
     onError,
   })

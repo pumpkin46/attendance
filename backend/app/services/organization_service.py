@@ -345,12 +345,25 @@ async def move_node(
         raise ValidationError("A company root cannot be moved")
     new_parent = await _get_node_in_tenant(db, tenant_org_id, body.new_parent_id)
 
-    if await root_id_of(db, new_parent.id) != await root_id_of(db, node.id):
+    node_root = await root_id_of(db, node.id)
+    if await root_id_of(db, new_parent.id) != node_root:
         raise ValidationError("Cannot move a node to a different organization")
     if new_parent.id == node.parent_id:
         await db.refresh(node)
         return await _node_out(db, node)
-    # Cycle guard: the new parent must not be the node itself or a descendant.
+
+    # Serialize concurrent reparents within this company: without a lock two
+    # moves (X under Y; Y under X) each evaluate the cycle guard against a
+    # pre-move snapshot, both pass, and commit a cycle (write-skew). Locking the
+    # company-root row makes the second move wait and then re-read the first's
+    # change below. A no-op on SQLite (tests); a real row lock on PostgreSQL.
+    if node_root is not None:
+        await db.execute(
+            select(Organization.id).where(Organization.id == node_root).with_for_update()
+        )
+
+    # Cycle guard (re-evaluated under the lock): the new parent must not be the
+    # node itself or a descendant.
     blocked = await descendant_ids(db, node.id, include_self=True)
     if new_parent.id in blocked:
         raise ValidationError("Cannot move a node beneath itself")

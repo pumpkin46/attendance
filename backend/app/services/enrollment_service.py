@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -27,7 +26,6 @@ from app.services.face_utils import decode_image, get_face_app, mock_embedding
 from app.services.enrollment_scoring import (
     EnrollmentScorer,
     EnrollmentScore,
-    EnrollmentStatus,
     MIN_IMAGES,
     get_enrollment_scorer,
 )

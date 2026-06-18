@@ -72,7 +72,7 @@ export function FaceCaptureModal({
   const restoreFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
-    start()
+    void start()
     return () => stop()
   }, [start, stop])
 

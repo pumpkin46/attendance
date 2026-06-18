@@ -1,4 +1,4 @@
-import { forwardRef, useLayoutEffect, useRef, type MutableRefObject } from 'react'
+import { forwardRef, useLayoutEffect, useRef } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { inputClass } from '@/shared/lib/inputClass'
 
@@ -43,7 +43,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
   const setRefs = (node: HTMLTextAreaElement | null) => {
     innerRef.current = node
     if (typeof ref === 'function') ref(node)
-    else if (ref) (ref as MutableRefObject<HTMLTextAreaElement | null>).current = node
+    else if (ref) (ref).current = node
   }
 
   // Refit on every committed value change (controlled inputs, resets, async fills).

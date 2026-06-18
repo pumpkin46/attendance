@@ -26,11 +26,9 @@ from app.middleware.tenant import apply_tenant_filter
 from app.models.employee import Employee
 from app.models.face import FaceEmbedding, FaceEnrollmentImage, FaceEnrollmentSession
 from app.services.audit_service import log_action
-from app.services.enrollment_scoring import EnrollmentStatus
 from app.services.enrollment_service import (
     EnrollmentMethod,
     EnrollmentType,
-    FaceEnrollmentService,
     ReEnrollmentTrigger,
     get_enrollment_service,
 )

@@ -59,6 +59,17 @@ class TestProductionSecretGuard:
         s = _settings(app_env="local")
         assert s.secret_key == DEFAULT_SECRET_KEY
 
+    def test_dev_envs_permit_default_secret(self):
+        for env in ("dev", "development", "test", "testing", "ci"):
+            assert _settings(app_env=env).secret_key == DEFAULT_SECRET_KEY
+
+    def test_default_secret_rejected_outside_dev_envs(self):
+        # The broadened guard: staging/qa/demo (anything not an explicit dev
+        # env) must not boot with the known default key.
+        for env in ("staging", "qa", "demo", "uat"):
+            with pytest.raises(ValueError):
+                _settings(app_env=env, SECRET_KEY=DEFAULT_SECRET_KEY)
+
     def test_app_env_case_variants_enforced(self):
         # APP_ENV=PRODUCTION / Production / prod / padded whitespace used to
         # bypass the exact-lowercase-string guard entirely.
@@ -74,7 +85,8 @@ class TestProductionSecretGuard:
 
     def test_is_production_false_outside_production(self):
         assert _settings(app_env="local").is_production is False
-        assert _settings(app_env="staging").is_production is False
+        # staging is not production, but (post-fix) still needs a real secret.
+        assert _settings(app_env="staging", SECRET_KEY=STRONG_SECRET).is_production is False
 
 
 class TestSelfRegistrationDefault:

@@ -267,6 +267,12 @@ def _resolve_checkout_status(
 
     if worked_minutes < half_day:
         return "half_day"
+    # Worked at least half a day but below the policy's minimum full day: an
+    # early departure. With the default min_work <= half_day this never triggers
+    # (so default behavior is unchanged); it only applies when an operator sets
+    # min_work_minutes above half_day_minutes.
+    if worked_minutes < min_work:
+        return "early_leave"
     if current_status == "late":
         return "late"
     return "present"
@@ -303,6 +309,57 @@ def _apply_check_out(
     record.overtime_minutes = overtime
     record.status = _resolve_checkout_status(worked, policy, record.status)
     record.attendance_type = record.status
+
+
+async def apply_manual_attendance(
+    db: AsyncSession,
+    *,
+    employee_id: int,
+    organization_id: int,
+    work_date: date,
+    check_in_at: datetime | None,
+    check_out_at: datetime | None,
+    notes: str | None = None,
+) -> AttendanceRecord:
+    """Create/update an attendance row from an admin manual entry.
+
+    Reuses the same shift/policy status derivation as the camera/RFID paths
+    (lateness, half_day/early_leave, per-policy break minutes) instead of
+    hardcoding 'present', and the same UNIQUE(employee_id, work_date) race
+    recovery as the live paths (a manual post racing a live writer no longer
+    500s).
+    """
+    shift = await _get_active_shift(db, employee_id, work_date)
+    policy = await _get_policy(db, shift, organization_id)
+    record = await _get_or_create_today_record(
+        db,
+        employee_id,
+        work_date,
+        location_id=None,
+        camera_id=None,
+        shift_id=shift.id if shift else None,
+    )
+
+    if check_in_at is not None:
+        _apply_check_in(
+            record, check_in_at, method="manual", camera_id=None, shift=shift, policy=policy
+        )
+
+    if check_out_at is not None:
+        if record.check_in_at is not None:
+            _apply_check_out(record, check_out_at, method="manual", policy=policy)
+        else:
+            # Checkout without a check-in: store the time but there is no
+            # duration/status to derive.
+            record.check_out_at = check_out_at
+            record.check_out_method = "manual"
+
+    if notes:
+        record.notes = notes
+
+    await db.flush()
+    await db.refresh(record, attribute_names=["created_at", "updated_at"])
+    return record
 
 
 async def process_recognition(
@@ -439,6 +496,18 @@ async def process_rfid_tap(
 
     now = datetime.now(timezone.utc)
     today = local_date(now)
+
+    if reader_direction == "out":
+        # Exit-only reader with no row yet: nothing to close out. Short-circuit
+        # before _get_or_create_today_record so an exit tap by someone who never
+        # tapped an entry reader does not create a bare status='absent' row
+        # (mirrors the face check_out path above).
+        existing_stmt = select(AttendanceRecord).where(
+            AttendanceRecord.employee_id == employee_id,
+            AttendanceRecord.work_date == today,
+        )
+        if (await db.execute(existing_stmt)).scalar_one_or_none() is None:
+            return None
 
     shift = await _get_active_shift(db, employee_id, today)
     policy = await _get_policy(db, shift, org_id) if org_id else None

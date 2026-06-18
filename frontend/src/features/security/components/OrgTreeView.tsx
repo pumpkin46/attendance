@@ -24,10 +24,16 @@ export function OrgTreeView({
   tree,
   loading,
   canManage,
+  onEditCompany,
+  onDeleteCompany,
 }: {
   tree: OrgNode[]
   loading: boolean
   canManage: boolean
+  /** Edit a company root — routed to the organizations endpoint, not nodes. */
+  onEditCompany?: (root: OrgNode) => void
+  /** Delete a company root. Omit to hide the action (e.g. the lone org). */
+  onDeleteCompany?: (root: OrgNode) => void
 }) {
   const [mode, setMode] = useState<Mode | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
@@ -100,35 +106,55 @@ export function OrgTreeView({
       header: <span className="sr-only">Actions</span>,
       width: '13rem',
       align: 'right',
-      cell: (n) => (
-        <div
-          className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Button variant="ghost" size="sm" onClick={() => open({ kind: 'create', parent: n })}>
-            + Child
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => open({ kind: 'edit', node: n })}>
-            Edit
-          </Button>
-          {!isRoot(n) && (
-            <Button variant="ghost" size="sm" onClick={() => open({ kind: 'move', node: n })}>
-              Move
+      cell: (n) => {
+        const root = isRoot(n)
+        return (
+          <div
+            className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Button variant="ghost" size="sm" onClick={() => open({ kind: 'create', parent: n })}>
+              + Unit
             </Button>
-          )}
-          {!isRoot(n) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={deleteNode.isPending}
-              className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-              onClick={() => removeNode(n)}
-            >
-              Delete
-            </Button>
-          )}
-        </div>
-      ),
+            {(!root || onEditCompany) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => (root ? onEditCompany?.(n) : open({ kind: 'edit', node: n }))}
+              >
+                Edit
+              </Button>
+            )}
+            {!root && (
+              <Button variant="ghost" size="sm" onClick={() => open({ kind: 'move', node: n })}>
+                Move
+              </Button>
+            )}
+            {root
+              ? onDeleteCompany && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    onClick={() => onDeleteCompany(n)}
+                  >
+                    Delete
+                  </Button>
+                )
+              : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={deleteNode.isPending}
+                    className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    onClick={() => removeNode(n)}
+                  >
+                    Delete
+                  </Button>
+                )}
+          </div>
+        )
+      },
     })
   }
 
@@ -154,8 +180,12 @@ export function OrgTreeView({
         getLabel={(n) => n.name}
         ariaLabel="Organization units"
         loading={loading}
-        empty="No org units yet"
-        onActivate={canManage ? (n) => open({ kind: 'edit', node: n }) : undefined}
+        empty="No organizations yet"
+        onActivate={
+          canManage
+            ? (n) => (isRoot(n) ? onEditCompany?.(n) : open({ kind: 'edit', node: n }))
+            : undefined
+        }
         rowClassName={(n) => (!n.is_active ? 'opacity-60' : undefined)}
       />
 
@@ -179,9 +209,9 @@ export function OrgTreeView({
             key={`create-${mode.parent.id}`}
             record={null}
             parent={mode.parent}
-            onSubmit={({ is_active: _ignored, ...values }) =>
+            onSubmit={({ name, code, node_type, timezone }) =>
               createNode.mutate(
-                { ...values, parent_id: mode.parent.id },
+                { name, code, node_type, timezone, parent_id: mode.parent.id },
                 { onSuccess: closePanel }
               )
             }

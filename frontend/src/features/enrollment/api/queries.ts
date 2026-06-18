@@ -94,7 +94,7 @@ export function useEnrollFace() {
       // announce a completion that didn't happen.
       if (!data.success) return
       toast.success('Enrollment completed')
-      invalidate()
+      void invalidate()
     },
   })
 }
@@ -117,7 +117,7 @@ export function useSimpleEnroll() {
     meta: { silent: true },
     onSuccess: () => {
       toast.success('Face registered')
-      invalidate()
+      void invalidate()
     },
   })
 }

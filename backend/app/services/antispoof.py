@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import urllib.request
 from dataclasses import dataclass, field
@@ -44,10 +45,38 @@ class AntiSpoofVerifier:
 
         if settings.antispoof_enabled:
             self._ensure_model()
-            if self.model_path.is_file():
+            if self.model_path.is_file() and self._verify_checksum(self.model_path):
                 self._load_session()
             else:
-                logger.warning("Anti-spoof ONNX model missing at %s", self.model_path)
+                # Loud signal: the engine then runs on coarse heuristics only
+                # (see verify()), which a sharp print/screen can defeat. The
+                # health endpoint reports the degraded mode (antispoof_mode).
+                logger.critical(
+                    "Anti-spoof model unavailable or failed verification at %s; "
+                    "liveness is running on heuristics only (degraded). Provide a "
+                    "verified MiniFASNetV2.onnx or set ANTISPOOF_FAIL_WITHOUT_MODEL=true.",
+                    self.model_path,
+                )
+
+    def _verify_checksum(self, path: Path) -> bool:
+        """True if the file matches the pinned SHA-256 (or verification is off).
+
+        The model is fetched over an unauthenticated URL and executed in-process,
+        so an unverified file is a supply-chain risk. A mismatch is treated as
+        "no model" (fail to the heuristic / fail-closed path) rather than loaded.
+        """
+        expected = (settings.antispoof_model_sha256 or "").strip().lower()
+        if not expected:
+            return True
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest == expected:
+            return True
+        logger.critical(
+            "Anti-spoof model checksum mismatch at %s (expected %s, got %s); "
+            "refusing to load a potentially tampered model.",
+            path, expected, digest,
+        )
+        return False
 
     def _ensure_model(self) -> None:
         if self.model_path.is_file():
@@ -57,9 +86,18 @@ class AntiSpoofVerifier:
         logger.info("Downloading anti-spoof model from %s", url)
         try:
             urllib.request.urlretrieve(url, self.model_path)
-            logger.info("Anti-spoof model saved to %s", self.model_path)
         except Exception as exc:
             logger.error("Failed to download anti-spoof model: %s", exc)
+            return
+        # Verify the freshly downloaded artifact before it is ever loaded; delete
+        # it on mismatch so a bad download is not trusted now or on next boot.
+        if not self._verify_checksum(self.model_path):
+            try:
+                self.model_path.unlink()
+            except OSError:
+                pass
+            return
+        logger.info("Anti-spoof model saved and verified at %s", self.model_path)
 
     def _load_session(self) -> None:
         self.session = ort.InferenceSession(
@@ -101,7 +139,7 @@ class AntiSpoofVerifier:
             return None
         bbox_xywh = self._xyxy_to_xywh(bbox_xyxy)
         face = self._crop_face(image, bbox_xywh)
-        tensor = face.astype(np.float32)
+        tensor = face.astype(np.float32) * settings.antispoof_input_scale
         tensor = np.transpose(tensor, (2, 0, 1))
         tensor = np.expand_dims(tensor, axis=0)
         outputs = self.session.run([self.output_name], {self.input_name: tensor})

@@ -260,7 +260,7 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
   const openGroup = (group: NavGroup) => {
     const first = group.items[0]
     if (first) {
-      navigate(first.to)
+      void navigate(first.to)
     }
   }
 

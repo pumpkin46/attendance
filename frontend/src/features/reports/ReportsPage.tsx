@@ -165,6 +165,13 @@ function TimelineRow({ label, at }: { label: string; at?: string | null }) {
   )
 }
 
+function fmtMeta(v: unknown): string {
+  if (typeof v === 'object') return JSON.stringify(v)
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v)
+  return JSON.stringify(v)
+}
+
 function MetadataList({ metadata }: { metadata: Record<string, unknown> }) {
   const entries = Object.entries(metadata).filter(([, v]) => v !== null && v !== undefined)
   if (entries.length === 0) return null
@@ -174,7 +181,7 @@ function MetadataList({ metadata }: { metadata: Record<string, unknown> }) {
         <div key={key} className="flex items-start justify-between gap-4 px-3 py-2">
           <dt className="text-xs uppercase tracking-wide text-slate-500">{prettify(key)}</dt>
           <dd className="break-all text-right font-mono text-xs text-slate-300">
-            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+            {fmtMeta(value)}
           </dd>
         </div>
       ))}

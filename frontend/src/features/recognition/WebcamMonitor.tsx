@@ -224,7 +224,7 @@ export default function WebcamMonitor() {
 
     const detectTimer = setInterval(runDetect, DETECT_MS)
     const identifyTimer = setInterval(runIdentify, IDENTIFY_MS)
-    runDetect()
+    void runDetect()
 
     return () => {
       clearInterval(detectTimer)

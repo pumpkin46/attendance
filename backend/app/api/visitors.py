@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
@@ -236,6 +236,10 @@ async def update_visitor(
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     updates = body.model_dump(exclude_none=True)
+    if updates.get("host_employee_id") is not None and not await visitor_service.is_org_employee(
+        db, updates["host_employee_id"], visitor.organization_id
+    ):
+        raise ValidationError("Host employee not found in this organization")
     if "first_name" in updates or "last_name" in updates:
         first = updates.get("first_name", visitor.first_name)
         last = updates.get("last_name", visitor.last_name)

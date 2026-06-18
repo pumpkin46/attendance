@@ -42,8 +42,8 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (r) => r,
-  (error) => {
-    if (error.response?.status === 401) {
+  (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
       clearToken()
       if (!window.location.pathname.startsWith('/login')) {
         // Preserve where the user was so login can return them there, instead
@@ -53,6 +53,8 @@ api.interceptors.response.use(
         window.location.href = `/login${param}`
       }
     }
-    return Promise.reject(error)
+    // Re-reject the original error (AxiosError extends Error, so callers still
+    // get the full axios error); wrap any non-Error to satisfy reject-errors.
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)))
   }
 )

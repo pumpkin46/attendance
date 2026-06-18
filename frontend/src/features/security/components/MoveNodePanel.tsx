@@ -24,9 +24,11 @@ interface MoveNodePanelProps {
 export function MoveNodePanel({ node, tree, onSubmit }: MoveNodePanelProps) {
   const [parentId, setParentId] = useState('')
 
-  // Anchor to the company root so candidates are tenant-scoped.
+  // Anchor to the company root so candidates are tenant-scoped. Memoize on
+  // stable inputs so the `[root]` literal does not recompute the breadcrumb /
+  // options memos on every render.
   const root = findNode(tree, node.root_organization_id)
-  const scope = root ? [root] : tree
+  const scope = useMemo(() => (root ? [root] : tree), [root, tree])
   const labels = useMemo(() => breadcrumbLabels(scope), [scope])
   const movingLabel = labels.get(node.id) ?? node.name
 
