@@ -17,17 +17,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import NotFoundError
 from app.core.timeutil import local_date, to_local
+from app.middleware.tenant import (
+    as_scope_ids,
+    descendants_subquery_multi,
+    root_id_of,
+)
 from app.models.attendance import AnomalyStatus, AttendanceAnomaly, AttendanceRecord
 from app.models.employee import Employee
 from app.schemas.attendance import AnomalySummary, AnomalyUpdateRequest
 from app.services.anomaly_detector import analyze_records
 
 
-def _org_employee_ids(org_id: int | None):
-    """Subquery of employee IDs for an org (None → no tenant filter)."""
+def _org_employee_ids(org_id):
+    """Subquery of employee IDs for a tenant scope (None → no tenant filter).
+
+    Employees may be assigned to any node in the company tree, so scope by the
+    union of the scope ids' sub-trees, not a flat equality. Read endpoints pass
+    the granted NODE scope (so a sub-unit grant stays sub-unit-granular); a write
+    passes the single active org. ``org_id`` is an id, a list of ids, or None.
+    """
     if org_id is None:
         return None
-    return select(Employee.id).where(Employee.organization_id == org_id)
+    return select(Employee.id).where(
+        Employee.organization_id.in_(descendants_subquery_multi(as_scope_ids(org_id)))
+    )
 
 
 async def run_anomaly_detection(
@@ -43,7 +56,9 @@ async def run_anomaly_detection(
 
     stmt = select(AttendanceRecord).where(AttendanceRecord.work_date >= local_date(cutoff))
     if org_id:
-        emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
+        emp_ids = select(Employee.id).where(
+            Employee.organization_id.in_(descendants_subquery_multi(as_scope_ids(org_id)))
+        )
         stmt = stmt.where(AttendanceRecord.employee_id.in_(emp_ids))
     if employee_ids:
         stmt = stmt.where(AttendanceRecord.employee_id.in_(employee_ids))
@@ -118,7 +133,7 @@ async def run_anomaly_detection(
     }
 
 
-async def summary(db: AsyncSession, org_id: int | None) -> AnomalySummary:
+async def summary(db: AsyncSession, org_id: list[int] | int | None) -> AnomalySummary:
     """Open-anomaly counts grouped in SQL (the triage view ignores closed ones)."""
     emp_ids = _org_employee_ids(org_id)
 
@@ -158,7 +173,7 @@ async def summary(db: AsyncSession, org_id: int | None) -> AnomalySummary:
 
 
 def anomalies_query(
-    org_id: int | None,
+    org_id: list[int] | int | None,
     *,
     status: str | None,
     severity: str | None,
@@ -194,11 +209,14 @@ async def update_anomaly(
     if not anomaly:
         raise NotFoundError("Anomaly not found")
 
-    owner_org = (
+    owner_node = (
         await db.execute(
             select(Employee.organization_id).where(Employee.id == anomaly.employee_id)
         )
     ).scalar_one_or_none()
+    # The employee may sit on a sub-node; the tenant boundary (and the realtime
+    # channel below) is always the company root, so resolve it.
+    owner_org = await root_id_of(db, owner_node) if owner_node is not None else None
     if org_id is not None and owner_org != org_id:
         # Cross-tenant probe: answer as if the anomaly does not exist.
         raise NotFoundError("Anomaly not found")

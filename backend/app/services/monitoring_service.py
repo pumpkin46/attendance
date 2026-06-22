@@ -15,7 +15,11 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.timeutil import local_date, local_day_bounds_utc
-from app.middleware.tenant import apply_tenant_filter
+from app.middleware.tenant import (
+    apply_employee_tenant_filter,
+    apply_tenant_filter,
+    as_scope_ids,
+)
 from app.models.attendance import AttendanceRecord
 from app.models.camera import Camera, CameraStatus
 from app.models.employee import Employee
@@ -118,7 +122,7 @@ def _parse_payload(raw: object) -> dict | None:
     return None
 
 
-async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
+async def build_dashboard(db: AsyncSession, org_id: list[int] | int | None) -> dict:
     now = datetime.now(timezone.utc)
     today = local_date(now)
     day_start_utc, day_end_utc = local_day_bounds_utc(today)
@@ -176,13 +180,13 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
     avg_latency = int(round(sum(latency_values) / len(latency_values))) if latency_values else None
 
     emp_stmt = select(func.count()).select_from(Employee).where(Employee.is_active.is_(True))
-    emp_stmt = apply_tenant_filter(emp_stmt, org_id, Employee.organization_id)
+    emp_stmt = apply_employee_tenant_filter(emp_stmt, org_id, Employee.organization_id)
     active_employees = (await db.execute(emp_stmt)).scalar() or 0
 
     att_stmt = select(AttendanceRecord).where(AttendanceRecord.work_date == today)
     if org_id is not None:
         att_stmt = att_stmt.join(Employee, AttendanceRecord.employee_id == Employee.id)
-        att_stmt = apply_tenant_filter(att_stmt, org_id, Employee.organization_id)
+        att_stmt = apply_employee_tenant_filter(att_stmt, org_id, Employee.organization_id)
     records = list((await db.execute(att_stmt)).scalars().all())
 
     present = sum(1 for r in records if r.status in ("present", "late"))
@@ -199,7 +203,9 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
         RecognitionEvent.recognized_at < day_end_utc,
     )
     if org_id is not None:
-        unknown_stmt = unknown_stmt.where(RecognitionEvent.organization_id == org_id)
+        unknown_stmt = unknown_stmt.where(
+            RecognitionEvent.organization_id.in_(as_scope_ids(org_id))
+        )
     unknown_today = (await db.execute(unknown_stmt)).scalar() or 0
 
     # Checked-in only, matching the visitor dashboard's "on site" count and the
@@ -217,6 +223,8 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
         "employees_present": present,
         "employees_absent": absent,
         "employees_late": late,
+        "employees_on_leave": on_leave,
+        "total_employees": active_employees,
         "unknown_persons_today": unknown_today,
         "active_visitors": active_visitors,
         "camera_health": {
@@ -230,7 +238,53 @@ async def build_dashboard(db: AsyncSession, org_id: int | None) -> dict:
     }
 
 
-async def build_live_feed(db: AsyncSession, org_id: int | None) -> dict:
+async def build_attendance_trend(
+    db: AsyncSession, org_id: list[int] | int | None, days: int = 7
+) -> dict:
+    """Daily check-in volume for the last ``days`` calendar days (local time).
+
+    Only counts attendance rows that actually exist (status ``present``/``late``),
+    so the series reflects real check-ins rather than a back-filled headcount —
+    historical "absent" can't be reconstructed reliably and is left out. Returns a
+    contiguous, gap-filled list oldest→newest so the chart axis is uniform.
+    """
+    days = max(1, min(days, 31))
+    today = local_date()
+    start = today - timedelta(days=days - 1)
+
+    stmt = (
+        select(AttendanceRecord.work_date, AttendanceRecord.status, func.count())
+        .where(AttendanceRecord.work_date >= start, AttendanceRecord.work_date <= today)
+        .group_by(AttendanceRecord.work_date, AttendanceRecord.status)
+    )
+    if org_id is not None:
+        stmt = stmt.join(Employee, AttendanceRecord.employee_id == Employee.id)
+        stmt = apply_employee_tenant_filter(stmt, org_id, Employee.organization_id)
+
+    buckets: dict[object, dict[str, int]] = {}
+    for work_date, status, count in (await db.execute(stmt)).all():
+        bucket = buckets.setdefault(work_date, {"on_time": 0, "late": 0})
+        if status == "late":
+            bucket["late"] += count
+        elif status == "present":
+            bucket["on_time"] += count
+
+    out = []
+    for offset in range(days):
+        day = start + timedelta(days=offset)
+        bucket = buckets.get(day, {"on_time": 0, "late": 0})
+        out.append(
+            {
+                "date": day.isoformat(),
+                "on_time": bucket["on_time"],
+                "late": bucket["late"],
+                "total": bucket["on_time"] + bucket["late"],
+            }
+        )
+    return {"days": out}
+
+
+async def build_live_feed(db: AsyncSession, org_id: list[int] | int | None) -> dict:
     stmt = select(LiveEvent).order_by(LiveEvent.occurred_at.desc()).limit(50)
     stmt = apply_tenant_filter(stmt, org_id, LiveEvent.organization_id)
     events = list((await db.execute(stmt)).scalars().all())

@@ -34,7 +34,10 @@ const navGroups: NavGroup[] = [
         </svg>
       </Icon>
     ),
-    items: [{ to: '/', label: 'Dashboard', end: true }],
+    items: [
+      { to: '/', label: 'Dashboard', end: true },
+      { to: '/chat', label: 'Chat' },
+    ],
   },
   {
     id: 'people',
@@ -133,6 +136,8 @@ const navGroups: NavGroup[] = [
     ),
     items: [
       { to: '/user-management', label: 'Users & Permissions' },
+      { to: '/organizations', label: 'Organizations' },
+      { to: '/locations', label: 'Locations' },
       { to: '/security', label: 'Security & Tenancy' },
     ],
   },
@@ -164,7 +169,6 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { hasPermission } = useAuth()
-  const [query, setQuery] = useState('')
 
   // Collapsed-rail flyout: which group is open and where to anchor its panel.
   const [flyout, setFlyout] = useState<{ id: string; top: number; left: number } | null>(null)
@@ -215,27 +219,12 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
     [pathname, visibleGroups]
   )
 
-  const filteredGroups = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return visibleGroups
-    return visibleGroups
-      .map((group) => ({
-        ...group,
-        items: group.items.filter(
-          (item) =>
-            item.label.toLowerCase().includes(q) || group.title.toLowerCase().includes(q)
-        ),
-      }))
-      .filter((group) => group.items.length > 0)
-  }, [query, visibleGroups])
-
-  // Expansion is fully derived: a search expands every match, otherwise only the
-  // group owning the active route is open (accordion). Navigating updates the
-  // route, which re-derives this — no effect needed.
-  const expanded = useMemo(() => {
-    if (query.trim()) return new Set(filteredGroups.map((g) => g.id))
-    return new Set(activeGroupId ? [activeGroupId] : [])
-  }, [query, filteredGroups, activeGroupId])
+  // Expansion is fully derived: only the group owning the active route is open
+  // (accordion). Navigating updates the route, which re-derives this — no effect needed.
+  const expanded = useMemo(
+    () => new Set(activeGroupId ? [activeGroupId] : []),
+    [activeGroupId]
+  )
 
   useEffect(() => {
     const el = scrollRef.current
@@ -255,7 +244,7 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
       resizeObserver.disconnect()
       mutationObserver.disconnect()
     }
-  }, [filteredGroups, expanded])
+  }, [visibleGroups, expanded])
 
   const openGroup = (group: NavGroup) => {
     const first = group.items[0]
@@ -358,35 +347,14 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <label className="relative mx-2 block shrink-0">
-        <span className="sr-only">Search navigation</span>
-        <svg
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="11" cy="11" r="7" />
-          <path d="M20 20l-4-4" />
-        </svg>
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search menu…"
-          className="w-full rounded-lg border border-slate-700/80 bg-slate-950/60 py-2 pl-9 pr-3 text-sm text-slate-200 transition-colors placeholder:text-slate-500 hover:border-slate-600 focus:border-blue-500/60 focus:outline-none focus:ring-1 focus:ring-blue-500/40 [&::-webkit-search-cancel-button]:appearance-none"
-        />
-      </label>
-
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="relative min-h-0 flex-1">
         <nav
           ref={scrollRef}
           className="scrollbar-hidden h-full overflow-y-auto pr-2"
         >
           <ul className="flex flex-col gap-0.5 pl-2 pr-1">
-            {filteredGroups.map((group) => {
+            {visibleGroups.map((group) => {
               const isOpen = expanded.has(group.id)
               const isActiveGroup = groupHasActiveItem(pathname, group)
 

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.dependencies import (
+    CurrentUser,
+    DbSession,
+    TenantNodeScope,
+    TenantOrgId,
+    TenantScope,
+    require_permission,
+)
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.schemas.attendance import (
     AttendancePolicyCreate,
@@ -26,7 +33,7 @@ router = APIRouter(prefix="/api/v1", tags=["shifts"])
 
 
 @router.get("/attendance-policies", response_model=list[AttendancePolicyOut])
-async def list_policies(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+async def list_policies(db: DbSession, user: CurrentUser, org_id: TenantScope):
     policies = await shift_service.list_policies(db, org_id)
     return [AttendancePolicyOut.model_validate(p, from_attributes=True) for p in policies]
 
@@ -43,7 +50,7 @@ async def create_policy(
 
 
 @router.get("/attendance-policies/{policy_id}", response_model=AttendancePolicyOut)
-async def get_policy(policy_id: int, db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+async def get_policy(policy_id: int, db: DbSession, user: CurrentUser, org_id: TenantScope):
     policy = await shift_service.get_policy(db, policy_id, org_id)
     return AttendancePolicyOut.model_validate(policy, from_attributes=True)
 
@@ -64,7 +71,7 @@ async def update_policy(
 
 
 @router.get("/shifts", response_model=list[ShiftOut])
-async def list_shifts(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+async def list_shifts(db: DbSession, user: CurrentUser, org_id: TenantScope):
     shifts = await shift_service.list_shifts(db, org_id)
     return [ShiftOut.model_validate(s, from_attributes=True) for s in shifts]
 
@@ -81,7 +88,7 @@ async def create_shift(
 
 
 @router.get("/shifts/{shift_id}", response_model=ShiftOut)
-async def get_shift(shift_id: int, db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+async def get_shift(shift_id: int, db: DbSession, user: CurrentUser, org_id: TenantScope):
     shift = await shift_service.get_shift(db, shift_id, org_id)
     return ShiftOut.model_validate(shift, from_attributes=True)
 
@@ -115,9 +122,15 @@ async def assign_shift(
     body: ShiftAssignRequest,
     db: DbSession,
     org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("shifts.manage"),
 ):
-    assignment = await shift_service.assign_shift(db, shift_id, body, org_id)
+    # org_id (single active company root) gates the root-keyed shift; node_scope
+    # (the granted nodes) gates the per-employee target so a sub-unit admin can
+    # only assign shifts to employees inside their sub-tree.
+    assignment = await shift_service.assign_shift(
+        db, shift_id, body, org_id, node_scope=node_scope
+    )
     return ShiftAssignmentOut(
         id=assignment.id,
         shift_id=assignment.shift_id,
@@ -131,7 +144,7 @@ async def assign_shift(
 
 
 @router.get("/holidays", response_model=list[HolidayOut])
-async def list_holidays(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+async def list_holidays(db: DbSession, user: CurrentUser, org_id: TenantScope):
     holidays = await shift_service.list_holidays(db, org_id)
     return [HolidayOut.model_validate(h, from_attributes=True) for h in holidays]
 
@@ -154,10 +167,13 @@ async def create_holiday(
 async def list_leave_requests(
     db: DbSession,
     user: CurrentUser,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     pagination: PaginationDep,
 ):
-    stmt = shift_service.leave_requests_query(org_id)
+    # Leave requests are purely employee-keyed (scoped via the employee's
+    # sub-tree), so use the granted NODE scope directly to keep a sub-unit grant
+    # sub-unit-granular.
+    stmt = shift_service.leave_requests_query(node_scope)
     return await paginate(db, stmt, pagination.page, pagination.per_page, LeaveRequestOut)
 
 
@@ -167,8 +183,13 @@ async def create_leave_request(
     db: DbSession,
     user: CurrentUser,
     org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
 ):
-    leave = await shift_service.create_leave_request(db, body, org_id)
+    # The target employee is validated through the granted node scope so a
+    # sub-unit admin cannot file leave for an employee outside their sub-tree.
+    leave = await shift_service.create_leave_request(
+        db, body, org_id, node_scope=node_scope
+    )
     return LeaveRequestOut.model_validate(leave, from_attributes=True)
 
 
@@ -178,7 +199,12 @@ async def update_leave_request(
     body: LeaveRequestUpdate,
     db: DbSession,
     org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("leave.approve"),
 ):
-    leave = await shift_service.decide_leave_request(db, leave_id, body, user.id, org_id)
+    # Leave requests are scoped through the employee's sub-tree, so decide
+    # against the granted NODE scope to keep a sub-unit admin sub-unit-granular.
+    leave = await shift_service.decide_leave_request(
+        db, leave_id, body, user.id, org_id, node_scope=node_scope
+    )
     return LeaveRequestOut.model_validate(leave, from_attributes=True)

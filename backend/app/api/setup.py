@@ -175,7 +175,6 @@ async def run_setup(body: SetupRequest, request: Request, db: DbSession):
         raise ConflictError("An account with that email already exists")
 
     admin = User(
-        organization_id=org.id,
         name=body.admin_name,
         email=body.admin_email,
         password=hash_password(body.admin_password),

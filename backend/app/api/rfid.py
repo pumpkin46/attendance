@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, Request, status
 from app.core.dependencies import (
     CurrentUser,
     DbSession,
+    TenantNodeScope,
     TenantOrgId,
+    TenantScope,
     get_rfid_reader,
     require_permission,
 )
@@ -42,7 +44,7 @@ def _ip(request: Request) -> str | None:
 async def list_readers(
     db: DbSession,
     user: CurrentUser,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("rfid.manage"),
 ):
     return await rfid_service.list_readers(db, org_id)
@@ -63,7 +65,7 @@ async def create_reader(
 
 
 @router.get("/rfid-readers/{reader_id}", response_model=RfidReaderOut)
-async def get_reader(reader_id: int, db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+async def get_reader(reader_id: int, db: DbSession, user: CurrentUser, org_id: TenantScope):
     return await rfid_service.get_reader_out(db, reader_id, org_id)
 
 
@@ -116,9 +118,12 @@ async def list_employee_cards(
     employee_id: int,
     db: DbSession,
     user: CurrentUser,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
+    node_scope: TenantNodeScope,
 ):
-    return await rfid_service.list_employee_cards(db, employee_id, org_id)
+    return await rfid_service.list_employee_cards(
+        db, employee_id, org_id, node_scope=node_scope
+    )
 
 
 @router.post(
@@ -132,10 +137,17 @@ async def add_employee_card(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("rfid.manage"),
 ):
     return await rfid_service.add_employee_card(
-        db, employee_id, org_id, body, user_id=user.id, ip_address=_ip(request)
+        db,
+        employee_id,
+        org_id,
+        body,
+        user_id=user.id,
+        ip_address=_ip(request),
+        node_scope=node_scope,
     )
 
 
@@ -145,9 +157,17 @@ async def delete_card(
     request: Request,
     db: DbSession,
     org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("rfid.manage"),
 ):
-    await rfid_service.revoke_card(db, card_id, org_id, user_id=user.id, ip_address=_ip(request))
+    await rfid_service.revoke_card(
+        db,
+        card_id,
+        org_id,
+        user_id=user.id,
+        ip_address=_ip(request),
+        node_scope=node_scope,
+    )
     return None
 
 
@@ -157,7 +177,7 @@ async def delete_card(
 @router.get("/rfid-events", response_model=PaginatedResponse[RfidEventOut])
 async def list_rfid_events(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     pagination: PaginationDep,
     _: require_permission("rfid.manage"),
 ):

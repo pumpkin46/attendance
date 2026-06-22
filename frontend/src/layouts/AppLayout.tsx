@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { AppLogo } from '@/shared/components/AppLogo'
 import SidebarNav from '@/shared/components/SidebarNav'
+import { NotificationsMenu } from '@/shared/components/NotificationsMenu'
 import { UserMenu } from '@/shared/components/UserMenu'
 import { Loading } from '@/shared/ui/Loading'
 import { cn } from '@/shared/lib/cn'
@@ -71,7 +72,10 @@ export default function AppLayout() {
           >
             <CollapseIcon collapsed={collapsed} />
           </button>
-          {user && <UserMenu user={user} role={role} onLogout={() => logout()} />}
+          <div className="flex items-center gap-1">
+            <NotificationsMenu />
+            {user && <UserMenu user={user} role={role} onLogout={() => logout()} />}
+          </div>
         </header>
         <main className="scrollbar-styled min-h-0 flex-1 overflow-y-auto p-6">
           <Suspense fallback={<Loading />}>

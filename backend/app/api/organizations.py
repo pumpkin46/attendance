@@ -7,9 +7,11 @@ from app.core.dependencies import (
     CurrentUser,
     DbSession,
     TenantOrgId,
+    TenantScope,
     require_any_permission,
     require_permission,
 )
+from app.middleware.tenant import root_ids_of
 from app.schemas.organization import (
     LocationCreate,
     LocationOut,
@@ -34,13 +36,10 @@ router = APIRouter(prefix="/api/v1", tags=["organizations"])
 
 
 @router.get("/organizations", response_model=list[OrganizationWithCounts])
-async def list_organizations(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
-    return await service.list_organizations(
-        db,
-        is_super_admin=user.has_role(settings.super_admin_role),
-        user_org_id=user.organization_id,
-        tenant_org_id=org_id,
-    )
+async def list_organizations(db: DbSession, user: CurrentUser, scope: TenantScope):
+    # The caller's read scope already encodes who they may see: their assigned
+    # companies (multi-org user), the header-selected one, or all (super admin).
+    return await service.list_organizations(db, scope=scope)
 
 
 @router.post("/organizations", response_model=OrganizationOut, status_code=status.HTTP_201_CREATED)
@@ -57,11 +56,14 @@ async def create_organization(
 
 @router.get("/organizations/{org_id}", response_model=OrganizationOut)
 async def get_organization(org_id: int, db: DbSession, user: CurrentUser):
+    is_super = user.has_role(settings.super_admin_role)
+    # This endpoint addresses COMPANY ROOTS, but a user's grants may be sub-units,
+    # so roll them up to the roots they may access before the permission check.
     org = await service.get_organization(
         db,
         org_id,
-        is_super_admin=user.has_role(settings.super_admin_role),
-        user_org_id=user.organization_id,
+        is_super_admin=is_super,
+        permitted_org_ids=None if is_super else await root_ids_of(db, [o.id for o in user.organizations]),
     )
     return OrganizationOut.model_validate(org, from_attributes=True)
 
@@ -73,12 +75,15 @@ async def update_organization(
     db: DbSession,
     user: require_permission("organizations.manage"),
 ):
+    is_super = user.has_role(settings.super_admin_role)
+    # Company-root endpoint: roll the caller's (possibly sub-unit) grants up to
+    # the roots they may manage before the permission check.
     org = await service.update_organization(
         db,
         org_id,
         body,
-        is_super_admin=user.has_role(settings.super_admin_role),
-        user_org_id=user.organization_id,
+        is_super_admin=is_super,
+        permitted_org_ids=None if is_super else await root_ids_of(db, [o.id for o in user.organizations]),
     )
     return OrganizationOut.model_validate(org, from_attributes=True)
 
@@ -100,20 +105,23 @@ async def delete_organization(
 @router.get("/org-nodes/tree", response_model=list[OrgNodeOut])
 async def get_org_tree(
     db: DbSession,
-    org_id: TenantOrgId,
-    user: require_any_permission("org_nodes.manage", "org_nodes.view"),
+    scope: TenantScope,
+    # ``users.manage`` admins also read the tree: the user editor's org picker
+    # needs it to grant nodes. It is already scoped to the caller's companies.
+    user: require_any_permission("org_nodes.manage", "org_nodes.view", "users.manage"),
 ):
-    return await service.get_tree(db, org_id)
+    # Returns every assigned company's tree (union) for a multi-org user.
+    return await service.get_tree(db, scope)
 
 
 @router.get("/org-nodes/{node_id}", response_model=OrgNodeDetail)
 async def get_org_node(
     node_id: int,
     db: DbSession,
-    org_id: TenantOrgId,
+    scope: TenantScope,
     user: require_any_permission("org_nodes.manage", "org_nodes.view"),
 ):
-    return await service.get_node(db, org_id, node_id)
+    return await service.get_node(db, scope, node_id)
 
 
 @router.post("/org-nodes", response_model=OrgNodeOut, status_code=status.HTTP_201_CREATED)
@@ -162,8 +170,8 @@ async def delete_org_node(
 
 
 @router.get("/locations", response_model=list[LocationOut])
-async def list_locations(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
-    return await service.list_locations(db, org_id)
+async def list_locations(db: DbSession, user: CurrentUser, scope: TenantScope):
+    return await service.list_locations(db, scope)
 
 
 @router.post("/locations", response_model=LocationOut, status_code=status.HTTP_201_CREATED)

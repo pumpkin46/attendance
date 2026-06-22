@@ -20,9 +20,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.dependencies import (
+    CurrentUser,
+    DbSession,
+    TenantNodeScope,
+    require_permission,
+)
 from app.core.errors import NotFoundError, ValidationError
-from app.middleware.tenant import apply_tenant_filter
+from app.middleware.tenant import apply_employee_tenant_filter
 from app.models.employee import Employee
 from app.models.face import FaceEmbedding, FaceEnrollmentImage, FaceEnrollmentSession
 from app.services.audit_service import log_action
@@ -230,13 +235,13 @@ async def enroll_face_single(
     body: SingleEnrollRequest,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     """Enroll a single face image (quick enrollment)."""
     from app.services import face_service
 
-    emp = await _get_employee_or_404(db, employee_id, org_id)
+    emp = await _get_employee_or_404(db, employee_id, node_scope)
     result = await run_in_threadpool(face_service.enroll, str(emp.id), body.image)
 
     if not result.get("success"):
@@ -269,7 +274,7 @@ async def enroll_face_simple(
     body: SimpleEnrollRequest,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     """Simple face registration — store an embedding for each captured image that
@@ -278,7 +283,7 @@ async def enroll_face_simple(
     """
     from app.services import face_service
 
-    emp = await _get_employee_or_404(db, employee_id, org_id)
+    emp = await _get_employee_or_404(db, employee_id, node_scope)
     result = await run_in_threadpool(face_service.enroll_simple, str(emp.id), body.images)
 
     if not result.get("success"):
@@ -312,13 +317,13 @@ async def enroll_face_batch(
     body: BatchEnrollRequest,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     """Batch enroll with 10+ face images and quality validation."""
     from app.services import face_service
 
-    emp = await _get_employee_or_404(db, employee_id, org_id)
+    emp = await _get_employee_or_404(db, employee_id, node_scope)
     result = await run_in_threadpool(face_service.enroll_batch, str(emp.id), body.images)
 
     if not result.get("success"):
@@ -352,13 +357,13 @@ async def enroll_face_structured(
     body: StructuredEnrollRequest,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     """Structured enrollment with required pose slots."""
     from app.services import face_service
 
-    emp = await _get_employee_or_404(db, employee_id, org_id)
+    emp = await _get_employee_or_404(db, employee_id, node_scope)
     result = await run_in_threadpool(
         face_service.enroll_structured, str(emp.id), body.poses
     )
@@ -406,11 +411,11 @@ async def enroll_face_full(
     body: FullEnrollRequest,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     """Full enrollment workflow with scoring, diversity analysis, and approval."""
-    emp = await _get_employee_or_404(db, employee_id, org_id)
+    emp = await _get_employee_or_404(db, employee_id, node_scope)
     service = get_enrollment_service()
 
     try:
@@ -497,11 +502,11 @@ async def re_enroll_face(
     body: ReEnrollRequest,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     """Re-enroll an employee (replaces existing face data)."""
-    emp = await _get_employee_or_404(db, employee_id, org_id)
+    emp = await _get_employee_or_404(db, employee_id, node_scope)
     service = get_enrollment_service()
 
     try:
@@ -559,7 +564,7 @@ async def bulk_enroll(
     body: BulkEnrollRequest,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     """Bulk enroll multiple employees at once."""
@@ -572,7 +577,7 @@ async def bulk_enroll(
 
     results: list[dict] = []
     for item in body.employees:
-        emp = await _get_employee_or_none(db, item.employee_id, org_id)
+        emp = await _get_employee_or_none(db, item.employee_id, node_scope)
         if emp is None:
             results.append({
                 "employee_id": item.employee_id,
@@ -633,10 +638,10 @@ async def face_status(
     employee_id: int,
     db: DbSession,
     user: CurrentUser,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
 ):
     """Get enrollment status and face data summary for an employee."""
-    emp = await _get_employee_or_404(db, employee_id, org_id)
+    emp = await _get_employee_or_404(db, employee_id, node_scope)
 
     stmt = (
         select(FaceEmbedding)
@@ -680,11 +685,11 @@ async def delete_face_enrollment(
     employee_id: int,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     """Delete all face enrollment data for an employee."""
-    emp = await _get_employee_or_404(db, employee_id, org_id)
+    emp = await _get_employee_or_404(db, employee_id, node_scope)
     service = get_enrollment_service()
     await run_in_threadpool(service.delete_enrollment, str(emp.id))
 
@@ -716,10 +721,10 @@ async def delete_face_enrollment(
 async def _get_employee_or_404(
     db: DbSession,
     employee_id: int,
-    org_id: int | None,
+    node_scope: list[int] | None,
 ) -> Employee:
     stmt = select(Employee).where(Employee.id == employee_id)
-    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    stmt = apply_employee_tenant_filter(stmt, node_scope, Employee.organization_id)
     result = await db.execute(stmt)
     emp = result.scalar_one_or_none()
     if emp is None:
@@ -730,10 +735,10 @@ async def _get_employee_or_404(
 async def _get_employee_or_none(
     db: DbSession,
     employee_id: int,
-    org_id: int | None,
+    node_scope: list[int] | None,
 ) -> Employee | None:
     stmt = select(Employee).where(Employee.id == employee_id)
-    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    stmt = apply_employee_tenant_filter(stmt, node_scope, Employee.organization_id)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 

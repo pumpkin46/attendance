@@ -31,6 +31,21 @@ export function descendantIds(node: OrgNode): Set<number> {
   return ids
 }
 
+/**
+ * Ids of every ancestor of `id`, root-most first is irrelevant (it's a Set).
+ * Excludes the node itself; empty if the node is a root or absent.
+ */
+export function ancestorIds(roots: OrgNode[] | null | undefined, id: number): Set<number> {
+  const byId = new Map(flattenTree(roots).map((n) => [n.id, n]))
+  const ids = new Set<number>()
+  let cur = byId.get(id)
+  while (cur && cur.parent_id != null && !ids.has(cur.parent_id)) {
+    ids.add(cur.parent_id)
+    cur = byId.get(cur.parent_id)
+  }
+  return ids
+}
+
 /** Find a node anywhere in the tree by id. */
 export function findNode(nodes: OrgNode[] | null | undefined, id: number): OrgNode | null {
   for (const node of nodes ?? []) {

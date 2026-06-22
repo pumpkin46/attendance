@@ -6,6 +6,8 @@ export interface MonitoringDashboard {
   employees_present: number
   employees_absent: number
   employees_late: number
+  employees_on_leave: number
+  total_employees: number
   unknown_persons_today: number
   active_visitors: number
   camera_health: {
@@ -16,6 +18,18 @@ export interface MonitoringDashboard {
     total_dropped_frames: number
   }
   cameras: Camera[]
+}
+
+export interface AttendanceTrendDay {
+  /** ISO calendar date (YYYY-MM-DD), local to the organization. */
+  date: string
+  on_time: number
+  late: number
+  total: number
+}
+
+export interface AttendanceTrend {
+  days: AttendanceTrendDay[]
 }
 
 export interface LiveEvent {

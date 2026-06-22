@@ -11,6 +11,8 @@ export const emptyEmployeeForm = {
   job_title: '',
   hire_date: '',
   location_id: '',
+  // Org-tree node id as a string ('' = company root / unassigned to a sub-unit).
+  organization_id: '',
   is_active: 'true',
 }
 
@@ -26,6 +28,9 @@ export function toEmployeePayload(form: EmployeeForm, includeStatus: boolean) {
     job_title: form.job_title.trim() || null,
     hire_date: form.hire_date || null,
     location_id: form.location_id ? Number(form.location_id) : null,
+    // '' means "no specific sub-unit" → null, which the API resolves to the
+    // company root. A node id assigns the employee to that org-tree unit.
+    organization_id: form.organization_id ? Number(form.organization_id) : null,
     ...(includeStatus ? { is_active: form.is_active === 'true' } : {}),
   }
 }

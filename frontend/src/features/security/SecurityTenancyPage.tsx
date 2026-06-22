@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { clearOrg, selectOrgId, setOrg } from '@/features/tenant/tenantSlice'
 import { useAuth } from '@/features/auth/AuthProvider'
@@ -8,7 +9,6 @@ import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Combobox } from '@/shared/ui/Combobox'
 import { cn } from '@/shared/lib/cn'
-import { TenancyDirectory } from '@/features/security/components/TenancyDirectory'
 import {
   useLocations,
   useOrganizations,
@@ -312,15 +312,61 @@ export default function SecurityTenancyPage() {
         </div>
       )}
 
-      <div>
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold text-slate-100">Organization directory</h2>
-          <p className="mt-0.5 text-sm text-slate-400">
-            Manage your organization&apos;s name, org-unit tree, and locations.
-          </p>
+      {hasPermission('org_nodes.view') && (
+        <div>
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-slate-100">Directory</h2>
+            <p className="mt-0.5 text-sm text-slate-400">
+              Manage your organization structure and physical sites.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <DirectoryLink
+              to="/organizations"
+              title="Organizations"
+              description="Org-chart, units, and reporting structure."
+            />
+            <DirectoryLink
+              to="/locations"
+              title="Locations"
+              description="Physical sites and facilities."
+            />
+          </div>
         </div>
-        <TenancyDirectory />
-      </div>
+      )}
     </div>
+  )
+}
+
+function DirectoryLink({
+  to,
+  title,
+  description,
+}: {
+  to: string
+  title: string
+  description: string
+}) {
+  return (
+    <Link
+      to={to}
+      className="group flex items-center justify-between gap-4 rounded-xl border border-slate-700 bg-slate-900 p-5 transition-colors hover:border-blue-500/50 hover:bg-slate-800/50"
+    >
+      <div>
+        <h3 className="text-base font-semibold text-slate-100">{title}</h3>
+        <p className="mt-0.5 text-sm text-slate-400">{description}</p>
+      </div>
+      <svg
+        viewBox="0 0 24 24"
+        className="h-5 w-5 shrink-0 text-slate-500 transition-transform group-hover:translate-x-0.5 group-hover:text-blue-400"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M5 12h14M13 6l6 6-6 6" />
+      </svg>
+    </Link>
   )
 }

@@ -10,9 +10,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.dependencies import DbSession, TenantOrgId, require_permission
+from app.core.dependencies import DbSession, TenantOrgId, TenantScope, require_permission
 from app.core.errors import NotFoundError
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
+from app.middleware.tenant import as_scope_ids
 from app.models.organization import Organization
 from app.realtime.hub import emit
 from app.schemas.security_monitoring import (
@@ -47,7 +48,7 @@ async def get_security_config(_: require_permission("security.monitor")):
 @router.get("/dashboard", response_model=SecurityDashboard)
 async def get_dashboard(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("security.monitor"),
     tz_offset: int = TzOffsetQuery,
 ):
@@ -57,7 +58,7 @@ async def get_dashboard(
 @router.get("/alerts", response_model=PaginatedResponse[SecurityAlertOut])
 async def list_alerts(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     pagination: PaginationDep,
     _: require_permission("security.monitor"),
     status: str | None = Query(None),
@@ -84,7 +85,7 @@ async def list_alerts(
 @router.get("/alerts/export")
 async def export_alerts(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("security.monitor"),
     export_format: Literal["csv", "xlsx", "pdf"] = Query("csv", alias="format"),
     status: str | None = Query(None),
@@ -109,9 +110,13 @@ async def export_alerts(
     alerts = list((await db.execute(stmt)).scalars().all())
 
     org_name = None
-    if org_id is not None:
+    scope_ids = as_scope_ids(org_id)
+    # The export header carries a single org name. Only label it when the read
+    # scope resolves to exactly one company root; a multi-org union has no single
+    # name, so leave it blank there.
+    if scope_ids is not None and len(scope_ids) == 1:
         org_name = (
-            await db.execute(select(Organization.name).where(Organization.id == org_id))
+            await db.execute(select(Organization.name).where(Organization.id == scope_ids[0]))
         ).scalar_one_or_none()
     ctx = ExportContext(
         org_name=org_name,
@@ -137,7 +142,7 @@ async def export_alerts(
 async def get_alert(
     alert_id: int,
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("security.monitor"),
 ):
     alert = await service.get_alert(db, alert_id, org_id)
@@ -148,7 +153,7 @@ async def get_alert(
 async def get_alert_snapshot(
     alert_id: int,
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("security.monitor"),
 ):
     alert = await service.get_alert(db, alert_id, org_id)

@@ -25,8 +25,10 @@ from app.core.errors import (
 from app.middleware.tenant import (
     ancestor_chain,
     apply_tenant_filter,
+    as_scope_ids,
     descendant_ids,
-    fetch_subtree,
+    descendants_subquery,
+    descendants_subquery_multi,
     root_id_of,
 )
 from app.models.employee import Employee
@@ -54,6 +56,21 @@ from app.schemas.organization import (
 
 async def _count_where(db: AsyncSession, model, column, value: int) -> int:
     stmt = select(func.count()).select_from(model).where(column == value)
+    return (await db.execute(stmt)).scalar_one()
+
+
+async def _count_employees_in_subtree(db: AsyncSession, node_id: int) -> int:
+    """Employees anywhere in ``node_id``'s sub-tree (it + descendants).
+
+    Employees may be assigned to any node in the company tree, so company- and
+    sub-tree-level employee totals roll up across descendants, not just the
+    exact node.
+    """
+    stmt = (
+        select(func.count())
+        .select_from(Employee)
+        .where(Employee.organization_id.in_(descendants_subquery(node_id)))
+    )
     return (await db.execute(stmt)).scalar_one()
 
 
@@ -99,25 +116,28 @@ async def _ensure_unique_root_code(
 async def list_organizations(
     db: AsyncSession,
     *,
-    is_super_admin: bool,
-    user_org_id: int | None,
-    tenant_org_id: int | None,
+    scope,
 ) -> list[OrganizationWithCounts]:
+    """Company roots visible to the caller.
+
+    ``scope`` is the request's read scope (from get_tenant_scope): None = every
+    company (global super admin), a set of root ids = exactly those companies
+    (a multi-org user's assigned set, or a super admin's header-selected one).
+    """
     stmt = (
         select(Organization)
         .where(Organization.parent_id.is_(None))
         .order_by(Organization.name)
     )
-    if not is_super_admin:
-        stmt = stmt.where(Organization.id == user_org_id)
-    elif tenant_org_id is not None:
-        stmt = stmt.where(Organization.id == tenant_org_id)
+    ids = as_scope_ids(scope)
+    if ids is not None:
+        stmt = stmt.where(Organization.id.in_(ids))
     roots = list((await db.execute(stmt)).scalars().all())
 
     result: list[OrganizationWithCounts] = []
     for root in roots:
         descendants = await descendant_ids(db, root.id, include_self=False)
-        employees = await _count_where(db, Employee, Employee.organization_id, root.id)
+        employees = await _count_employees_in_subtree(db, root.id)
         result.append(
             OrganizationWithCounts(
                 **OrganizationOut.model_validate(root, from_attributes=True).model_dump(),
@@ -149,9 +169,9 @@ async def create_organization(
 
 
 async def get_organization(
-    db: AsyncSession, target_org_id: int, *, is_super_admin: bool, user_org_id: int | None
+    db: AsyncSession, target_org_id: int, *, is_super_admin: bool, permitted_org_ids: list[int] | None
 ) -> Organization:
-    if not is_super_admin and user_org_id != target_org_id:
+    if not is_super_admin and target_org_id not in (permitted_org_ids or []):
         raise PermissionDeniedError("Access denied")
     org = (
         await db.execute(
@@ -171,10 +191,10 @@ async def update_organization(
     body: OrganizationUpdate,
     *,
     is_super_admin: bool,
-    user_org_id: int | None,
+    permitted_org_ids: list[int] | None,
 ) -> Organization:
     org = await get_organization(
-        db, target_org_id, is_super_admin=is_super_admin, user_org_id=user_org_id
+        db, target_org_id, is_super_admin=is_super_admin, permitted_org_ids=permitted_org_ids
     )
     changes = body.model_dump(exclude_unset=True)
     if "code" in changes and changes["code"] != org.code:
@@ -206,7 +226,7 @@ async def delete_organization(
         raise ConflictError(
             f"Organization still has {len(descendants)} sub-unit(s); remove them first"
         )
-    employees = await _count_where(db, Employee, Employee.organization_id, org.id)
+    employees = await _count_employees_in_subtree(db, org.id)
     if employees:
         raise ConflictError(
             f"Organization still has {employees} employee(s); reassign or remove them first"
@@ -231,28 +251,45 @@ async def _ensure_unique_sibling_code(
 
 
 async def _get_node_in_tenant(
-    db: AsyncSession, tenant_org_id: int | None, node_id: int
+    db: AsyncSession, scope, node_id: int
 ) -> Organization:
-    """Load a node belonging to the caller's tenant (or any node when global)."""
+    """Load a node within the caller's scope (or any node when global).
+
+    ``scope`` is a single active org id (writes), a read scope (list of roots),
+    or None (global super admin). The node's company root must be one of them.
+    """
     node = (
         await db.execute(select(Organization).where(Organization.id == node_id))
     ).scalar_one_or_none()
     if node is None:
         raise NotFoundError("Organization node not found")
-    if tenant_org_id is not None and await root_id_of(db, node.id) != tenant_org_id:
+    ids = as_scope_ids(scope)
+    if ids is not None and (await root_id_of(db, node.id)) not in ids:
         raise NotFoundError("Organization node not found")
     return node
 
 
-async def get_tree(db: AsyncSession, tenant_org_id: int | None) -> list[OrgNodeOut]:
-    """Return the tenant's org tree as nested OrgNodeOut roots.
+async def get_tree(db: AsyncSession, scope) -> list[OrgNodeOut]:
+    """Return the caller's org tree(s) as nested OrgNodeOut roots.
 
-    depth/path/root_organization_id are computed during assembly. For a global
-    super admin (tenant_org_id None) every company is returned.
+    depth/path/root_organization_id are computed during assembly. ``scope`` is a
+    read scope (list of company roots — every assigned company's tree is
+    returned) or None (global super admin → every company).
     """
-    if tenant_org_id is not None:
-        rows = await fetch_subtree(db, tenant_org_id)
-        top_ids = [tenant_org_id]
+    ids = as_scope_ids(scope)
+    if ids is not None:
+        rows = list(
+            (
+                await db.execute(
+                    select(Organization).where(
+                        Organization.id.in_(descendants_subquery_multi(ids))
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        top_ids = list(ids)
     else:
         rows = list((await db.execute(select(Organization))).scalars().all())
         top_ids = [r.id for r in rows if r.parent_id is None]
@@ -288,13 +325,15 @@ async def get_tree(db: AsyncSession, tenant_org_id: int | None) -> list[OrgNodeO
         top = by_id.get(top_id)
         if top is None:
             continue
-        root_resp = tenant_org_id if tenant_org_id is not None else top.id
-        out.append(build(top, "/", 0, root_resp))
+        # Each top is a company root, so its responses carry its own id as root.
+        out.append(build(top, "/", 0, top.id))
     return out
 
 
-async def get_node(db: AsyncSession, tenant_org_id: int | None, node_id: int) -> OrgNodeDetail:
-    node = await _get_node_in_tenant(db, tenant_org_id, node_id)
+async def get_node(
+    db: AsyncSession, scope: int | list[int] | None, node_id: int
+) -> OrgNodeDetail:
+    node = await _get_node_in_tenant(db, scope, node_id)
     base = await _node_out(db, node)
     breadcrumb_rows = await ancestor_chain(db, node.id, include_self=False)
     breadcrumb = [
@@ -384,6 +423,14 @@ async def delete_node(db: AsyncSession, tenant_org_id: int | None, node_id: int)
         raise ConflictError(
             f"Node still has {child_nodes} sub-unit(s); remove or move them first"
         )
+    # Employee.organization_id is ondelete=CASCADE, so deleting a node that still
+    # has employees assigned would hard-delete them (and their attendance ledger).
+    # Children are already required gone above, so a direct count suffices.
+    employees = await _count_where(db, Employee, Employee.organization_id, node.id)
+    if employees:
+        raise ConflictError(
+            f"Node still has {employees} employee(s); reassign or remove them first"
+        )
     await db.delete(node)
     await db.flush()
 
@@ -404,9 +451,11 @@ async def _resolve_target_org_id(
     return root_id
 
 
-async def list_locations(db: AsyncSession, tenant_org_id: int | None) -> list[LocationOut]:
+async def list_locations(
+    db: AsyncSession, scope: int | list[int] | None
+) -> list[LocationOut]:
     stmt = select(Location).order_by(Location.name)
-    stmt = apply_tenant_filter(stmt, tenant_org_id, Location.organization_id)
+    stmt = apply_tenant_filter(stmt, scope, Location.organization_id)
     return [
         LocationOut.model_validate(loc, from_attributes=True)
         for loc in (await db.execute(stmt)).scalars().all()

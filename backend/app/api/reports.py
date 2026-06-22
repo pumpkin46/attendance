@@ -7,10 +7,11 @@ from fastapi import APIRouter, Query, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 
-from app.core.dependencies import DbSession, TenantOrgId, require_permission
+from app.core.dependencies import DbSession, TenantNodeScope, TenantScope, require_permission
 from app.core.errors import ValidationError
 from app.core.timeutil import local_date
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
+from app.middleware.tenant import as_scope_ids
 from app.models.organization import Organization
 from app.schemas.report import UnknownPersonEvent, UnknownPersonsSummary
 from app.services import report_export, report_service
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 @router.get("/unknown-persons", response_model=PaginatedResponse[UnknownPersonEvent])
 async def unknown_persons_report(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("reports.view"),
     pagination: PaginationDep,
     date_from: date | None = Query(None),
@@ -38,7 +39,7 @@ async def unknown_persons_report(
 @router.get("/unknown-persons/summary", response_model=UnknownPersonsSummary)
 async def unknown_persons_summary(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("reports.view"),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
@@ -55,7 +56,8 @@ MAX_EXPORT_RANGE_DAYS = 366
 @router.get("/export")
 async def export_report(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
+    node_scope: TenantNodeScope,
     _: require_permission("reports.export"),
     export_format: Literal["csv", "xlsx", "pdf"] = Query("csv", alias="format"),
     date_from: date | None = Query(None),
@@ -81,9 +83,13 @@ async def export_report(
         raise ValidationError(f"Export range is limited to {MAX_EXPORT_RANGE_DAYS} days")
 
     org_name = None
-    if org_id is not None:
+    scope_ids = as_scope_ids(org_id)
+    # The export header carries a single org name. Only label it when the read
+    # scope resolves to exactly one company root; a multi-org union has no single
+    # name, so leave it blank there.
+    if scope_ids is not None and len(scope_ids) == 1:
         org_name = (
-            await db.execute(select(Organization.name).where(Organization.id == org_id))
+            await db.execute(select(Organization.name).where(Organization.id == scope_ids[0]))
         ).scalar_one_or_none()
     ctx = report_export.ExportContext(
         org_name=org_name,
@@ -91,7 +97,9 @@ async def export_report(
         tz_offset=tz_offset,
     )
 
-    report = await report_service.attendance_range_report(db, org_id, start, end)
+    report = await report_service.attendance_range_report(
+        db, org_id, start, end, node_scope=node_scope
+    )
     # Rendering (openpyxl/reportlab) is CPU-bound — keep it off the event loop.
     content = await run_in_threadpool(report_export.export_attendance, report, export_format, ctx)
     basename = f"attendance-{start.isoformat()}-to-{end.isoformat()}"

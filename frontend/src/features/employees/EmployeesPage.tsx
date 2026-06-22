@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
 import { Card } from '@/shared/ui/Card'
@@ -14,14 +14,19 @@ import { confirmDialog } from '@/shared/ui/dialogs'
 import { cn } from '@/shared/lib/cn'
 import { initialsOf } from '@/shared/lib/format'
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue'
+import { useAuth } from '@/features/auth/AuthProvider'
 import type { Employee } from '@/shared/types'
 import {
   useDeleteEmployee,
   useEmployeeLocations,
+  useEmployeeOrgNodeCounts,
   useEmployees,
   useSaveEmployee,
 } from '@/features/employees/api/queries'
 import { emptyEmployeeForm, type EmployeeForm } from '@/features/employees/types'
+import { OrgFilterSidebar } from '@/features/employees/components/OrgFilterSidebar'
+import { useOrgTree } from '@/features/security/api/queries'
+import { flattenTree } from '@/features/security/lib/tree'
 
 /** Deterministic accent colour for an employee avatar, derived from their id. */
 const AVATAR_TONES = [
@@ -73,19 +78,51 @@ function MiniStat({
 }
 
 export default function EmployeesPage() {
+  const { isSuperAdmin, hasPermission } = useAuth()
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search)
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<EmployeeForm>(emptyEmployeeForm)
+  // null = "All employees"; a node id filters to that unit + its sub-tree.
+  const [orgNodeId, setOrgNodeId] = useState<number | null>(null)
 
-  const { data, isPending: loading } = useEmployees(debouncedSearch)
+  // The org tree drives the directory sidebar + the form's unit picker. Gate the
+  // fetch on org-node access so viewers without it just see the flat list.
+  const canViewOrg = isSuperAdmin() || hasPermission('org_nodes.view') || hasPermission('org_nodes.manage')
+  const { data: orgTree = [], isPending: orgTreeLoading } = useOrgTree(canViewOrg)
+  const { data: orgNodeCounts = {} } = useEmployeeOrgNodeCounts(canViewOrg)
+  const showOrgSidebar = canViewOrg && orgTree.length > 0
+
+  const { data, isPending: loading } = useEmployees(debouncedSearch, orgNodeId)
   const employees = data?.data ?? []
   const { data: locations = [] } = useEmployeeLocations()
   // The employee list returns location_id only; resolve names from the
   // locations the form picker already loads.
   const locationName = (id: number | null | undefined) =>
     id == null ? undefined : locations.find((l) => l.id === id)?.name
+
+  // Flat view of the org tree for name lookups (table column) and the picker.
+  const orgNodesFlat = useMemo(() => flattenTree(orgTree), [orgTree])
+  const orgNameById = useMemo(
+    () => new Map(orgNodesFlat.map((n) => [n.id, n.name] as const)),
+    [orgNodesFlat]
+  )
+  const rootIds = useMemo(() => new Set(orgTree.map((r) => r.id)), [orgTree])
+  // Picker options: '' = company root, then each sub-unit indented by depth.
+  const orgOptions = useMemo(
+    () => [
+      { value: '', label: 'Company root (default)' },
+      ...orgNodesFlat
+        .filter((n) => n.parent_id !== null)
+        .map((n) => ({
+          value: String(n.id),
+          label: `${'   '.repeat(Math.max(0, n.depth - 1))}${n.name}`,
+        })),
+    ],
+    [orgNodesFlat]
+  )
+  const selectedNodeName = orgNodeId != null ? orgNameById.get(orgNodeId) : undefined
 
   const saveEmployee = useSaveEmployee()
   const deleteMutation = useDeleteEmployee()
@@ -101,7 +138,11 @@ export default function EmployeesPage() {
 
   const openCreate = () => {
     setEditingId(null)
-    setForm(emptyEmployeeForm)
+    setForm({
+      ...emptyEmployeeForm,
+      // Pre-select the unit being filtered so "+ New employee" lands there.
+      organization_id: orgNodeId != null && !rootIds.has(orgNodeId) ? String(orgNodeId) : '',
+    })
     setFormOpen(true)
   }
 
@@ -115,6 +156,9 @@ export default function EmployeesPage() {
       job_title: e.job_title ?? '',
       hire_date: e.hire_date ?? '',
       location_id: e.location_id ? String(e.location_id) : '',
+      // A root assignment is the implicit default → show as "Company root".
+      organization_id:
+        e.organization_id && !rootIds.has(e.organization_id) ? String(e.organization_id) : '',
       is_active: String(e.is_active),
     })
     setFormOpen(true)
@@ -133,6 +177,110 @@ export default function EmployeesPage() {
     e.preventDefault()
     saveEmployee.mutate({ id: editingId, form }, { onSuccess: closeForm })
   }
+
+  const columns = [
+    {
+      key: 'code',
+      header: 'Code',
+      sortable: true,
+      width: '8rem',
+      cell: (e: Employee) => <span className="font-mono text-xs text-slate-400">{e.employee_code}</span>,
+    },
+    {
+      key: 'name',
+      header: 'Employee',
+      sortable: true,
+      sortValue: (e: Employee) => `${e.first_name} ${e.last_name}`,
+      cell: (e: Employee) => (
+        <div className="flex items-center gap-3">
+          <Avatar employee={e} />
+          <div className="min-w-0">
+            <div className="truncate font-medium text-slate-100">
+              {e.first_name} {e.last_name}
+            </div>
+            <div className="truncate text-xs text-slate-500">{e.job_title || e.email || '—'}</div>
+          </div>
+        </div>
+      ),
+    },
+    ...(showOrgSidebar
+      ? [
+          {
+            key: 'org_unit',
+            header: 'Org unit',
+            sortable: true,
+            sortValue: (e: Employee) => (e.organization_id ? orgNameById.get(e.organization_id) ?? '' : ''),
+            cell: (e: Employee) =>
+              e.organization_id && orgNameById.has(e.organization_id) ? (
+                orgNameById.get(e.organization_id)
+              ) : (
+                <span className="text-slate-600">—</span>
+              ),
+          },
+        ]
+      : []),
+    {
+      key: 'location',
+      header: 'Location',
+      sortable: true,
+      sortValue: (e: Employee) => locationName(e.location_id) ?? '',
+      cell: (e: Employee) => locationName(e.location_id) ?? <span className="text-slate-600">—</span>,
+    },
+    {
+      key: 'face_enrolled',
+      header: 'Face',
+      align: 'center' as const,
+      sortable: true,
+      sortValue: (e: Employee) => (e.face_enrolled ? 1 : 0),
+      cell: (e: Employee) => (
+        <Badge tone={e.face_enrolled ? 'ok' : 'warn'}>{e.face_enrolled ? 'Enrolled' : 'Missing'}</Badge>
+      ),
+    },
+    {
+      key: 'rfid',
+      header: 'RFID',
+      align: 'center' as const,
+      sortable: true,
+      sortValue: (e: Employee) => e.active_rfid_cards_count ?? 0,
+      cell: (e: Employee) => (
+        <Badge tone={(e.active_rfid_cards_count ?? 0) > 0 ? 'ok' : 'neutral'}>
+          {(e.active_rfid_cards_count ?? 0) > 0 ? 'Assigned' : 'None'}
+        </Badge>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      align: 'center' as const,
+      sortable: true,
+      sortValue: (e: Employee) => (e.is_active ? 1 : 0),
+      cell: (e: Employee) => (
+        <Badge tone={e.is_active ? 'ok' : 'danger'}>{e.is_active ? 'Active' : 'Inactive'}</Badge>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right' as const,
+      width: '7rem',
+      cell: (e: Employee) => (
+        <div className="flex justify-end gap-1">
+          <Button size="sm" variant="ghost" onClick={() => openEdit(e)}>
+            Edit
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            onClick={() => remove(e)}
+            disabled={deleteMutation.isPending}
+          >
+            Delete
+          </Button>
+        </div>
+      ),
+    },
+  ]
 
   return (
     <div>
@@ -154,26 +302,73 @@ export default function EmployeesPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MiniStat label="Total employees" value={total} hint={`${inactiveCount} inactive`} />
-        <MiniStat
-          label="Face enrolled"
-          value={enrolledCount}
-          hint={`${pct(enrolledCount)}% of loaded`}
-          tone="ok"
-        />
-        <MiniStat
-          label="RFID assigned"
-          value={rfidCount}
-          hint={`${pct(rfidCount)}% of loaded`}
-          tone="accent"
-        />
-        <MiniStat
-          label="Inactive"
-          value={inactiveCount}
-          hint={inactiveCount ? 'Needs review' : 'All active'}
-          tone={inactiveCount ? 'warn' : undefined}
-        />
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        {showOrgSidebar && (
+          <aside className="lg:sticky lg:top-6 lg:w-72 lg:shrink-0">
+            <OrgFilterSidebar
+              tree={orgTree}
+              counts={orgNodeCounts}
+              selectedId={orgNodeId}
+              onSelect={setOrgNodeId}
+              loading={orgTreeLoading}
+            />
+          </aside>
+        )}
+
+        <div className="min-w-0 flex-1">
+          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <MiniStat label="Total employees" value={total} hint={`${inactiveCount} inactive`} />
+            <MiniStat
+              label="Face enrolled"
+              value={enrolledCount}
+              hint={`${pct(enrolledCount)}% of loaded`}
+              tone="ok"
+            />
+            <MiniStat
+              label="RFID assigned"
+              value={rfidCount}
+              hint={`${pct(rfidCount)}% of loaded`}
+              tone="accent"
+            />
+            <MiniStat
+              label="Inactive"
+              value={inactiveCount}
+              hint={inactiveCount ? 'Needs review' : 'All active'}
+              tone={inactiveCount ? 'warn' : undefined}
+            />
+          </div>
+
+          {selectedNodeName && (
+            <div className="mb-3 flex items-center gap-2 text-sm text-slate-400">
+              <span>
+                Filtered to <span className="font-medium text-slate-200">{selectedNodeName}</span>{' '}
+                and its sub-units
+              </span>
+              <button
+                type="button"
+                onClick={() => setOrgNodeId(null)}
+                className="rounded px-1.5 py-0.5 text-xs font-medium text-blue-400 transition-colors hover:bg-blue-500/10"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
+          <DataTable
+            data={employees}
+            rowKey={(e) => e.id}
+            pageSize={10}
+            loading={loading}
+            empty={
+              search
+                ? `No employees match “${search}”`
+                : selectedNodeName
+                  ? `No employees in ${selectedNodeName}`
+                  : 'No employees found'
+            }
+            columns={columns}
+          />
+        </div>
       </div>
 
       <SidePanel
@@ -205,6 +400,16 @@ export default function EmployeesPage() {
               required
             />
           </Label>
+          {showOrgSidebar && (
+            <Label>
+              Organization unit
+              <Combobox
+                value={form.organization_id}
+                onChange={(value) => setForm({ ...form, organization_id: value })}
+                options={orgOptions}
+              />
+            </Label>
+          )}
           <Label>
             Location
             <Combobox
@@ -271,107 +476,6 @@ export default function EmployeesPage() {
           )}
         </form>
       </SidePanel>
-
-      <DataTable
-        data={employees}
-        rowKey={(e) => e.id}
-        pageSize={10}
-        loading={loading}
-        empty={search ? `No employees match “${search}”` : 'No employees found'}
-        columns={[
-          {
-            key: 'code',
-            header: 'Code',
-            sortable: true,
-            width: '8rem',
-            cell: (e) => <span className="font-mono text-xs text-slate-400">{e.employee_code}</span>,
-          },
-          {
-            key: 'name',
-            header: 'Employee',
-            sortable: true,
-            sortValue: (e) => `${e.first_name} ${e.last_name}`,
-            cell: (e) => (
-              <div className="flex items-center gap-3">
-                <Avatar employee={e} />
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-slate-100">
-                    {e.first_name} {e.last_name}
-                  </div>
-                  <div className="truncate text-xs text-slate-500">
-                    {e.job_title || e.email || '—'}
-                  </div>
-                </div>
-              </div>
-            ),
-          },
-          {
-            key: 'location',
-            header: 'Location',
-            sortable: true,
-            sortValue: (e) => locationName(e.location_id) ?? '',
-            cell: (e) => locationName(e.location_id) ?? <span className="text-slate-600">—</span>,
-          },
-          {
-            key: 'face_enrolled',
-            header: 'Face',
-            align: 'center',
-            sortable: true,
-            sortValue: (e) => (e.face_enrolled ? 1 : 0),
-            cell: (e) => (
-              <Badge tone={e.face_enrolled ? 'ok' : 'warn'}>
-                {e.face_enrolled ? 'Enrolled' : 'Missing'}
-              </Badge>
-            ),
-          },
-          {
-            key: 'rfid',
-            header: 'RFID',
-            align: 'center',
-            sortable: true,
-            sortValue: (e) => e.active_rfid_cards_count ?? 0,
-            cell: (e) => (
-              <Badge tone={(e.active_rfid_cards_count ?? 0) > 0 ? 'ok' : 'neutral'}>
-                {(e.active_rfid_cards_count ?? 0) > 0 ? 'Assigned' : 'None'}
-              </Badge>
-            ),
-          },
-          {
-            key: 'status',
-            header: 'Status',
-            align: 'center',
-            sortable: true,
-            sortValue: (e) => (e.is_active ? 1 : 0),
-            cell: (e) => (
-              <Badge tone={e.is_active ? 'ok' : 'danger'}>
-                {e.is_active ? 'Active' : 'Inactive'}
-              </Badge>
-            ),
-          },
-          {
-            key: 'actions',
-            header: '',
-            align: 'right',
-            width: '7rem',
-            cell: (e) => (
-              <div className="flex justify-end gap-1">
-                <Button size="sm" variant="ghost" onClick={() => openEdit(e)}>
-                  Edit
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                  onClick={() => remove(e)}
-                  disabled={deleteMutation.isPending}
-                >
-                  Delete
-                </Button>
-              </div>
-            ),
-          },
-        ]}
-      />
     </div>
   )
 }

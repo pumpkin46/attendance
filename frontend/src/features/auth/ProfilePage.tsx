@@ -140,10 +140,6 @@ function ProfileCard() {
             <dd className="font-medium text-slate-100">{user.email}</dd>
           </div>
           <div className="flex items-center justify-between py-2.5">
-            <dt className="text-slate-400">Organization</dt>
-            <dd className="font-medium text-slate-100">{user.organization?.name ?? '—'}</dd>
-          </div>
-          <div className="flex items-center justify-between py-2.5">
             <dt className="text-slate-400">Member since</dt>
             <dd className="font-medium text-slate-100">{formatDate(user.created_at)}</dd>
           </div>

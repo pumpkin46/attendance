@@ -80,6 +80,26 @@ body {
   }
 }
 
+/* Org-chart node entrance — runs once per card mount (new / revealed nodes) */
+@keyframes orgnode-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Honour reduced-motion: the JS layout tween already snaps; silence the CSS
+   entrance too so expand/collapse/add produces no motion for opted-out users. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[orgnode-in_220ms_ease-out\] {
+    animation: none;
+  }
+}
+
 /* Slim dark scrollbars for main content and other scroll regions */
 .scrollbar-styled {
   scrollbar-width: thin;

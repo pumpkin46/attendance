@@ -25,7 +25,9 @@ def _online_threshold() -> datetime:
     return datetime.now(timezone.utc) - timedelta(seconds=settings.camera_online_threshold_seconds)
 
 
-async def _get_camera_or_404(db: AsyncSession, camera_id: int, org_id: int | None) -> Camera:
+async def _get_camera_or_404(
+    db: AsyncSession, camera_id: int, org_id: int | list[int] | None
+) -> Camera:
     stmt = (
         select(Camera)
         .join(Location, Camera.location_id == Location.id)
@@ -50,7 +52,9 @@ async def _generate_device_id(db: AsyncSession, name: str) -> str:
         suffix += 1
 
 
-async def monitoring_summary(db: AsyncSession, org_id: int | None) -> CameraMonitoringSummary:
+async def monitoring_summary(
+    db: AsyncSession, org_id: int | list[int] | None
+) -> CameraMonitoringSummary:
     threshold = _online_threshold()
     stmt = select(Camera).join(Location, Camera.location_id == Location.id)
     stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
@@ -76,7 +80,7 @@ async def monitoring_summary(db: AsyncSession, org_id: int | None) -> CameraMoni
     )
 
 
-def cameras_query(org_id: int | None) -> Select:
+def cameras_query(org_id: int | list[int] | None) -> Select:
     stmt = select(Camera).join(Location, Camera.location_id == Location.id)
     stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
     return stmt.order_by(Camera.id.desc())
@@ -109,8 +113,18 @@ async def _validate_stream_url_or_raise(stream_url: str | None) -> None:
         raise ValidationError(error)
 
 
-async def create_camera(db: AsyncSession, body: CameraCreate) -> Camera:
+async def create_camera(
+    db: AsyncSession, org_id: int | None, body: CameraCreate
+) -> Camera:
     data = body.model_dump()
+    # Tenant guard: the target location must be in the caller's company, so a
+    # cameras.manage admin can't plant a camera at another tenant's location.
+    location_id = data.get("location_id")
+    if location_id is not None:
+        loc_stmt = select(Location.id).where(Location.id == location_id)
+        loc_stmt = apply_tenant_filter(loc_stmt, org_id, Location.organization_id)
+        if (await db.execute(loc_stmt)).scalar_one_or_none() is None:
+            raise ValidationError("Location not found in this organization")
     await _validate_stream_url_or_raise(data.get("stream_url"))
     data["device_id"] = data.get("device_id") or await _generate_device_id(db, body.name)
     camera = Camera(**data)
@@ -121,7 +135,9 @@ async def create_camera(db: AsyncSession, body: CameraCreate) -> Camera:
     return camera
 
 
-async def get_camera(db: AsyncSession, camera_id: int, org_id: int | None) -> Camera:
+async def get_camera(
+    db: AsyncSession, camera_id: int, org_id: int | list[int] | None
+) -> Camera:
     return await _get_camera_or_404(db, camera_id, org_id)
 
 
@@ -169,7 +185,9 @@ async def heartbeat(db: AsyncSession, camera_id: int, org_id: int | None) -> Cam
     return camera
 
 
-async def capture_frame(db: AsyncSession, camera_id: int, org_id: int | None) -> CaptureResult:
+async def capture_frame(
+    db: AsyncSession, camera_id: int, org_id: int | list[int] | None
+) -> CaptureResult:
     camera = await _get_camera_or_404(db, camera_id, org_id)
     if not camera.stream_url:
         raise ValidationError("Camera has no stream URL configured")

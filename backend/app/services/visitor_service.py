@@ -9,6 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.timeutil import local_date, local_day_bounds_utc
+from app.middleware.tenant import (
+    as_scope_ids,
+    descendants_subquery_multi,
+)
 from app.models.employee import Employee
 from app.models.visitor import (
     ApprovalStatus,
@@ -74,7 +78,7 @@ async def check_blacklist(
     db: AsyncSession, org_id: int, name: str, id_number: str | None = None
 ) -> VisitorBlacklist | None:
     stmt = select(VisitorBlacklist).where(
-        VisitorBlacklist.organization_id == org_id,
+        VisitorBlacklist.organization_id.in_(as_scope_ids(org_id)),
         VisitorBlacklist.is_active == True,  # noqa: E712
     )
     conditions = [VisitorBlacklist.name.ilike(name)]
@@ -143,7 +147,12 @@ async def is_org_employee(
     """
     stmt = select(Employee.id).where(Employee.id == employee_id)
     if org_id is not None:
-        stmt = stmt.where(Employee.organization_id == org_id)
+        # Host may be assigned to any node in the company tree → sub-tree scope.
+        stmt = stmt.where(
+            Employee.organization_id.in_(
+                descendants_subquery_multi(as_scope_ids(org_id))
+            )
+        )
     return (await db.execute(stmt)).scalar_one_or_none() is not None
 
 
@@ -417,11 +426,13 @@ async def reject_visitor(
     return visitor
 
 
-async def get_pending_approvals(db: AsyncSession, org_id: int) -> list[Visitor]:
+async def get_pending_approvals(
+    db: AsyncSession, org_id: int | list[int] | None
+) -> list[Visitor]:
     stmt = (
         select(Visitor)
         .where(
-            Visitor.organization_id == org_id,
+            Visitor.organization_id.in_(as_scope_ids(org_id)),
             Visitor.status == VisitorStatus.pending_approval,
         )
         .order_by(Visitor.created_at.desc())
@@ -542,9 +553,15 @@ async def expire_visitors(db: AsyncSession) -> int:
     return count
 
 
-async def get_dashboard_stats(db: AsyncSession, org_id: int) -> dict:
+async def get_dashboard_stats(
+    db: AsyncSession, org_id: int | list[int] | None
+) -> dict:
     now = _now()
-    base = select(func.count()).select_from(Visitor).where(Visitor.organization_id == org_id)
+    base = (
+        select(func.count())
+        .select_from(Visitor)
+        .where(Visitor.organization_id.in_(as_scope_ids(org_id)))
+    )
 
     on_site = (await db.execute(
         base.where(Visitor.status == VisitorStatus.checked_in)
@@ -592,11 +609,13 @@ async def get_dashboard_stats(db: AsyncSession, org_id: int) -> dict:
     }
 
 
-async def get_active_visitors(db: AsyncSession, org_id: int) -> list[Visitor]:
+async def get_active_visitors(
+    db: AsyncSession, org_id: int | list[int] | None
+) -> list[Visitor]:
     stmt = (
         select(Visitor)
         .where(
-            Visitor.organization_id == org_id,
+            Visitor.organization_id.in_(as_scope_ids(org_id)),
             Visitor.status == VisitorStatus.checked_in,
         )
         .order_by(Visitor.checked_in_at.desc())
@@ -604,11 +623,13 @@ async def get_active_visitors(db: AsyncSession, org_id: int) -> list[Visitor]:
     return list((await db.execute(stmt)).scalars().all())
 
 
-async def get_daily_report(db: AsyncSession, org_id: int, report_date: date | None = None) -> dict:
+async def get_daily_report(
+    db: AsyncSession, org_id: int | list[int] | None, report_date: date | None = None
+) -> dict:
     d = report_date or local_date()
     day_start, day_end = local_day_bounds_utc(d)
     base = select(Visitor).where(
-        Visitor.organization_id == org_id,
+        Visitor.organization_id.in_(as_scope_ids(org_id)),
         Visitor.created_at >= day_start,
         Visitor.created_at < day_end,
     )

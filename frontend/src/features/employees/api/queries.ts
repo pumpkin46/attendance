@@ -12,16 +12,33 @@ import {
 
 export const employeeKeys = {
   all: ['employees'] as const,
-  list: (search: string) => ['employees', 'list', search] as const,
+  list: (search: string, orgNodeId?: number | null) =>
+    ['employees', 'list', search, orgNodeId ?? null] as const,
+  orgNodeCounts: ['employees', 'org-node-counts'] as const,
   locations: ['locations'] as const,
 }
 
-export function useEmployees(search: string) {
+export function useEmployees(search: string, orgNodeId?: number | null) {
   return useApiQuery<Paginated<Employee>>(
-    employeeKeys.list(search),
+    employeeKeys.list(search, orgNodeId),
     '/employees',
-    { search, per_page: 50 },
+    {
+      search,
+      per_page: 50,
+      // Only send the filter when a unit is selected; null/undefined = whole tenant.
+      ...(orgNodeId != null ? { org_node_id: orgNodeId } : {}),
+    },
     { keepPreviousData: true }
+  )
+}
+
+/** Direct employee count per org-tree node (keyed by node id), for the sidebar. */
+export function useEmployeeOrgNodeCounts(enabled = true) {
+  return useApiQuery<Record<string, number>>(
+    employeeKeys.orgNodeCounts,
+    '/employees/org-node-counts',
+    undefined,
+    { enabled, silent: true }
   )
 }
 
@@ -74,6 +91,8 @@ export function useDeleteEmployee() {
         { queryKey: employeeKeys.all },
         removeRowFromPaginated<Employee>(id)
       )
+      // Per-unit sidebar counts can't be patched from a single row id; refetch.
+      void qc.invalidateQueries({ queryKey: employeeKeys.orgNodeCounts })
     },
     onError: (err) => toast.error(getApiErrorMessage(err)),
   })

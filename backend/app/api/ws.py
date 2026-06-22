@@ -22,8 +22,9 @@ from app.core.config import settings
 from app.core.database import async_session_factory
 from app.core.dependencies import get_single_org_id
 from app.core.security import decode_access_token
+from app.middleware.tenant import root_id_of, root_ids_of
 from app.models.user import Role, User
-from app.realtime.hub import Connection, get_hub
+from app.realtime.hub import Connection, emit, get_hub
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -55,8 +56,13 @@ def _origin_allowed(origin: str | None) -> bool:
 
 async def _resolve_identity(
     token: str | None, org_param: str | None
-) -> tuple[int, int | None] | None:
-    """Validate the token and return (user_id, org_id), or None to reject."""
+) -> tuple[int, set[int] | None] | None:
+    """Validate the token and return (user_id, org_ids), or None to reject.
+
+    ``org_ids`` is the set of company roots the connection receives events for
+    (a multi-org user's assigned companies, or a super admin's header-selected
+    one), or None for a super admin watching every tenant.
+    """
     if not token:
         return None
     payload = decode_access_token(token)
@@ -76,27 +82,41 @@ async def _resolve_identity(
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
-        # Mirror get_tenant_org_id: a super admin without an explicit ?org=
-        # falls back to the lone active organization (single-org deployments).
-        default_org: int | None = None
-        if user is not None and user.has_role(settings.super_admin_role) and not org_param:
-            default_org = await get_single_org_id(db)
+        is_super = user is not None and user.has_role(settings.super_admin_role)
+        single_org: int | None = None
+        assigned: list[int] = []
+        # The ?org= param may name any node (a company root or a sub-unit) and can
+        # be stale; resolve it to its COMPANY ROOT the same way the HTTP header is
+        # (events are partitioned by root), never trusting the raw value.
+        picked_root: int | None = None
+        if user is not None:
+            if is_super:
+                single_org = await get_single_org_id(db)
+            else:
+                # Roll the user's grants (which may be sub-units) up to their roots.
+                assigned = await root_ids_of(db, [o.id for o in user.organizations])
+            if org_param:
+                try:
+                    picked_root = await root_id_of(db, int(org_param))
+                except ValueError:
+                    picked_root = None
 
     if user is None:
         return None
-    if user.has_role(settings.super_admin_role):
+    if is_super:
         if org_param:
-            try:
-                return user.id, int(org_param)
-            except ValueError:
-                return user.id, None
-        return user.id, default_org
-    if user.organization_id is None:
-        # Mirror get_tenant_org_id: org_id=None is validated global scope,
-        # reserved for super admins -- the hub fans every tenant's events to
-        # such a connection. Reject an org-less tenant user like a bad token.
+            # A named (resolved) company scopes to it; an absent/unknown one is
+            # global, matching the HTTP header behaviour.
+            return user.id, ({picked_root} if picked_root is not None else None)
+        return user.id, ({single_org} if single_org is not None else None)
+    # Non-super-admin: scope is the union of assigned companies (the param may
+    # narrow to one of them). None = global scope, reserved for super admins, so a
+    # user with no assigned company is refused like a bad token rather than going global.
+    if not assigned:
         return None
-    return user.id, user.organization_id
+    if picked_root is not None and picked_root in assigned:
+        return user.id, {picked_root}
+    return user.id, set(assigned)
 
 
 async def _pump_outgoing(websocket: WebSocket, conn: Connection) -> None:
@@ -173,7 +193,7 @@ _DETECTION_LABEL_TTL_SECONDS = 10.0
 
 
 async def _label_detections(
-    faces: list[dict], org_id: int | None, cache: dict[str, tuple]
+    faces: list[dict], org_id: set[int] | None, cache: dict[str, tuple]
 ) -> None:
     """Attach tenant-gated display names to recognized faces, in place.
 
@@ -232,7 +252,7 @@ async def _label_detections(
 
 
 async def _send_camera_detections(
-    websocket: WebSocket, camera_id: int, org_id: int | None, fps: int = 5
+    websocket: WebSocket, camera_id: int, org_id: set[int] | None, fps: int = 5
 ) -> None:
     """Push the camera's live per-face detection state as JSON, capped at ``fps``.
 
@@ -310,7 +330,7 @@ async def _push_engine_status(websocket: WebSocket, period: float = 2.0) -> None
         await asyncio.sleep(period)
 
 
-async def _push_monitoring(websocket: WebSocket, org_id: int | None, period: float = 3.0) -> None:
+async def _push_monitoring(websocket: WebSocket, org_id: set[int] | None, period: float = 3.0) -> None:
     """Push the monitoring dashboard + live feed (tenant-scoped) on a fixed cadence.
 
     Gives the monitoring page smoothly-ticking counters without leaning on the
@@ -404,18 +424,27 @@ async def realtime_ws(websocket: WebSocket) -> None:
     if identity is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
-    user_id, org_id = identity
+    user_id, org_ids = identity
 
     hub = get_hub()
-    conn = await hub.register(user_id, org_id)
+    conn = await hub.register(user_id, org_ids)
     if conn is None:
         # Per-user connection cap reached.
         await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
         return
 
     # Echo the negotiated subprotocol so the browser completes the handshake.
+    # org_ids is a set (or None) → JSON-serialize as a sorted list.
+    org_list = sorted(org_ids) if org_ids is not None else None
     await websocket.accept(subprotocol=_BEARER_SUBPROTOCOL)
-    await websocket.send_json({"type": "connected", "data": {"org_id": org_id}, "org_id": org_id})
+    await websocket.send_json({"type": "connected", "data": {"org_ids": org_list}, "org_ids": org_list})
+
+    # Chat presence: announce "online" only for the company roots where this is
+    # the user's first live socket (the transition is computed atomically, shared
+    # via Redis across workers). Skipped for a global super admin (org_ids None).
+    if org_ids:
+        for root in await hub.presence_connect(user_id, org_ids):
+            await emit(root, "chat.presence", {"user_id": user_id, "online": True})
 
     sender = asyncio.create_task(_pump_outgoing(websocket, conn))
     receiver = asyncio.create_task(_drain_incoming(websocket))
@@ -429,3 +458,7 @@ async def realtime_ws(websocket: WebSocket) -> None:
         sender.cancel()
         receiver.cancel()
         await hub.unregister(conn)
+        # Retract presence only where the user's last socket just closed.
+        if org_ids:
+            for root in await hub.presence_disconnect(user_id, org_ids):
+                await emit(root, "chat.presence", {"user_id": user_id, "online": False})

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import NotFoundError
+from app.middleware.tenant import as_scope_ids, root_id_of
 from app.models.employee import Employee
 from app.models.recognition import RecognitionEvent
 from app.models.visitor import Visitor
@@ -166,8 +167,14 @@ async def authorize_match(
         return None
     if not identity.startswith("visitor-") and not row.is_active:
         return None
-    if org_id is not None and row.organization_id != org_id:
-        return None
+    # The FAISS index is global, so every match is gated to the caller's tenant
+    # scope (a single active org for ingestion, or a multi-org user's set for the
+    # live feed). The row matches when its org IS one of those roots (fast path)
+    # or rolls up to one (employee on a sub-node).
+    ids = as_scope_ids(org_id)
+    if ids is not None and row.organization_id not in ids:
+        if (await root_id_of(db, row.organization_id)) not in ids:
+            return None
     return row
 
 
@@ -283,7 +290,10 @@ async def _record_employee_match(
 
     # Log the successful match so it appears in metrics, the events list,
     # and exports (previously only "unknown" events were recorded).
-    event_org_id = employee.organization_id
+    # RecognitionEvent / LiveEvent / security-monitoring are tenant-scoped by the
+    # company root; an employee's organization_id may be a sub-node, so derive the
+    # root to keep events on the right tenant channel and in tenant reports.
+    event_org_id = await root_id_of(db, employee.organization_id) or employee.organization_id
     event = RecognitionEvent(
         employee_id=employee_id,
         organization_id=event_org_id,
@@ -319,7 +329,7 @@ async def _record_employee_match(
 
     await create_live_event(
         db=db,
-        organization_id=employee.organization_id,
+        organization_id=event_org_id,
         event_type="recognition.matched",
         message=f"{employee.first_name} {employee.last_name} recognized",
         employee_id=employee.id,
@@ -429,7 +439,7 @@ async def _count(db: AsyncSession, stmt: Select) -> int:
 async def metrics(db: AsyncSession, org_id: int | None) -> RecognitionMetrics:
     base_stmt = select(RecognitionEvent)
     if org_id is not None:
-        base_stmt = base_stmt.where(RecognitionEvent.organization_id == org_id)
+        base_stmt = base_stmt.where(RecognitionEvent.organization_id.in_(as_scope_ids(org_id)))
 
     total_events = await _count(db, base_stmt)
     matched = await _count(db, base_stmt.where(RecognitionEvent.result == "matched"))
@@ -458,7 +468,7 @@ async def metrics(db: AsyncSession, org_id: int | None) -> RecognitionMetrics:
 def events_query(org_id: int | None) -> Select:
     stmt = select(RecognitionEvent)
     if org_id is not None:
-        stmt = stmt.where(RecognitionEvent.organization_id == org_id)
+        stmt = stmt.where(RecognitionEvent.organization_id.in_(as_scope_ids(org_id)))
     return stmt.order_by(RecognitionEvent.recognized_at.desc())
 
 
@@ -519,7 +529,7 @@ async def snapshot_path(db: AsyncSession, event_id: int, org_id: int | None = No
     if org_id is not None:
         # Event ids are sequential integers; without the tenant filter any
         # caller with recognition.view could enumerate other orgs' snapshots.
-        stmt = stmt.where(RecognitionEvent.organization_id == org_id)
+        stmt = stmt.where(RecognitionEvent.organization_id.in_(as_scope_ids(org_id)))
     event = (await db.execute(stmt)).scalar_one_or_none()
     if not event:
         raise NotFoundError("Event not found")
@@ -533,7 +543,7 @@ async def snapshot_path(db: AsyncSession, event_id: int, org_id: int | None = No
 async def unknown_summary(db: AsyncSession, org_id: int | None) -> UnknownSummary:
     base_stmt = select(RecognitionEvent).where(RecognitionEvent.result == "unknown")
     if org_id is not None:
-        base_stmt = base_stmt.where(RecognitionEvent.organization_id == org_id)
+        base_stmt = base_stmt.where(RecognitionEvent.organization_id.in_(as_scope_ids(org_id)))
 
     now = datetime.now(timezone.utc)
     return UnknownSummary(

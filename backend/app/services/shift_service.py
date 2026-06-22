@@ -13,7 +13,12 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
-from app.middleware.tenant import apply_tenant_filter
+from app.middleware.tenant import (
+    apply_employee_tenant_filter,
+    apply_tenant_filter,
+    as_scope_ids,
+    descendants_subquery_multi,
+)
 from app.models.attendance import (
     AttendancePolicy,
     Holiday,
@@ -35,7 +40,9 @@ from app.schemas.attendance import (
 # ── Attendance policies ───────────────────────────────────────────────────────
 
 
-async def list_policies(db: AsyncSession, org_id: int | None) -> list[AttendancePolicy]:
+async def list_policies(
+    db: AsyncSession, org_id: int | list[int] | None
+) -> list[AttendancePolicy]:
     stmt = (
         select(AttendancePolicy)
         .where(AttendancePolicy.is_active == True)  # noqa: E712
@@ -73,23 +80,31 @@ async def create_policy(
 
 
 async def _require_org_employee(
-    db: AsyncSession, employee_id: int, org_id: int | None
+    db: AsyncSession,
+    employee_id: int,
+    org_id: int | None,
+    node_scope: int | list[int] | None = None,
 ) -> None:
     """Reject an employee id that is not in the caller's tenant.
 
     Closes the cross-tenant write IDOR where a client-supplied ``employee_id``
     could attach a shift assignment / leave request to another org's employee.
-    No-op tenant check when ``org_id`` is None (validated super-admin scope),
+    No-op tenant check when the scope is None (validated super-admin scope),
     but still verifies the employee exists.
+
+    The employee boundary is sub-tree based, so a sub-unit admin must only be
+    able to touch employees in their granted sub-tree: scope by ``node_scope``
+    (the granted NODES) when provided, falling back to ``org_id`` otherwise.
     """
+    emp_scope = node_scope if node_scope is not None else org_id
     stmt = select(Employee.id).where(Employee.id == employee_id)
-    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    stmt = apply_employee_tenant_filter(stmt, emp_scope, Employee.organization_id)
     if (await db.execute(stmt)).scalar_one_or_none() is None:
         raise NotFoundError("Employee not found")
 
 
 async def get_policy(
-    db: AsyncSession, policy_id: int, org_id: int | None
+    db: AsyncSession, policy_id: int, org_id: int | list[int] | None
 ) -> AttendancePolicy:
     stmt = select(AttendancePolicy).where(AttendancePolicy.id == policy_id)
     stmt = apply_tenant_filter(stmt, org_id, AttendancePolicy.organization_id)
@@ -115,7 +130,7 @@ async def update_policy(
 # ── Shifts ────────────────────────────────────────────────────────────────────
 
 
-async def list_shifts(db: AsyncSession, org_id: int | None) -> list[Shift]:
+async def list_shifts(db: AsyncSession, org_id: int | list[int] | None) -> list[Shift]:
     stmt = (
         select(Shift).where(Shift.is_active == True).order_by(Shift.name)  # noqa: E712
     )
@@ -133,7 +148,9 @@ async def create_shift(db: AsyncSession, org_id: int | None, body: ShiftCreate) 
     return shift
 
 
-async def get_shift(db: AsyncSession, shift_id: int, org_id: int | None) -> Shift:
+async def get_shift(
+    db: AsyncSession, shift_id: int, org_id: int | list[int] | None
+) -> Shift:
     stmt = select(Shift).where(Shift.id == shift_id)
     stmt = apply_tenant_filter(stmt, org_id, Shift.organization_id)
     shift = (await db.execute(stmt)).scalar_one_or_none()
@@ -160,10 +177,17 @@ async def deactivate_shift(db: AsyncSession, shift_id: int, org_id: int | None) 
 
 
 async def assign_shift(
-    db: AsyncSession, shift_id: int, body: ShiftAssignRequest, org_id: int | None
+    db: AsyncSession,
+    shift_id: int,
+    body: ShiftAssignRequest,
+    org_id: int | None,
+    node_scope: int | list[int] | None = None,
 ) -> ShiftAssignment:
+    # Shift is root-keyed → validate it against the company root (org_id). The
+    # employee is sub-tree-keyed → validate it against the granted node scope so
+    # a sub-unit admin cannot assign a shift to an employee outside their unit.
     await get_shift(db, shift_id, org_id)
-    await _require_org_employee(db, body.employee_id, org_id)
+    await _require_org_employee(db, body.employee_id, org_id, node_scope)
     assignment = ShiftAssignment(
         shift_id=shift_id,
         employee_id=body.employee_id,
@@ -179,7 +203,9 @@ async def assign_shift(
 # ── Holidays ──────────────────────────────────────────────────────────────────
 
 
-async def list_holidays(db: AsyncSession, org_id: int | None) -> list[Holiday]:
+async def list_holidays(
+    db: AsyncSession, org_id: int | list[int] | None
+) -> list[Holiday]:
     stmt = select(Holiday).order_by(Holiday.date)
     stmt = apply_tenant_filter(stmt, org_id, Holiday.organization_id)
     return list((await db.execute(stmt)).scalars().all())
@@ -200,20 +226,35 @@ async def create_holiday(
 # ── Leave requests ────────────────────────────────────────────────────────────
 
 
-def leave_requests_query(org_id: int | None) -> Select:
-    """Statement for paginated leave-request listing (router applies paginate)."""
+def leave_requests_query(
+    org_id: int | list[int] | None,
+    node_scope: int | list[int] | None = None,
+) -> Select:
+    """Statement for paginated leave-request listing (router applies paginate).
+
+    A leave request has no organization_id of its own; it is scoped through the
+    employee's sub-tree. That makes this a purely employee-keyed filter, so a
+    sub-unit grant must stay sub-unit-granular: scope by ``node_scope`` (the
+    granted NODES) when provided, else fall back to ``org_id``.
+    """
+    emp_scope = node_scope if node_scope is not None else org_id
     stmt = select(LeaveRequest).order_by(LeaveRequest.created_at.desc())
-    if org_id:
-        emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
+    if emp_scope:
+        emp_ids = select(Employee.id).where(
+            Employee.organization_id.in_(descendants_subquery_multi(as_scope_ids(emp_scope)))
+        )
         stmt = stmt.where(LeaveRequest.employee_id.in_(emp_ids))
     return stmt
 
 
 async def create_leave_request(
-    db: AsyncSession, body: LeaveRequestCreate, org_id: int | None
+    db: AsyncSession,
+    body: LeaveRequestCreate,
+    org_id: int | None,
+    node_scope: int | list[int] | None = None,
 ) -> LeaveRequest:
     if body.employee_id is not None:
-        await _require_org_employee(db, body.employee_id, org_id)
+        await _require_org_employee(db, body.employee_id, org_id, node_scope)
     leave = LeaveRequest(
         employee_id=body.employee_id,
         type=body.type,
@@ -233,11 +274,18 @@ async def decide_leave_request(
     body: LeaveRequestUpdate,
     approver_id: int,
     org_id: int | None,
+    node_scope: int | list[int] | None = None,
 ) -> LeaveRequest:
     # LeaveRequest has no organization_id; scope it through the employee's org.
+    # Purely employee-keyed → use the granted NODE scope when provided so a
+    # sub-unit admin can only decide on leave requests of employees in their
+    # sub-tree; fall back to org_id otherwise.
+    emp_scope = node_scope if node_scope is not None else org_id
     stmt = select(LeaveRequest).where(LeaveRequest.id == leave_id)
-    if org_id is not None:
-        emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
+    if emp_scope is not None:
+        emp_ids = select(Employee.id).where(
+            Employee.organization_id.in_(descendants_subquery_multi(as_scope_ids(emp_scope)))
+        )
         stmt = stmt.where(LeaveRequest.employee_id.in_(emp_ids))
     leave = (await db.execute(stmt)).scalar_one_or_none()
     if not leave:

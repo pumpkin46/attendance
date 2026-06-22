@@ -40,6 +40,9 @@ class EmployeeCreate(BaseModel):
 
 
 class EmployeeUpdate(BaseModel):
+    # Re-assign the employee to a different org-tree node (validated within the
+    # tenant in the API layer). An explicit null is treated as "no change".
+    organization_id: int | None = None
     location_id: int | None = None
     employee_code: str | None = None
     first_name: str | None = None

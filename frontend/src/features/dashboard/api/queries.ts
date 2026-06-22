@@ -2,11 +2,12 @@ import { useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useApiQuery } from '@/shared/hooks/useApiQuery'
 import { useAuthedWebSocket } from '@/shared/hooks/useAuthedWebSocket'
-import type { LiveEvent, MonitoringDashboard } from '@/features/dashboard/types'
+import type { AttendanceTrend, LiveEvent, MonitoringDashboard } from '@/features/dashboard/types'
 
 export const monitoringKeys = {
   dashboard: ['monitoring', 'dashboard'] as const,
   liveFeed: ['monitoring', 'live-feed'] as const,
+  attendanceTrend: ['monitoring', 'attendance-trend'] as const,
 }
 
 /** `poll` comes from `useFallbackPoll` — undefined while the socket is healthy. */
@@ -16,6 +17,20 @@ export function useMonitoringDashboard(poll: number | undefined) {
     '/monitoring/dashboard',
     undefined,
     { silent: true, refetchInterval: poll }
+  )
+}
+
+/**
+ * Daily check-in trend for the dashboard chart. Slow-moving, so it lives on its
+ * own cadence (refetched every few minutes) rather than riding the 3s monitoring
+ * socket — keeping the hot path light.
+ */
+export function useAttendanceTrend(days = 7) {
+  return useApiQuery<AttendanceTrend>(
+    [...monitoringKeys.attendanceTrend, days],
+    '/monitoring/attendance-trend',
+    { days },
+    { silent: true, refetchInterval: 5 * 60_000, staleTime: 5 * 60_000 }
   )
 }
 

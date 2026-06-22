@@ -46,9 +46,13 @@ export function useOrganizations() {
   return useApiQuery<Organization[]>(organizationKeys.list, '/organizations')
 }
 
-/** Top-level company roots, each nested via a `children` array. */
-export function useOrgTree() {
-  return useApiQuery<OrgNode[]>(orgNodeKeys.tree, '/org-nodes/tree')
+/**
+ * Top-level company roots, each nested via a `children` array. Pass
+ * `enabled=false` to skip the fetch where the viewer lacks org-node access
+ * (e.g. the employee directory sidebar degrades instead of 403-ing).
+ */
+export function useOrgTree(enabled = true) {
+  return useApiQuery<OrgNode[]>(orgNodeKeys.tree, '/org-nodes/tree', undefined, { enabled })
 }
 
 export function useLocations() {

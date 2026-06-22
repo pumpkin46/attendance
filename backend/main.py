@@ -30,6 +30,7 @@ from app.api.security_monitoring import router as security_monitoring_router
 from app.api.reports import router as reports_router
 from app.api.audit import router as audit_router
 from app.api.privacy import router as privacy_router
+from app.api.chat import router as chat_router
 from app.api.health import build_health_response, router as health_router
 from app.api.ws import router as ws_router
 
@@ -125,6 +126,7 @@ app.include_router(security_monitoring_router)
 app.include_router(reports_router)
 app.include_router(audit_router)
 app.include_router(privacy_router)
+app.include_router(chat_router)
 app.include_router(health_router)
 app.include_router(ws_router)
 

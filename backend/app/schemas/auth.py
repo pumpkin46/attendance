@@ -79,15 +79,29 @@ class RoleOut(BaseModel):
         from_attributes = True
 
 
+class OrgRef(BaseModel):
+    """An org-tree node the user is granted (id + name) — a company or a sub-unit.
+
+    Surfaced by the user admin UI as the set of checked nodes in the org tree.
+    """
+
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
 class UserOut(BaseModel):
     id: int
-    organization_id: int | None = None
     name: str
     email: str
     email_verified_at: datetime | None = None
     is_active: bool
     auth_provider: str = "local"
     roles: list[RoleOut] = []
+    # Org-tree nodes this user is granted (drives their tenant read scope).
+    organizations: list[OrgRef] = []
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -9,7 +9,9 @@ import type { Paginated } from '@/shared/types'
  */
 export function removeRowFromPaginated<T extends { id: number }>(id: number) {
   return (old: Paginated<T> | undefined): Paginated<T> | undefined => {
-    if (!old) return old
+    // A broad setQueriesData prefix (e.g. ['employees']) can hand us sibling
+    // caches that are not Paginated lists (counts, summaries) — leave those be.
+    if (!old || !Array.isArray(old.data)) return old
     const data = old.data.filter((row) => row.id !== id)
     if (data.length === old.data.length) return old
     return { ...old, data, total: old.total - 1 }

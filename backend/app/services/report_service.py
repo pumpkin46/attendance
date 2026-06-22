@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import lazyload, selectinload
 
 from app.core.timeutil import local_day_bounds_utc
-from app.middleware.tenant import apply_tenant_filter
+from app.middleware.tenant import apply_employee_tenant_filter, as_scope_ids
 from app.models.attendance import AttendanceRecord
 from app.models.camera import Camera
 from app.models.employee import Employee
@@ -52,9 +52,19 @@ def format_unknown_person_event(event: RecognitionEvent) -> dict:
 
 
 async def attendance_range_report(
-    db: AsyncSession, org_id: int | None, start: date, end: date
+    db: AsyncSession,
+    org_id: int | list[int] | None,
+    start: date,
+    end: date,
+    node_scope: int | list[int] | None = None,
 ) -> AttendanceRangeReport:
-    """Raw attendance records over a range — mirrors the Attendance page list."""
+    """Raw attendance records over a range — mirrors the Attendance page list.
+
+    ``node_scope`` (the GRANTED node scope) gates the employee filter so a
+    sub-unit admin's export stays sub-unit-granular; it falls back to ``org_id``
+    when not supplied. ``org_id`` remains the company root used for the export
+    header's org-name lookup in the router.
+    """
     stmt = (
         select(AttendanceRecord)
         .where(AttendanceRecord.work_date >= start, AttendanceRecord.work_date <= end)
@@ -69,7 +79,8 @@ async def attendance_range_report(
         )
         .order_by(AttendanceRecord.work_date.desc(), Employee.last_name, Employee.first_name)
     )
-    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    emp_scope = node_scope if node_scope is not None else org_id
+    stmt = apply_employee_tenant_filter(stmt, emp_scope, Employee.organization_id)
     records = list((await db.execute(stmt)).scalars().unique().all())
 
     entries = [
@@ -102,7 +113,7 @@ async def attendance_range_report(
 
 
 def _unknown_conditions(
-    org_id: int | None,
+    org_id: int | list[int] | None,
     date_from: date | None,
     date_to: date | None,
     camera_id: int | None = None,
@@ -110,7 +121,7 @@ def _unknown_conditions(
 ) -> list:
     conds = [RecognitionEvent.result == RecognitionResult.unknown.value]
     if org_id is not None:
-        conds.append(RecognitionEvent.organization_id == org_id)
+        conds.append(RecognitionEvent.organization_id.in_(as_scope_ids(org_id)))
     # recognized_at is a UTC timestamp, but the requested dates are local
     # calendar days; map each to its UTC interval so the report does not shift
     # by the UTC offset (an evening event landing on the wrong day).
@@ -127,7 +138,7 @@ def _unknown_conditions(
 
 
 def unknown_persons_query(
-    org_id: int | None,
+    org_id: int | list[int] | None,
     date_from: date | None,
     date_to: date | None,
     camera_id: int | None = None,
@@ -141,7 +152,7 @@ def unknown_persons_query(
 
 
 async def unknown_persons_summary(
-    db: AsyncSession, org_id: int | None, date_from: date | None, date_to: date | None
+    db: AsyncSession, org_id: int | list[int] | None, date_from: date | None, date_to: date | None
 ) -> dict:
     """Range-wide aggregates for the Unknown Faces page.
 

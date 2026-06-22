@@ -48,11 +48,15 @@ export function SidePanel({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  // Scroll-lock the page and move focus into the dialog while open.
+  // Scroll-lock the page and move focus into the dialog while open. If the
+  // content opts in by marking a region `data-autofocus`, focus the first field
+  // inside it; otherwise focus the dialog container.
   useEffect(() => {
     if (!open) return
     restoreFocusRef.current = document.activeElement as HTMLElement | null
-    panelRef.current?.focus()
+    const marked = panelRef.current?.querySelector<HTMLElement>('[data-autofocus]')
+    const field = marked?.querySelector<HTMLElement>('input, textarea, select')
+    ;(field ?? panelRef.current)?.focus()
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {

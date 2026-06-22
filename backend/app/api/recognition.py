@@ -7,7 +7,13 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.dependencies import (
+    CurrentUser,
+    DbSession,
+    TenantOrgId,
+    TenantScope,
+    require_permission,
+)
 from app.core.errors import ValidationError
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.core.rate_limit import recognition_rate_limit
@@ -172,19 +178,19 @@ async def verify_liveness(body: LivenessVerifyRequest, user: CurrentUser):
 async def get_recognition_metrics(
     db: DbSession,
     user: require_permission("recognition.view"),
-    org_id: TenantOrgId = None,
+    scope: TenantScope = None,
 ):
-    return await recognition_service.metrics(db, org_id)
+    return await recognition_service.metrics(db, scope)
 
 
 @router.get("/recognition/events", response_model=PaginatedResponse[RecognitionEventOut])
 async def list_recognition_events(
     db: DbSession,
     user: require_permission("recognition.view"),
-    org_id: TenantOrgId,
+    scope: TenantScope,
     pagination: PaginationDep,
 ):
-    stmt = recognition_service.events_query(org_id)
+    stmt = recognition_service.events_query(scope)
     return await paginate(db, stmt, pagination.page, pagination.per_page, RecognitionEventOut)
 
 
@@ -193,9 +199,9 @@ async def get_event_snapshot(
     event_id: int,
     db: DbSession,
     user: require_permission("recognition.view"),
-    org_id: TenantOrgId = None,
+    scope: TenantScope = None,
 ):
-    path = await recognition_service.snapshot_path(db, event_id, org_id)
+    path = await recognition_service.snapshot_path(db, event_id, scope)
     return FileResponse(path, media_type="image/jpeg")
 
 
@@ -203,9 +209,9 @@ async def get_event_snapshot(
 async def get_unknown_summary(
     db: DbSession,
     user: require_permission("recognition.view"),
-    org_id: TenantOrgId = None,
+    scope: TenantScope = None,
 ):
-    return await recognition_service.unknown_summary(db, org_id)
+    return await recognition_service.unknown_summary(db, scope)
 
 
 @router.get(

@@ -2,11 +2,9 @@ import { useState } from 'react'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { Badge } from '@/shared/ui/Badge'
 import { Button } from '@/shared/ui/Button'
-import { Checkbox } from '@/shared/ui/Checkbox'
 import { Combobox } from '@/shared/ui/Combobox'
 import { DataTable } from '@/shared/ui/DataTable'
 import { Input } from '@/shared/ui/Input'
-import { Label } from '@/shared/ui/Label'
 import { SearchBox } from '@/shared/ui/SearchBox'
 import { SidePanel } from '@/shared/ui/SidePanel'
 import { confirmDialog } from '@/shared/ui/dialogs'
@@ -24,6 +22,8 @@ import {
   useUpdateOrganization,
 } from '@/features/security/api/queries'
 import { OrgTreeView } from '@/features/security/components/OrgTreeView'
+import { Field, Switch, ToggleRow } from '@/features/security/components/PanelKit'
+import { CompanyIcon } from '@/features/security/lib/nodeType'
 
 const FORM_ID = 'tenancy-entity-form'
 const PAGE_SIZE = 8
@@ -44,23 +44,42 @@ function StatusBadge({ active }: { active: boolean }) {
   return <Badge tone={active ? 'ok' : 'neutral'}>{active ? 'Active' : 'Inactive'}</Badge>
 }
 
-function ActiveField({
-  checked,
-  onChange,
-  entity,
+const PinIcon = (
+  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+    <circle cx="12" cy="10" r="2.5" />
+  </svg>
+)
+
+/** Live card preview shared by the entity forms (company / location). */
+function EntityPreview({
+  name,
+  namePlaceholder,
+  meta,
+  icon,
+  tile,
+  // Full border (+ optional ring) utilities. Owns the border color outright so
+  // a second border-* utility never collides under the plain `cn` join.
+  accent = 'border-slate-700',
 }: {
-  checked: boolean
-  onChange: (value: boolean) => void
-  entity: string
+  name: string
+  namePlaceholder: string
+  meta: React.ReactNode
+  icon: React.ReactNode
+  tile: string
+  accent?: string
 }) {
   return (
-    <div className="pt-1">
-      <Checkbox
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        label="Active"
-        description={`Inactive ${entity}s are kept for history but hidden from day-to-day workflows.`}
-      />
+    <div className={cn('rounded-xl border bg-slate-900 px-3.5 py-2.5 shadow-lg shadow-black/20', accent)}>
+      <div className="flex items-center gap-3">
+        <span className={cn('grid h-10 w-10 shrink-0 place-items-center rounded-lg', tile)}>{icon}</span>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-slate-100">
+            {name.trim() || namePlaceholder}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">{meta}</div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -85,29 +104,53 @@ function OrganizationForm({
   return (
     <form
       id={FORM_ID}
+      className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault()
-        onSubmit(
-          record
-            ? { name, code, timezone, is_active: active }
-            : { name, code, timezone }
-        )
+        onSubmit(record ? { name, code, timezone, is_active: active } : { name, code, timezone })
       }}
     >
-      <Label>
-        Name
-        <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Corp" />
-      </Label>
-      <Label>
-        Code
-        <Input required value={code} onChange={(e) => setCode(e.target.value)} placeholder="ACME" />
-      </Label>
-      <Label>
-        Timezone
-        <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
-      </Label>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Name" htmlFor="org-name" required autoFocus>
+          <Input id="org-name" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Corp" />
+        </Field>
+        <Field label="Code" htmlFor="org-code" hint="Short & unique" required>
+          <Input
+            id="org-code"
+            required
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            placeholder="ACME"
+            className="font-mono uppercase"
+          />
+        </Field>
+      </div>
+      <Field label="Timezone" htmlFor="org-tz">
+        <Input id="org-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
+      </Field>
+      <Field label="Preview">
+        <EntityPreview
+          name={name}
+          namePlaceholder="Organization name"
+          icon={CompanyIcon}
+          tile="bg-blue-500/15 text-blue-300"
+          accent="border-blue-500/40 ring-1 ring-blue-500/15"
+          meta={
+            <>
+              <span className="font-mono text-[11px] uppercase">{code.trim() || 'CODE'}</span>
+              <span aria-hidden>·</span>
+              <span>Organization</span>
+            </>
+          }
+        />
+      </Field>
       {record && allowDeactivate && (
-        <ActiveField checked={active} onChange={setActive} entity="organization" />
+        <ToggleRow
+          title="Active"
+          description="Inactive organizations are kept for history but hidden from day-to-day workflows."
+        >
+          <Switch checked={active} onChange={setActive} id="org-active" />
+        </ToggleRow>
       )}
     </form>
   )
@@ -133,6 +176,7 @@ function LocationForm({
   return (
     <form
       id={FORM_ID}
+      className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault()
         onSubmit({
@@ -143,19 +187,32 @@ function LocationForm({
         })
       }}
     >
-      <Label>
-        Name
-        <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Head Office" />
-      </Label>
-      <Label>
-        Address <span className="text-xs text-slate-500">(optional)</span>
-        <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="100 Main Street" />
-      </Label>
-      <Label>
-        Timezone
-        <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
-      </Label>
-      {record && <ActiveField checked={active} onChange={setActive} entity="location" />}
+      <Field label="Name" htmlFor="loc-name" required autoFocus>
+        <Input id="loc-name" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Head Office" />
+      </Field>
+      <Field label="Address" htmlFor="loc-address" hint="Optional">
+        <Input id="loc-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="100 Main Street" />
+      </Field>
+      <Field label="Timezone" htmlFor="loc-tz">
+        <Input id="loc-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
+      </Field>
+      <Field label="Preview">
+        <EntityPreview
+          name={name}
+          namePlaceholder="Location name"
+          icon={PinIcon}
+          tile="bg-amber-500/15 text-amber-300"
+          meta={<span className="truncate">{address.trim() || 'No address'}</span>}
+        />
+      </Field>
+      {record && (
+        <ToggleRow
+          title="Active"
+          description="Inactive locations are kept for history but hidden from day-to-day workflows."
+        >
+          <Switch checked={active} onChange={setActive} id="loc-active" />
+        </ToggleRow>
+      )}
     </form>
   )
 }
@@ -163,11 +220,13 @@ function LocationForm({
 // ── Directory ────────────────────────────────────────────────────────────────
 
 /**
- * Tabbed tenancy directory: organizations (company roots), the recursive org
- * unit tree, and locations — with search, inline edit / delete, and
- * side-panel create / edit forms.
+ * Tenancy directory: organizations (company roots, as an org-chart / tree) and
+ * locations — with search, inline edit / delete, and side-panel create / edit
+ * forms. Pass `only` to render a single section without the tab switcher (used
+ * by the dedicated Organizations and Locations pages); omit it for the combined
+ * tabbed view.
  */
-export function TenancyDirectory() {
+export function TenancyDirectory({ only }: { only?: EntityTab } = {}) {
   const { isSuperAdmin, hasPermission } = useAuth()
 
   const { data: organizations, isPending: orgsLoading } = useOrganizations()
@@ -177,7 +236,7 @@ export function TenancyDirectory() {
   const treeRoots = tree ?? []
   const locationList = locations ?? []
 
-  const [tab, setTab] = useState<EntityTab>('organizations')
+  const [tab, setTab] = useState<EntityTab>(only ?? 'organizations')
   const [search, setSearch] = useState('')
   const [orgFilter, setOrgFilter] = useState('')
   // `panel` keeps the last opened record mounted while the panel animates out.
@@ -193,6 +252,8 @@ export function TenancyDirectory() {
 
   const canManageOrgs = hasPermission('organizations.manage')
   const canManageNodes = hasPermission('org_nodes.manage')
+  // Assigning existing users to an org is a user-management action.
+  const canAssignUsers = hasPermission('users.manage')
   // Locations are facility management, same scope as org units.
   const canManageLocations = canManageNodes
 
@@ -284,6 +345,9 @@ export function TenancyDirectory() {
 
   const showOrgFilter = tab === 'locations' && orgs.length > 1
   const canCreateCurrent = tab === 'organizations' ? canCreateOrg : tab === 'locations' && canManageLocations
+  // With `only` set the toolbar may have nothing to show (e.g. the lone
+  // organization with no create button) — skip the empty row entirely.
+  const showHeaderRow = !only || tab === 'locations' || canCreateCurrent
 
   const panelTitle = panel
     ? `${panel.record ? 'Edit' : 'New'} ${ENTITY_LABEL[panel.entity]}`
@@ -291,7 +355,9 @@ export function TenancyDirectory() {
 
   return (
     <section>
+      {showHeaderRow && (
       <div className="flex flex-wrap items-center gap-3 pb-4">
+        {!only && (
         <div
           className="inline-flex rounded-lg border border-slate-700 bg-slate-950/60 p-0.5"
           role="group"
@@ -321,6 +387,7 @@ export function TenancyDirectory() {
             </button>
           ))}
         </div>
+        )}
 
         {tab === 'locations' && (
           <SearchBox
@@ -358,12 +425,14 @@ export function TenancyDirectory() {
           </Button>
         )}
       </div>
+      )}
 
       {tab === 'organizations' && (
         <OrgTreeView
           tree={treeRoots}
           loading={treeLoading || orgsLoading}
           canManage={canManageNodes}
+          canAssignUsers={canAssignUsers}
           onEditCompany={
             canManageOrgs
               ? (root) => {

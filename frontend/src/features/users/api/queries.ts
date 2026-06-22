@@ -24,12 +24,12 @@ export const userAdminKeys = {
 
 // ── Queries ──────────────────────────────────────────────────────────────────
 
-export function useAdminUsers(params: UserListParams) {
+export function useAdminUsers(params: UserListParams, options?: { enabled?: boolean }) {
   return useApiQuery<Paginated<User>>(
     userAdminKeys.users(params),
     '/users',
     params as Record<string, unknown>,
-    { keepPreviousData: true }
+    { keepPreviousData: true, ...options }
   )
 }
 
@@ -67,6 +67,8 @@ export interface SaveUserPayload {
   password?: string
   is_active?: boolean
   role_ids?: number[]
+  /** Company (org root) ids this user may access. */
+  organization_ids?: number[]
 }
 
 export function useSaveUser() {
@@ -77,6 +79,24 @@ export function useSaveUser() {
     onSuccess: (_d, { id }) => {
       toast.success(id ? 'User updated' : 'User created')
       invalidate()
+    },
+    onError,
+  })
+}
+
+/**
+ * Toggle a single user's set of granted organizations (used by the org chart's
+ * "assign users" panel). Quiet — no toast per toggle; just refreshes the list.
+ */
+export function useUpdateUserOrganizations() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, organization_ids }: { id: number; organization_ids: number[] }) =>
+      api.patch<User>(`/users/${id}`, { organization_ids }),
+    // Reconcile on settle so an optimistic toggle is confirmed on success and
+    // rolled back (refetched) on failure.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: userAdminKeys.usersAll })
     },
     onError,
   })

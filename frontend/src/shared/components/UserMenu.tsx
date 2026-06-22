@@ -53,11 +53,6 @@ const LogoutIcon = (
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
   </svg>
 )
-const BuildingIcon = (
-  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M17 21V9h2a2 2 0 0 1 2 2v10M8 7h2M8 11h2M8 15h2" />
-  </svg>
-)
 const AccountIcon = (
   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="8" r="4" />
@@ -77,7 +72,6 @@ export function UserMenu({
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
   const navigate = useNavigate()
-  const orgName = user.organization?.name
   const { status } = useRealtime()
   const realtime = REALTIME_META[status]
 
@@ -124,13 +118,6 @@ export function UserMenu({
             </span>
           </div>
         </div>
-
-        {orgName && (
-          <div className="flex items-center gap-2 border-b border-slate-800 px-2.5 py-2.5 text-xs text-slate-400">
-            <span className="text-slate-500">{BuildingIcon}</span>
-            <span className="truncate">{orgName}</span>
-          </div>
-        )}
 
         <div className="mt-1 space-y-0.5">
           <button

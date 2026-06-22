@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import decode_access_token, hash_device_token
+from app.middleware.tenant import descendant_ids, root_ids_of
 from app.models.user import User, Role
 
 
@@ -139,48 +140,142 @@ async def get_single_org_id(db: AsyncSession) -> int | None:
     return ids[0] if len(ids) == 1 else None
 
 
+async def _header_org_root(request: Request, db: AsyncSession) -> int | None:
+    """Company ROOT named by the X-Organization-Id header, or None.
+
+    The header may name any node (a company root or a sub-unit) and can be stale
+    (the org was deleted, or it is from another deployment); the tenant boundary
+    is always that node's company root, derived from the node itself — never the
+    raw header value. Returns None for an absent / unparseable / unknown value.
+    """
+    header_val = request.headers.get(settings.tenant_header)
+    if not header_val:
+        return None
+    try:
+        oid = int(header_val)
+    except ValueError:
+        return None
+    from app.middleware.tenant import root_id_of
+
+    return await root_id_of(db, oid)
+
+
 async def get_tenant_org_id(
     request: Request,
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ) -> int | None:
-    if user.has_role(settings.super_admin_role):
-        header_val = request.headers.get(settings.tenant_header)
-        if header_val:
-            # The selection is persisted client-side and can outlive the org (it
-            # was deleted, or the value is a node id / id from another
-            # deployment). The header may name ANY node (a company root or a
-            # sub-unit); the tenant boundary is always that node's company ROOT,
-            # derived from the node itself — never the raw header value — so a
-            # selected department still feeds apply_tenant_filter the company root.
-            org_id: int | None
-            try:
-                org_id = int(header_val)
-            except ValueError:
-                org_id = None
-            if org_id is not None:
-                from app.middleware.tenant import root_id_of
+    """The single ACTIVE organization (company root) for writes / single-org ops.
 
-                root_id = await root_id_of(db, org_id)
-                if root_id is not None:
-                    return root_id
-            # A stale or unparseable selection must not brick every request:
-            # fall back to the single-org / global scope a super admin gets with
-            # no header at all. The client can re-select a valid tenant.
+    Super admin: the header org (resolved to its company root), else the lone
+    active org, else None (validated global scope). Non-super-admin: their grants
+    are first rolled UP to company roots (a grant may be a sub-unit), then the
+    header company if it is one of those roots, else their sole company; an
+    ambiguous tenant (0 or 2+ companies, no header) is refused so a write can
+    never land in an unintended org.
+    """
+    if user.has_role(settings.super_admin_role):
+        header_root = await _header_org_root(request, db)
+        if header_root is not None:
+            return header_root
         return await get_single_org_id(db)
-    if user.organization_id is None:
-        # None means validated global scope (super admin only). A tenant user
-        # without an org (self-registered, or their org was deleted) must not
-        # inherit it: apply_tenant_filter is a no-op on None, so returning it
-        # would expose every tenant's data.
+
+    assigned_nodes = [o.id for o in user.organizations]
+    if not assigned_nodes:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account is not assigned to an organization",
+            detail="No organizations assigned to this account",
         )
-    return user.organization_id
+    assigned_roots = await root_ids_of(db, assigned_nodes)
+    header_root = await _header_org_root(request, db)
+    if header_root is not None and header_root in assigned_roots:
+        return header_root
+    if len(assigned_roots) == 1:
+        return assigned_roots[0]
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Select an organization (X-Organization-Id) to act in",
+    )
+
+
+async def _resolve_read_scopes(
+    request: Request,
+    user: User,
+    db: AsyncSession,
+) -> tuple[list[int] | None, list[int] | None]:
+    """Resolve a request's READ access as ``(root_scope, node_scope)``.
+
+    ``root_scope`` gates every table keyed by the company root (cameras, RFID,
+    locations, visitors, recognition events, …); ``node_scope`` gates the
+    ``Employee`` directory, whose boundary is sub-tree membership, so a grant of
+    a single sub-unit stays sub-unit-granular there while still exposing the
+    parent company's root-keyed data. ``None`` on both = a validated global super
+    admin (no filter). A tenant user is never global and is refused with nothing
+    assigned, so neither scope is ever None for them.
+
+    Super admin: the header company if given, else the lone active org, else
+    global. Non-super-admin: their granted nodes (and the roots they roll up to);
+    a header narrows to one company AND to the grants under it.
+    """
+    if user.has_role(settings.super_admin_role):
+        header_root = await _header_org_root(request, db)
+        if header_root is not None:
+            return [header_root], [header_root]
+        sid = await get_single_org_id(db)
+        return ([sid], [sid]) if sid is not None else (None, None)
+
+    assigned_nodes = [o.id for o in user.organizations]
+    if not assigned_nodes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No organizations assigned to this account",
+        )
+    assigned_roots = await root_ids_of(db, assigned_nodes)
+    header_root = await _header_org_root(request, db)
+    if header_root is not None and header_root in assigned_roots:
+        # Header picks one company: narrow the roots to it and the granted nodes
+        # to those inside its sub-tree, so the employee view matches the company.
+        under = await descendant_ids(db, header_root)
+        nodes = [n for n in assigned_nodes if n in under]
+        return [header_root], nodes
+    return assigned_roots, assigned_nodes
+
+
+async def get_tenant_scope(
+    request: Request,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> list[int] | None:
+    """The set of COMPANY ROOTS the request may READ across (root-keyed tables).
+
+    A user's grants (which may be sub-units) are rolled up to their company
+    roots, so a sub-unit grant exposes the parent company's root-keyed data.
+    None = no tenant filter, reserved for super admins; a tenant user never
+    returns None. For the ``Employee`` directory use ``get_tenant_node_scope``.
+    """
+    roots, _nodes = await _resolve_read_scopes(request, user, db)
+    return roots
+
+
+async def get_tenant_node_scope(
+    request: Request,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> list[int] | None:
+    """The granted ORG-TREE NODES for ``Employee``-keyed sub-tree scoping.
+
+    The directory counterpart of ``get_tenant_scope``: keeps the user's grants at
+    node granularity (a sub-unit grant stays a sub-unit) so the employee filter
+    bounds them to exactly that unit and its descendants. None = global (super
+    admin); a tenant user never returns None.
+    """
+    _roots, nodes = await _resolve_read_scopes(request, user, db)
+    return nodes
 
 
 TenantOrgId = Annotated[int | None, Depends(get_tenant_org_id)]
+TenantScope = Annotated[list[int] | None, Depends(get_tenant_scope)]
+TenantNodeScope = Annotated[list[int] | None, Depends(get_tenant_node_scope)]
 
 
 async def get_rfid_reader(

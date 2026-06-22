@@ -26,9 +26,14 @@ async def _make_location(db) -> Location:
     return location
 
 
+async def _create(db, body):
+    # org_id=None (global) — these tests cover URL validation, not tenant scoping.
+    return await camera_service.create_camera(db, None, body)
+
+
 async def test_create_accepts_usb_device_index(db_session):
     location = await _make_location(db_session)
-    camera = await camera_service.create_camera(
+    camera = await _create(
         db_session,
         CameraCreate(
             location_id=location.id,
@@ -42,7 +47,7 @@ async def test_create_accepts_usb_device_index(db_session):
 
 async def test_update_accepts_usb_device_index(db_session):
     location = await _make_location(db_session)
-    camera = await camera_service.create_camera(
+    camera = await _create(
         db_session,
         CameraCreate(location_id=location.id, name="Lobby USB", camera_type="usb"),
     )
@@ -55,7 +60,7 @@ async def test_update_accepts_usb_device_index(db_session):
 async def test_create_rejects_file_url(db_session):
     location = await _make_location(db_session)
     with pytest.raises(ValidationError):
-        await camera_service.create_camera(
+        await _create(
             db_session,
             CameraCreate(
                 location_id=location.id,
@@ -68,7 +73,7 @@ async def test_create_rejects_file_url(db_session):
 async def test_create_rejects_loopback_url(db_session):
     location = await _make_location(db_session)
     with pytest.raises(ValidationError):
-        await camera_service.create_camera(
+        await _create(
             db_session,
             CameraCreate(
                 location_id=location.id,
@@ -80,7 +85,7 @@ async def test_create_rejects_loopback_url(db_session):
 
 async def test_update_rejects_loopback_url(db_session):
     location = await _make_location(db_session)
-    camera = await camera_service.create_camera(
+    camera = await _create(
         db_session, CameraCreate(location_id=location.id, name="Cam")
     )
     with pytest.raises(ValidationError):
@@ -92,9 +97,18 @@ async def test_update_rejects_loopback_url(db_session):
         )
 
 
+async def test_create_rejects_cross_tenant_location(db_session):
+    # A caller scoped to another company cannot plant a camera at org 1's location.
+    location = await _make_location(db_session)  # org id=1
+    with pytest.raises(ValidationError):
+        await camera_service.create_camera(
+            db_session, 999, CameraCreate(location_id=location.id, name="X")
+        )
+
+
 async def test_update_allows_clearing_stream_url(db_session):
     location = await _make_location(db_session)
-    camera = await camera_service.create_camera(
+    camera = await _create(
         db_session,
         CameraCreate(
             location_id=location.id,

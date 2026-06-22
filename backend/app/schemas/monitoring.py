@@ -61,10 +61,27 @@ class MonitoringDashboardOut(BaseModel):
     employees_present: int
     employees_absent: int
     employees_late: int
+    # Default-bearing so payloads built before these fields existed (and the
+    # mocked dashboards in the WS feed tests) still validate.
+    employees_on_leave: int = 0
+    total_employees: int = 0
     unknown_persons_today: int
     active_visitors: int
     camera_health: CameraHealthSummary
     cameras: list[MonitoringCameraOut]
+
+
+class AttendanceTrendDay(BaseModel):
+    """One calendar day of check-in volume, split on-time vs late."""
+
+    date: str
+    on_time: int
+    late: int
+    total: int
+
+
+class AttendanceTrendOut(BaseModel):
+    days: list[AttendanceTrendDay]
 
 
 class LiveFeedEventOut(BaseModel):

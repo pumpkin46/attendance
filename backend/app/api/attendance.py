@@ -8,11 +8,21 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import lazyload
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.dependencies import (
+    CurrentUser,
+    DbSession,
+    TenantNodeScope,
+    require_permission,
+)
 from app.core.errors import NotFoundError, ValidationError
 from app.core.timeutil import local_date
 from app.core.pagination import PaginatedResponse, paginate, PaginationDep
-from app.middleware.tenant import apply_tenant_filter
+from app.middleware.tenant import (
+    apply_employee_tenant_filter,
+    as_scope_ids,
+    descendants_subquery_multi,
+    root_id_of,
+)
 from app.models.attendance import AttendanceRecord
 from app.models.employee import Employee
 from app.schemas.attendance import (
@@ -49,7 +59,7 @@ async def attendance_config(user: CurrentUser) -> AttendanceConfigResponse:
 async def list_attendance(
     db: DbSession,
     user: CurrentUser,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     pagination: PaginationDep,
     work_date: str | None = Query(None),
     date_from: str | None = Query(None),
@@ -76,8 +86,12 @@ async def list_attendance(
         .order_by(AttendanceRecord.work_date.desc())
     )
 
-    if org_id:
-        emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
+    if node_scope is not None:
+        # Employees live anywhere in the company tree, across the caller's
+        # assigned companies → scope by the union of those sub-trees.
+        emp_ids = select(Employee.id).where(
+            Employee.organization_id.in_(descendants_subquery_multi(as_scope_ids(node_scope)))
+        )
         stmt = stmt.where(AttendanceRecord.employee_id.in_(emp_ids))
 
     if work_date:
@@ -100,18 +114,19 @@ async def list_attendance(
 async def today_summary(
     db: DbSession,
     user: CurrentUser,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
 ) -> TodaySummary:
     today = local_date()
 
     emp_stmt = select(func.count(Employee.id)).where(Employee.is_active == True)  # noqa: E712
-    if org_id:
-        emp_stmt = emp_stmt.where(Employee.organization_id == org_id)
+    emp_stmt = apply_employee_tenant_filter(emp_stmt, node_scope, Employee.organization_id)
     total_employees = (await db.execute(emp_stmt)).scalar() or 0
 
     base = select(AttendanceRecord).where(AttendanceRecord.work_date == today)
-    if org_id:
-        emp_ids = select(Employee.id).where(Employee.organization_id == org_id)
+    if node_scope is not None:
+        emp_ids = select(Employee.id).where(
+            Employee.organization_id.in_(descendants_subquery_multi(as_scope_ids(node_scope)))
+        )
         base = base.where(AttendanceRecord.employee_id.in_(emp_ids))
 
     result = await db.execute(base)
@@ -135,15 +150,15 @@ async def today_summary(
 async def create_manual_attendance(
     body: AttendanceManualRequest,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("attendance.manage"),
 ):
-    # Tenant scope: an org admin must not be able to write attendance for an
-    # employee in another org. Loading the employee through the tenant filter
-    # gives a clean 404 instead of an orphaned record on a bad id, and its org
-    # drives the shift/policy used to classify the entry.
+    # Tenant scope: an admin must not be able to write attendance for an employee
+    # outside their assigned companies. Loading the employee through the read
+    # scope gives a clean 404 on a bad id, and its org drives the shift/policy
+    # used to classify the entry (resolved to the company root below).
     emp_stmt = select(Employee).where(Employee.id == body.employee_id)
-    emp_stmt = apply_tenant_filter(emp_stmt, org_id, Employee.organization_id)
+    emp_stmt = apply_employee_tenant_filter(emp_stmt, node_scope, Employee.organization_id)
     employee = (await db.execute(emp_stmt)).scalar_one_or_none()
     if employee is None:
         raise NotFoundError("Employee not found")
@@ -152,10 +167,16 @@ async def create_manual_attendance(
     # naive UI input to the app timezone). The service derives status from the
     # employee's shift/policy (lateness, half_day/early_leave) instead of
     # hardcoding 'present', and recovers from a concurrent-insert race.
+    # apply_manual_attendance scopes the (root-owned) attendance policy by this
+    # id, so pass the employee's company root, not their (possibly sub-node) org.
+    org_root = await root_id_of(db, employee.organization_id)
+    if org_root is None:
+        # Orphaned org (impossible under the FK) — treat as a missing employee.
+        raise NotFoundError("Employee not found")
     record = await attendance_service.apply_manual_attendance(
         db,
         employee_id=employee.id,
-        organization_id=employee.organization_id,
+        organization_id=org_root,
         work_date=body.work_date,
         check_in_at=body.check_in_at,
         check_out_at=body.check_out_at,

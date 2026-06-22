@@ -11,6 +11,7 @@ import { ROUTE_PERMISSIONS } from '@/app/access'
 import AppLayout from '@/layouts/AppLayout'
 
 const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'))
+const ChatPage = lazy(() => import('@/features/chat/ChatPage'))
 const VisitorsPage = lazy(() => import('@/features/visitors/VisitorsPage'))
 const EmployeesPage = lazy(() => import('@/features/employees/EmployeesPage'))
 const EnrollmentPage = lazy(() => import('@/features/enrollment/EnrollmentPage'))
@@ -27,6 +28,8 @@ const ReportsPage = lazy(() => import('@/features/reports/ReportsPage'))
 const UnknownFacesPage = lazy(() => import('@/features/recognition/UnknownFacesPage'))
 const AuditLogsPage = lazy(() => import('@/features/audit/AuditLogsPage'))
 const SecurityTenancyPage = lazy(() => import('@/features/security/SecurityTenancyPage'))
+const OrganizationsPage = lazy(() => import('@/features/security/OrganizationsPage'))
+const LocationsPage = lazy(() => import('@/features/security/LocationsPage'))
 const RecognitionEnginePage = lazy(() => import('@/features/recognition/RecognitionEnginePage'))
 const PrivacyPage = lazy(() => import('@/features/privacy/PrivacyPage'))
 const ProfilePage = lazy(() => import('@/features/auth/ProfilePage'))
@@ -66,6 +69,7 @@ export default function App() {
               >
                 <Route index element={<DashboardPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />
+                <Route path="chat" element={<ChatPage />} />
                 <Route path="visitors" element={<VisitorsPage />} />
                 <Route path="employees" element={guard('/employees', <EmployeesPage />)} />
                 <Route path="enrollment" element={guard('/enrollment', <EnrollmentPage />)} />
@@ -82,6 +86,8 @@ export default function App() {
                 <Route path="unknown-faces" element={guard('/unknown-faces', <UnknownFacesPage />)} />
                 <Route path="audit-logs" element={guard('/audit-logs', <AuditLogsPage />)} />
                 <Route path="security" element={guard('/security', <SecurityTenancyPage />)} />
+                <Route path="organizations" element={guard('/organizations', <OrganizationsPage />)} />
+                <Route path="locations" element={guard('/locations', <LocationsPage />)} />
                 <Route path="user-management" element={guard('/user-management', <UserManagementPage />)} />
                 {/* The AI security monitoring page moved to /reports; keep old links working. */}
                 <Route path="security-monitoring" element={<Navigate to="/reports" replace />} />

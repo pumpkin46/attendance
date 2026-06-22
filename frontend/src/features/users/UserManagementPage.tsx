@@ -23,6 +23,9 @@ import {
   useSaveUser,
   type RoleWithUsage,
 } from '@/features/users/api/queries'
+import { useOrgTree } from '@/features/security/api/queries'
+import { OrgAccessField } from '@/features/users/components/OrgAccessField'
+import { RoleSelector } from '@/features/users/components/RoleSelector'
 
 const PER_PAGE = 25
 const SUPER_ADMIN = 'super_admin'
@@ -50,6 +53,7 @@ interface UserDraft {
   password: string
   is_active: boolean
   role_ids: number[]
+  organization_ids: number[]
 }
 
 function draftFromUser(user: User | null): UserDraft {
@@ -59,6 +63,7 @@ function draftFromUser(user: User | null): UserDraft {
     password: '',
     is_active: user?.is_active ?? true,
     role_ids: user?.roles?.map((r) => r.id) ?? [],
+    organization_ids: user?.organizations?.map((o) => o.id) ?? [],
   }
 }
 
@@ -76,6 +81,7 @@ function UserEditorPanel({
 }) {
   const { user: me, isSuperAdmin } = useAuth()
   const save = useSaveUser()
+  const { data: orgTree = [], isLoading: orgTreeLoading } = useOrgTree(open)
   const [draft, setDraft] = useState<UserDraft>(() => draftFromUser(editing))
 
   // Re-initialize on each open (render-time state adjustment, not an effect) so
@@ -97,12 +103,27 @@ function UserEditorPanel({
     }))
   }
 
+  const toggleOrg = (orgId: number) => {
+    setDraft((d) => ({
+      ...d,
+      organization_ids: d.organization_ids.includes(orgId)
+        ? d.organization_ids.filter((id) => id !== orgId)
+        : [...d.organization_ids, orgId],
+    }))
+  }
+  const clearOrgs = () => setDraft((d) => ({ ...d, organization_ids: [] }))
+
+  // Holding a super-admin role makes org grants moot (full access everywhere).
+  const superAdminRole = roles.find((r) => r.name === SUPER_ADMIN)
+  const isSuperSelected = superAdminRole ? draft.role_ids.includes(superAdminRole.id) : false
+
   const handleSave = async () => {
     const payload = {
       name: draft.name.trim(),
       email: draft.email.trim(),
       is_active: draft.is_active,
       role_ids: draft.role_ids,
+      organization_ids: draft.organization_ids,
       ...(draft.password ? { password: draft.password } : {}),
     }
     try {
@@ -179,30 +200,24 @@ function UserEditorPanel({
           onChange={(e) => setDraft((d) => ({ ...d, is_active: e.target.checked }))}
         />
 
-        <div>
-          <p className="mb-2 text-sm font-medium text-slate-300">Roles</p>
-          <div className="space-y-2.5 rounded-lg border border-slate-700/80 bg-slate-950/40 p-4">
-            {roles.map((role) => {
-              const lockedSuperAdmin = role.name === SUPER_ADMIN && !isSuperAdmin()
-              return (
-                <Checkbox
-                  key={role.id}
-                  label={role.label}
-                  description={
-                    role.name === SUPER_ADMIN
-                      ? 'Full access — bypasses all permission checks.'
-                      : `${role.permissions?.length ?? 0} permission(s)`
-                  }
-                  checked={draft.role_ids.includes(role.id)}
-                  disabled={lockedSuperAdmin}
-                  onChange={(e) => toggleRole(role.id, e.target.checked)}
-                />
-              )
-            })}
-            {roles.length === 0 && (
-              <p className="text-sm text-slate-500">No roles defined yet.</p>
-            )}
-          </div>
+        <div className="border-t border-slate-800 pt-5">
+          <RoleSelector
+            roles={roles}
+            selectedIds={draft.role_ids}
+            onToggle={toggleRole}
+            canAssignSuperAdmin={isSuperAdmin()}
+          />
+        </div>
+
+        <div className="border-t border-slate-800 pt-5">
+          <OrgAccessField
+            tree={orgTree}
+            selectedIds={draft.organization_ids}
+            onToggle={toggleOrg}
+            onClear={clearOrgs}
+            loading={orgTreeLoading}
+            unrestricted={isSuperSelected}
+          />
         </div>
       </div>
     </SidePanel>
@@ -264,6 +279,22 @@ function UsersTab() {
           </div>
         ) : (
           <span className="text-slate-600">No roles</span>
+        ),
+    },
+    {
+      key: 'organizations',
+      header: 'Organizations',
+      cell: (u) =>
+        u.organizations?.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {u.organizations.map((o) => (
+              <Badge key={o.id} tone="neutral">
+                {o.name}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <span className="text-slate-600">—</span>
         ),
     },
     {

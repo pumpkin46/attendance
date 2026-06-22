@@ -26,7 +26,9 @@ class AdminCreateUserRequest(BaseModel):
     password: str = Field(min_length=8, max_length=255)
     role_ids: list[int] = []
     is_active: bool = True
-    organization_id: int | None = None
+    # Org-tree nodes to grant this user access to — a company root or any
+    # sub-unit. Each grant scopes the employee directory to that node's sub-tree.
+    organization_ids: list[int] = []
 
     @field_validator("name")
     @classmethod
@@ -45,6 +47,8 @@ class AdminUpdateUserRequest(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=255)
     is_active: bool | None = None
     role_ids: list[int] | None = None
+    # Replace the user's granted org-tree nodes (None = leave unchanged).
+    organization_ids: list[int] | None = None
 
     @field_validator("name")
     @classmethod

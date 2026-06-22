@@ -11,6 +11,7 @@ from sqlalchemy import or_, select, update
 from app.core.dependencies import (
     DbSession,
     TenantOrgId,
+    TenantScope,
     require_permission,
 )
 from app.core.errors import NotFoundError, ValidationError
@@ -98,7 +99,7 @@ _EMPTY_DASHBOARD = VisitorDashboard(
 async def visitor_dashboard(
     db: DbSession,
     user: require_permission("visitors.view"),
-    org_id: TenantOrgId,
+    org_id: TenantScope,
 ):
     if org_id is None:
         return _EMPTY_DASHBOARD
@@ -110,7 +111,7 @@ async def visitor_dashboard(
 async def list_active_visitors(
     db: DbSession,
     user: require_permission("visitors.view"),
-    org_id: TenantOrgId,
+    org_id: TenantScope,
 ):
     if org_id is None:
         return []
@@ -122,7 +123,7 @@ async def list_active_visitors(
 async def visitor_daily_report(
     db: DbSession,
     user: require_permission("visitors.view"),
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     report_date: str | None = None,
 ):
     from datetime import date as date_type
@@ -145,7 +146,7 @@ async def visitor_daily_report(
 async def list_pending_approvals(
     db: DbSession,
     user: require_permission("visitors.view"),
-    org_id: TenantOrgId,
+    org_id: TenantScope,
 ):
     if org_id is None:
         return []
@@ -157,7 +158,7 @@ async def list_pending_approvals(
 async def list_visitors(
     db: DbSession,
     user: require_permission("visitors.view"),
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     pagination: PaginationDep,
     status_filter: str | None = Query(None, alias="status"),
     search: str | None = None,
@@ -219,7 +220,7 @@ async def get_visitor(
     visitor_id: int,
     db: DbSession,
     user: require_permission("visitors.view"),
-    org_id: TenantOrgId,
+    org_id: TenantScope,
 ):
     visitor = await _get_visitor_or_404(db, visitor_id, org_id)
     return _format_visitor(visitor)
@@ -469,7 +470,7 @@ async def _make_photo_primary(db, visitor: Visitor, photo: VisitorPhoto) -> None
 async def list_visitor_photos(
     visitor_id: int,
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     user: require_permission("visitors.view"),
 ):
     await _get_visitor_or_404(db, visitor_id, org_id)
@@ -599,7 +600,7 @@ async def delete_visitor_photo(
 async def list_visitor_documents(
     visitor_id: int,
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     user: require_permission("visitors.view"),
 ):
     await _get_visitor_or_404(db, visitor_id, org_id)
@@ -686,7 +687,7 @@ async def delete_visitor_document(
 async def get_visitor_timeline(
     visitor_id: int,
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     user: require_permission("visitors.view"),
     limit: int = Query(50, ge=1, le=200),
 ):
@@ -708,7 +709,7 @@ async def get_visitor_timeline(
 async def list_visitor_access_permissions(
     visitor_id: int,
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     user: require_permission("visitors.view"),
 ):
     from app.models.visitor import VisitorAccessPermission
@@ -749,7 +750,7 @@ async def set_visitor_access_permissions(
 @router.get("/visitor-blacklist", response_model=PaginatedResponse[BlacklistOut])
 async def list_blacklist(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     user: require_permission("visitors.view"),
     pagination: PaginationDep,
 ):
@@ -857,7 +858,7 @@ def start_visitor_expiry_task() -> asyncio.Task:
 
 
 async def _get_visitor_or_404(
-    db: DbSession, visitor_id: int, org_id: int | None
+    db: DbSession, visitor_id: int, org_id: int | list[int] | None
 ) -> Visitor:
     stmt = select(Visitor).where(Visitor.id == visitor_id)
     stmt = apply_tenant_filter(stmt, org_id, Visitor.organization_id)

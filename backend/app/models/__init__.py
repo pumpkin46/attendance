@@ -41,6 +41,14 @@ from app.models.engine import (
     UnknownPersonLog,
     EngineMetricsSnapshot,
 )
+from app.models.chat import (
+    Conversation,
+    ConversationMember,
+    Message,
+    MessageAttachment,
+    MessageReaction,
+    MessageMention,
+)
 
 __all__ = [
     "Base",
@@ -90,4 +98,10 @@ __all__ = [
     "EngineRecognitionLog",
     "UnknownPersonLog",
     "EngineMetricsSnapshot",
+    "Conversation",
+    "ConversationMember",
+    "Message",
+    "MessageAttachment",
+    "MessageReaction",
+    "MessageMention",
 ]

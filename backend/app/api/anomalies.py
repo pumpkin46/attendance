@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from app.core.dependencies import DbSession, TenantOrgId, require_permission
+from app.core.dependencies import DbSession, TenantNodeScope, TenantOrgId, require_permission
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.realtime.hub import emit
 from app.schemas.attendance import (
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/v1", tags=["anomalies"])
 @router.get("/anomalies/summary", response_model=AnomalySummary)
 async def anomaly_summary(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantNodeScope,
     user: require_permission("reports.view"),
 ):
     return await anomaly_service.summary(db, org_id)
@@ -29,7 +29,7 @@ async def anomaly_summary(
 @router.get("/anomalies", response_model=PaginatedResponse[AnomalyOut])
 async def list_anomalies(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantNodeScope,
     user: require_permission("reports.view"),
     pagination: PaginationDep,
     status: str | None = Query(None),

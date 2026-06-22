@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import get_redis
 from app.core.timeutil import local_date, to_local
+from app.middleware.tenant import root_id_of
 from app.models.attendance import (
     AttendancePolicy,
     AttendanceRecord,
@@ -391,15 +392,22 @@ async def process_recognition(
         # Stale FAISS vector (deleted/deactivated employee): writing a record
         # would violate the FK / resurrect attendance for a removed person.
         return None
-    if organization_id is not None and employee.organization_id != organization_id:
-        # Caller-supplied tenant context (e.g. the camera's org) must match the
-        # matched employee: a cross-org recognition writes nothing.
+    if (
+        organization_id is not None
+        and employee.organization_id != organization_id
+        and await root_id_of(db, employee.organization_id) != organization_id
+    ):
+        # Caller-supplied tenant context (e.g. the camera's org root) must match
+        # the matched employee's company: a cross-org recognition writes nothing.
+        # The employee may sit on a sub-node, so fall back to comparing roots.
         logger.warning(
             "suppressing recognition for employee %s: organization mismatch",
             employee_id,
         )
         return None
-    org_id = employee.organization_id
+    # Policies are stored at the company root; resolve it from the employee's
+    # (possibly sub-node) organization_id so policy lookup still finds them.
+    org_id = await root_id_of(db, employee.organization_id) or employee.organization_id
 
     now = datetime.now(timezone.utc)
     today = local_date(now)
@@ -492,7 +500,9 @@ async def process_rfid_tap(
     employee = emp_result.scalar_one_or_none()
     if employee is None or not employee.is_active:
         return None
-    org_id = employee.organization_id
+    # Policies live at the company root; resolve it from the employee's
+    # (possibly sub-node) organization_id so policy lookup still finds them.
+    org_id = await root_id_of(db, employee.organization_id) or employee.organization_id
 
     now = datetime.now(timezone.utc)
     today = local_date(now)

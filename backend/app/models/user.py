@@ -32,6 +32,22 @@ role_user = Table(
     Column("role_id", Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
 )
 
+# A user may be granted access to many org-tree nodes — a company root or any
+# sub-unit. Their read scope is the union of those nodes' sub-trees (employees)
+# and the nodes' company roots (everything else); see app.core.dependencies
+# (get_tenant_scope, get_tenant_org_id) and app.middleware.tenant.Scope.
+user_organization = Table(
+    "user_organization",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "organization_id",
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
 
 class Role(Base, TimestampMixin):
     __tablename__ = "roles"
@@ -61,9 +77,6 @@ class User(Base, TimestampMixin):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    organization_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
-    )
     name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(255), unique=True)
     email_verified_at: Mapped[datetime | None] = mapped_column(
@@ -83,8 +96,12 @@ class User(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
 
-    organization: Mapped["Organization | None"] = relationship(lazy="selectin")
     roles: Mapped[list[Role]] = relationship(secondary=role_user, lazy="selectin")
+    # Organizations (company roots) this account may access. Drives the tenant
+    # read-scope for non-super-admins (union of these orgs' sub-trees).
+    organizations: Mapped[list["Organization"]] = relationship(
+        secondary=user_organization, lazy="selectin"
+    )
 
     def has_role(self, role_name: str) -> bool:
         return any(r.name == role_name for r in self.roles)

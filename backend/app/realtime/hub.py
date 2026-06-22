@@ -34,6 +34,16 @@ logger = logging.getLogger(__name__)
 # Single channel; tenant targeting is applied locally per worker from the payload.
 _CHANNEL = "realtime:events"
 
+# Redis hash per company root holding {user_id: live-socket-count} for chat
+# presence. A shared counter is required so online/offline transitions and the
+# online roster are correct across workers/nodes (the in-process count is only
+# this worker's sockets). Falls back to an in-process counter when Redis is off.
+_PRESENCE_PREFIX = "chat:presence:"
+
+
+def _presence_key(org_id: int) -> str:
+    return f"{_PRESENCE_PREFIX}{org_id}"
+
 # Bounded per-connection buffer. A client that cannot keep up drops events rather
 # than ballooning memory; it will re-sync via a normal refetch on reconnect.
 _MAX_QUEUED_EVENTS = 100
@@ -53,11 +63,16 @@ _SUBSCRIBE_RETRY_DELAY = 2.0
 
 
 class Connection:
-    """A single subscriber's mailbox."""
+    """A single subscriber's mailbox.
 
-    def __init__(self, user_id: int, org_id: int | None) -> None:
+    ``org_ids`` is the set of company roots this connection receives events for
+    (a multi-org user's assigned companies). ``None`` means every tenant — a
+    super admin watching globally.
+    """
+
+    def __init__(self, user_id: int, org_ids: set[int] | None) -> None:
         self.user_id = user_id
-        self.org_id = org_id
+        self.org_ids = org_ids
         self.queue: asyncio.Queue[str] = asyncio.Queue(maxsize=_MAX_QUEUED_EVENTS)
 
 
@@ -67,10 +82,13 @@ class RealtimeHub:
         self._lock = asyncio.Lock()
         self._pubsub: Any = None
         self._sub_task: asyncio.Task | None = None
+        # In-process presence counters (org_id, user_id) -> live socket count,
+        # used only when Redis is disabled (single-worker mode).
+        self._presence_counts: dict[tuple[int, int], int] = {}
 
-    async def register(self, user_id: int, org_id: int | None) -> Connection | None:
+    async def register(self, user_id: int, org_ids: set[int] | None) -> Connection | None:
         """Register a subscriber, or return None if the per-user cap is reached."""
-        conn = Connection(user_id, org_id)
+        conn = Connection(user_id, org_ids)
         async with self._lock:
             active = sum(1 for c in self._connections if c.user_id == user_id)
             if active >= _MAX_CONNECTIONS_PER_USER:
@@ -86,17 +104,103 @@ class RealtimeHub:
     def connection_count(self) -> int:
         return len(self._connections)
 
+    async def presence_connect(self, user_id: int, org_ids: set[int]) -> list[int]:
+        """Record a new live socket; return the company roots the user just came
+        ONLINE in (0->1 transition) so the caller announces presence exactly once.
+
+        Counts are shared via Redis when enabled (correct across workers), else
+        kept in-process (single-worker). Best-effort: a Redis error yields an
+        empty/partial result rather than breaking the connection.
+        """
+        redis = get_redis()
+        if redis is not None:
+            became: list[int] = []
+            try:
+                for org in org_ids:
+                    n = await redis.hincrby(_presence_key(org), str(user_id), 1)
+                    if n == 1:
+                        became.append(org)
+            except RedisError:
+                logger.warning("Presence connect via Redis failed; presence may be stale")
+            return became
+        async with self._lock:
+            became = []
+            for org in org_ids:
+                key = (org, user_id)
+                n = self._presence_counts.get(key, 0) + 1
+                self._presence_counts[key] = n
+                if n == 1:
+                    became.append(org)
+            return became
+
+    async def presence_disconnect(self, user_id: int, org_ids: set[int]) -> list[int]:
+        """Drop a live socket; return the company roots the user just went
+        OFFLINE in (1->0 transition)."""
+        redis = get_redis()
+        if redis is not None:
+            gone: list[int] = []
+            try:
+                for org in org_ids:
+                    n = await redis.hincrby(_presence_key(org), str(user_id), -1)
+                    if n <= 0:
+                        await redis.hdel(_presence_key(org), str(user_id))
+                        gone.append(org)
+            except RedisError:
+                logger.warning("Presence disconnect via Redis failed; presence may be stale")
+            return gone
+        async with self._lock:
+            gone = []
+            for org in org_ids:
+                key = (org, user_id)
+                n = self._presence_counts.get(key, 0) - 1
+                if n <= 0:
+                    self._presence_counts.pop(key, None)
+                    gone.append(org)
+                else:
+                    self._presence_counts[key] = n
+            return gone
+
+    async def online_user_ids(self, org_id: int | None) -> list[int]:
+        """User ids with at least one live socket in ``org_id`` (company root).
+
+        Reads the shared Redis roster when enabled (so it reflects every worker),
+        else the in-process counters. ``None`` (a global super-admin scope) has no
+        company roster, so it returns empty.
+        """
+        if org_id is None:
+            return []
+        redis = get_redis()
+        if redis is not None:
+            try:
+                fields = await redis.hkeys(_presence_key(org_id))
+                return sorted(int(f) for f in fields)
+            except RedisError:
+                return []
+        async with self._lock:
+            return sorted(
+                user_id
+                for (org, user_id), count in self._presence_counts.items()
+                if org == org_id and count > 0
+            )
+
     async def publish(
         self,
         org_id: int | None,
         event_type: str,
         data: dict[str, Any] | None = None,
+        user_ids: list[int] | set[int] | None = None,
     ) -> None:
+        # ``user_ids`` targets specific recipients (a chat conversation's members)
+        # regardless of their current org scope; ``None`` keeps the org-broadcast
+        # behaviour. Carried in the payload so the Redis subscriber on every
+        # worker can apply the same targeting locally.
+        to = sorted({int(u) for u in user_ids}) if user_ids is not None else None
         message = json.dumps(
             {
                 "type": event_type,
                 "data": data or {},
                 "org_id": org_id,
+                "to": to,
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -110,20 +214,35 @@ class RealtimeHub:
                 return
             except RedisError:
                 logger.warning("Realtime PUBLISH failed; delivering locally only")
-        await self._deliver_local(org_id, message)
+        await self._deliver_local(org_id, message, to)
 
-    async def _deliver_local(self, org_id: int | None, message: str) -> None:
+    async def _deliver_local(
+        self,
+        org_id: int | None,
+        message: str,
+        user_ids: list[int] | None = None,
+    ) -> None:
         """Fan a serialized event out to this process's matching connections.
 
-        A super-admin connection (org_id is None) sees every tenant's events; an
-        event with org_id=None is delivered ONLY to those super-admin connections.
+        When ``user_ids`` is given the event is a direct delivery: only those
+        users' sockets receive it, ignoring org scope (so a recipient currently
+        viewing another tenant still gets their chat message, and a super-admin
+        who is not a recipient does not). Otherwise it is an org broadcast: a
+        super-admin connection (org_ids None) sees every tenant's events, an
+        event with org_id=None is delivered ONLY to those super-admin
+        connections, and a multi-org connection matches when its org root is in
+        the set.
         """
         async with self._lock:
-            targets = [
-                conn
-                for conn in self._connections
-                if conn.org_id is None or conn.org_id == org_id
-            ]
+            if user_ids is not None:
+                recipients = set(user_ids)
+                targets = [c for c in self._connections if c.user_id in recipients]
+            else:
+                targets = [
+                    conn
+                    for conn in self._connections
+                    if conn.org_ids is None or (org_id is not None and org_id in conn.org_ids)
+                ]
         for conn in targets:
             try:
                 conn.queue.put_nowait(message)
@@ -166,10 +285,12 @@ class RealtimeHub:
                 if not isinstance(raw, str):
                     continue
                 try:
-                    org_id = json.loads(raw).get("org_id")
+                    payload = json.loads(raw)
+                    org_id = payload.get("org_id")
+                    to = payload.get("to")
                 except (ValueError, TypeError):
                     continue
-                await self._deliver_local(org_id, raw)
+                await self._deliver_local(org_id, raw, to)
             except asyncio.CancelledError:
                 raise
             except RedisError:
@@ -212,9 +333,14 @@ async def emit(
     org_id: int | None,
     event_type: str,
     data: dict[str, Any] | None = None,
+    user_ids: list[int] | set[int] | None = None,
 ) -> None:
-    """Fire-and-forget publish that never raises into the calling request."""
+    """Fire-and-forget publish that never raises into the calling request.
+
+    Pass ``user_ids`` to deliver only to those users' sockets (direct/chat
+    delivery); omit it for the default org-scoped broadcast.
+    """
     try:
-        await _hub.publish(org_id, event_type, data)
+        await _hub.publish(org_id, event_type, data, user_ids)
     except Exception:  # pragma: no cover - defensive; realtime must not break writes
         logger.exception("Failed to emit realtime event '%s'", event_type)

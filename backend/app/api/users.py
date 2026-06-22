@@ -25,7 +25,8 @@ from app.core.dependencies import (
 )
 from app.core.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from app.core.security import hash_password
-from app.middleware.tenant import apply_tenant_filter
+from app.middleware.tenant import descendants_subquery_multi
+from app.models.organization import Organization
 from app.models.user import Permission, Role, User, role_user
 from app.schemas.users import (
     AdminCreateUserRequest,
@@ -69,6 +70,43 @@ def _guard_super_admin_assignment(actor: User, roles: list[Role]) -> None:
         raise PermissionDeniedError("Only a super admin can grant the super admin role")
 
 
+async def _load_orgs(db, org_ids: list[int], actor: User) -> list[Organization]:
+    """Load the org-tree nodes to grant, validating each exists and the actor may
+    delegate it.
+
+    A grant may be ANY node — a company root or a sub-unit (region, hotel,
+    department, …). It drives the grantee's read scope: the union of the granted
+    nodes' sub-trees for the employee directory, and their company roots for
+    everything keyed by the company. A super admin may grant any node; any other
+    admin may grant only nodes inside the sub-trees they are themselves assigned
+    to, so they can neither escalate nor reach into a sibling unit they don't
+    hold.
+    """
+    if not org_ids:
+        return []
+    result = await db.execute(
+        select(Organization).where(Organization.id.in_(set(org_ids)))
+    )
+    orgs = list(result.scalars())
+    found = {o.id for o in orgs}
+    missing = set(org_ids) - found
+    if missing:
+        raise ValidationError(f"Unknown organization id(s): {sorted(missing)}")
+    if not actor.has_role(settings.super_admin_role):
+        actor_nodes = [o.id for o in actor.organizations]
+        grantable: set[int] = (
+            set((await db.execute(descendants_subquery_multi(actor_nodes))).scalars().all())
+            if actor_nodes
+            else set()
+        )
+        forbidden = found - grantable
+        if forbidden:
+            raise PermissionDeniedError(
+                f"Cannot grant access to organization units outside your own: {sorted(forbidden)}"
+            )
+    return orgs
+
+
 # ── Users ────────────────────────────────────────────────────────────────────
 
 
@@ -85,9 +123,10 @@ async def list_users(
 ):
     stmt = select(User).options(selectinload(User.roles).selectinload(Role.permissions))
 
-    # Tenant boundary: org admins manage only accounts inside their company;
-    # a global super admin (org_id None) sees all.
-    stmt = apply_tenant_filter(stmt, org_id, User.organization_id)
+    # Users are not org-scoped (single-company model). The TenantOrgId dependency
+    # still gates access — a non-super-admin whose tenant is ambiguous (0 or 2+
+    # companies) is 403'd before reaching here.
+    _ = org_id
 
     if search:
         like = f"%{search.strip()}%"
@@ -128,23 +167,16 @@ async def create_user(
     roles = await _load_roles(db, body.role_ids)
     _guard_super_admin_assignment(user, roles)
 
-    is_super = user.has_role(settings.super_admin_role)
-    if is_super:
-        # Default to the tenant context (selected tenant header, or the single
-        # active org) so a super admin's new users are never created org-less:
-        # accounts with no organization cannot use tenant-scoped endpoints.
-        organization_id = body.organization_id if body.organization_id is not None else org_id
-    else:
-        organization_id = user.organization_id
-
+    _ = org_id
     target = User(
-        organization_id=organization_id,
         name=body.name,
         email=body.email,
         password=hash_password(body.password),
         auth_provider="local",
         is_active=body.is_active,
     )
+    # Grant access to the chosen org-tree nodes (drives this user's read scope).
+    target.organizations = await _load_orgs(db, body.organization_ids, user)
     target.roles = roles
     db.add(target)
     await db.flush()
@@ -172,14 +204,14 @@ async def update_user(
     org_id: TenantOrgId,
 ):
     is_super = user.has_role(settings.super_admin_role)
+    # Users are not org-scoped (single-company model); the TenantOrgId gate has
+    # already 403'd a non-super-admin with an ambiguous tenant.
+    _ = org_id
     stmt = (
         select(User)
         .options(selectinload(User.roles).selectinload(Role.permissions))
         .where(User.id == user_id)
     )
-    if not is_super:
-        # Org admins manage only accounts inside their company.
-        stmt = apply_tenant_filter(stmt, org_id, User.organization_id)
     target = (await db.execute(stmt)).scalar_one_or_none()
     if target is None:
         raise NotFoundError("User not found")
@@ -231,6 +263,14 @@ async def update_user(
         if old_names != new_names:
             changes["roles"] = {"from": old_names, "to": new_names}
         target.roles = roles
+
+    if body.organization_ids is not None:
+        orgs = await _load_orgs(db, body.organization_ids, user)
+        old_orgs = sorted(o.id for o in target.organizations)
+        new_orgs = sorted(o.id for o in orgs)
+        if old_orgs != new_orgs:
+            changes["organizations"] = {"from": old_orgs, "to": new_orgs}
+        target.organizations = orgs
 
     if changes:
         await log_action(

@@ -14,7 +14,7 @@ def test_publish_delivers_locally_without_redis(monkeypatch):
     hub = RealtimeHub()
 
     async def scenario():
-        conn = await hub.register(user_id=1, org_id=7)
+        conn = await hub.register(user_id=1, org_ids={7})
         await hub.publish(7, "cameras.changed", {"x": 1})
         return conn
 
@@ -35,7 +35,7 @@ def test_publish_broadcasts_via_redis_when_enabled(monkeypatch):
     hub = RealtimeHub()
 
     async def scenario():
-        conn = await hub.register(1, 7)
+        conn = await hub.register(1, {7})
         await hub.publish(7, "rfid.tap", {})
         return conn
 
@@ -52,8 +52,8 @@ def test_tenant_targeting(monkeypatch):
     hub = RealtimeHub()
 
     async def scenario():
-        same_org = await hub.register(1, 7)
-        other_org = await hub.register(2, 9)
+        same_org = await hub.register(1, {7})
+        other_org = await hub.register(2, {9})
         super_admin = await hub.register(3, None)
         await hub.publish(7, "anomalies.changed", {})
         return same_org, other_org, super_admin

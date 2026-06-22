@@ -11,6 +11,7 @@ import {
   updateProfile,
 } from '@/features/auth/authSlice'
 import { getToken } from '@/shared/lib/session'
+import { queryClient } from '@/shared/lib/queryClient'
 
 /**
  * Auth state now lives in the Redux store (`store/authSlice`). This module is a
@@ -42,6 +43,10 @@ export function useAuth() {
 
   const login = useCallback(
     async (email: string, password: string) => {
+      // Clear any cache left from a prior session on this tab (e.g. one that
+      // ended via a 401 redirect rather than an explicit logout) so the signing-in
+      // user never reads the previous account's tenant-scoped data.
+      queryClient.clear()
       await dispatch(loginUser({ email, password })).unwrap()
     },
     [dispatch]
@@ -56,6 +61,10 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     await dispatch(logoutUser())
+    // Drop all cached query data so the next account to sign in on this tab can
+    // never momentarily read the previous user's tenant-scoped data (org tree,
+    // user list, employees, …) from a still-fresh cache entry.
+    queryClient.clear()
   }, [dispatch])
 
   const saveProfile = useCallback(

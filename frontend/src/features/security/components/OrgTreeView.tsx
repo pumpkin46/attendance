@@ -1,10 +1,6 @@
 import { useState } from 'react'
-import { Badge } from '@/shared/ui/Badge'
-import { Button } from '@/shared/ui/Button'
 import { SidePanel } from '@/shared/ui/SidePanel'
-import { TreeGrid, type TreeColumn } from '@/shared/ui/TreeGrid'
 import { confirmDialog } from '@/shared/ui/dialogs'
-import { cn } from '@/shared/lib/cn'
 import type { OrgNode } from '@/features/security/types'
 import {
   useCreateOrgNode,
@@ -12,8 +8,10 @@ import {
   useMoveOrgNode,
   useUpdateOrgNode,
 } from '@/features/security/api/queries'
+import { OrgChart } from '@/features/security/components/OrgChart'
 import { OrgNodeForm, OrgNodeFormFooter } from '@/features/security/components/OrgNodeForm'
 import { MoveNodeFooter, MoveNodePanel } from '@/features/security/components/MoveNodePanel'
+import { AssignUsersPanel } from '@/features/users/components/AssignUsersPanel'
 
 type Mode =
   | { kind: 'create'; parent: OrgNode }
@@ -24,12 +22,15 @@ export function OrgTreeView({
   tree,
   loading,
   canManage,
+  canAssignUsers = false,
   onEditCompany,
   onDeleteCompany,
 }: {
   tree: OrgNode[]
   loading: boolean
   canManage: boolean
+  /** Viewer can assign existing users to org nodes (users.manage). */
+  canAssignUsers?: boolean
   /** Edit a company root — routed to the organizations endpoint, not nodes. */
   onEditCompany?: (root: OrgNode) => void
   /** Delete a company root. Omit to hide the action (e.g. the lone org). */
@@ -37,6 +38,10 @@ export function OrgTreeView({
 }) {
   const [mode, setMode] = useState<Mode | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
+  // Keep `assignNode` set while the panel slides out (open drives visibility) so
+  // its content doesn't flash an empty/un-granted state during the exit.
+  const [assignNode, setAssignNode] = useState<OrgNode | null>(null)
+  const [assignOpen, setAssignOpen] = useState(false)
 
   const createNode = useCreateOrgNode()
   const updateNode = useUpdateOrgNode()
@@ -59,105 +64,6 @@ export function OrgTreeView({
     if (ok) deleteNode.mutate(node.id)
   }
 
-  const isRoot = (n: OrgNode) => n.parent_id === null
-
-  const columns: TreeColumn<OrgNode>[] = [
-    {
-      key: 'name',
-      header: 'Org unit',
-      tree: true,
-      cell: (n) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className={cn(
-              'truncate font-medium',
-              n.is_active ? 'text-slate-100' : 'text-slate-500'
-            )}
-          >
-            {n.name}
-          </span>
-          <span className="shrink-0 font-mono text-[10px] text-slate-500">{n.code}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'type',
-      header: 'Type',
-      width: '9rem',
-      cell: (n) => (
-        <Badge tone={isRoot(n) ? 'ok' : 'neutral'} className="capitalize">
-          {n.node_type}
-        </Badge>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      width: '7rem',
-      cell: (n) => (
-        <Badge tone={n.is_active ? 'ok' : 'warn'}>{n.is_active ? 'Active' : 'Inactive'}</Badge>
-      ),
-    },
-  ]
-
-  if (canManage) {
-    columns.push({
-      key: 'actions',
-      header: <span className="sr-only">Actions</span>,
-      width: '13rem',
-      align: 'right',
-      cell: (n) => {
-        const root = isRoot(n)
-        return (
-          <div
-            className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Button variant="ghost" size="sm" onClick={() => open({ kind: 'create', parent: n })}>
-              + Unit
-            </Button>
-            {(!root || onEditCompany) && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => (root ? onEditCompany?.(n) : open({ kind: 'edit', node: n }))}
-              >
-                Edit
-              </Button>
-            )}
-            {!root && (
-              <Button variant="ghost" size="sm" onClick={() => open({ kind: 'move', node: n })}>
-                Move
-              </Button>
-            )}
-            {root
-              ? onDeleteCompany && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                    onClick={() => onDeleteCompany(n)}
-                  >
-                    Delete
-                  </Button>
-                )
-              : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={deleteNode.isPending}
-                    className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                    onClick={() => removeNode(n)}
-                  >
-                    Delete
-                  </Button>
-                )}
-          </div>
-        )
-      },
-    })
-  }
-
   let panelTitle = ''
   if (mode?.kind === 'create') panelTitle = 'New org unit'
   else if (mode?.kind === 'edit') panelTitle = 'Edit org unit'
@@ -172,22 +78,28 @@ export function OrgTreeView({
 
   return (
     <>
-      <TreeGrid
-        nodes={tree}
-        columns={columns}
-        getId={(n) => n.id}
-        getChildren={(n) => n.children}
-        getLabel={(n) => n.name}
-        ariaLabel="Organization units"
+      <OrgChart
+        tree={tree}
         loading={loading}
-        empty="No organizations yet"
-        onActivate={
-          canManage
-            ? (n) => (isRoot(n) ? onEditCompany?.(n) : open({ kind: 'edit', node: n }))
+        canManage={canManage}
+        onAddChild={(n) => open({ kind: 'create', parent: n })}
+        onEdit={(n) => open({ kind: 'edit', node: n })}
+        onMove={(n) => open({ kind: 'move', node: n })}
+        onMoveTo={(n, newParentId) => moveNode.mutate({ id: n.id, new_parent_id: newParentId })}
+        onDelete={(n) => void removeNode(n)}
+        onEditCompany={onEditCompany}
+        onDeleteCompany={onDeleteCompany}
+        onAssignUsers={
+          canAssignUsers
+            ? (n) => {
+                setAssignNode(n)
+                setAssignOpen(true)
+              }
             : undefined
         }
-        rowClassName={(n) => (!n.is_active ? 'opacity-60' : undefined)}
       />
+
+      <AssignUsersPanel open={assignOpen} node={assignNode} onClose={() => setAssignOpen(false)} />
 
       <SidePanel
         open={panelOpen}

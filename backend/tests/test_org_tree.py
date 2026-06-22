@@ -195,9 +195,7 @@ async def test_list_organizations_counts_nodes_and_employees(db_session):
     await _node(db_session, tech, "Backend", "BACKEND", node_type="team")
     await _employee(db_session, root_id=org.id, code="E1")
 
-    rows = await svc.list_organizations(
-        db_session, is_super_admin=True, user_org_id=None, tenant_org_id=org.id
-    )
+    rows = await svc.list_organizations(db_session, scope=[org.id])
     assert len(rows) == 1
     assert rows[0].nodes_count == 2          # Technology + Backend
     assert rows[0].employees_count == 1

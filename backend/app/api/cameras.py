@@ -6,7 +6,13 @@ from fastapi import APIRouter, status
 
 from app.core.cache import cached_json
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.dependencies import (
+    CurrentUser,
+    DbSession,
+    TenantOrgId,
+    TenantScope,
+    require_permission,
+)
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
 from app.schemas.camera import (
     CAMERA_STATUSES,
@@ -41,7 +47,7 @@ async def get_camera_config(user: CurrentUser):
 
 
 @router.get("/cameras/monitoring", response_model=CameraMonitoringSummary)
-async def get_camera_monitoring(db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+async def get_camera_monitoring(db: DbSession, user: CurrentUser, org_id: TenantScope):
     return await camera_service.monitoring_summary(db, org_id)
 
 
@@ -49,7 +55,7 @@ async def get_camera_monitoring(db: DbSession, user: CurrentUser, org_id: Tenant
 async def list_cameras(
     db: DbSession,
     user: CurrentUser,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     pagination: PaginationDep,
 ):
     # Cap is small (settings.max_cameras), so cache the whole formatted per-org
@@ -83,13 +89,14 @@ async def create_camera(
     body: CameraCreate,
     db: DbSession,
     user: require_permission("cameras.manage"),
+    org_id: TenantOrgId = None,
 ):
-    camera = await camera_service.create_camera(db, body)
+    camera = await camera_service.create_camera(db, org_id, body)
     return CameraOut.model_validate(camera, from_attributes=True)
 
 
 @router.get("/cameras/{camera_id}", response_model=CameraOut)
-async def get_camera(camera_id: int, db: DbSession, user: CurrentUser, org_id: TenantOrgId):
+async def get_camera(camera_id: int, db: DbSession, user: CurrentUser, org_id: TenantScope):
     camera = await camera_service.get_camera(db, camera_id, org_id)
     return CameraOut.model_validate(camera, from_attributes=True)
 
@@ -121,7 +128,7 @@ async def get_camera_health(
     camera_id: int,
     db: DbSession,
     user: require_permission("cameras.manage"),
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     pagination: PaginationDep,
 ):
     stmt = camera_service.health_query(camera_id)
@@ -139,6 +146,6 @@ async def capture_camera_frame(
     camera_id: int,
     db: DbSession,
     user: require_permission("cameras.manage"),
-    org_id: TenantOrgId = None,
+    org_id: TenantScope = None,
 ):
     return await camera_service.capture_frame(db, camera_id, org_id)

@@ -3,7 +3,8 @@ export interface User {
   name: string
   email: string
   roles?: Role[]
-  organization?: { id: number; name: string }
+  /** Org-tree nodes this user is granted (a company or any sub-unit); drives their read scope. */
+  organizations?: { id: number; name: string }[]
   auth_provider?: string
   email_verified_at?: string | null
   is_active?: boolean
@@ -38,6 +39,8 @@ export interface Employee {
   face_enrolled_at?: string
   active_rfid_cards_count?: number
   location_id?: number | null
+  /** The org-tree node the employee belongs to (company root or any sub-unit). */
+  organization_id?: number | null
 }
 
 export interface RfidReader {

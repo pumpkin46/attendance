@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.security import generate_device_token
 from app.core.timeutil import local_date, local_day_bounds_utc
-from app.middleware.tenant import apply_tenant_filter
+from app.middleware.tenant import apply_employee_tenant_filter, apply_tenant_filter
 from app.models.employee import Employee
 from app.models.location import Location
 from app.models.rfid import RfidCard, RfidDirection, RfidEvent, RfidEventResult, RfidReader
@@ -133,7 +133,9 @@ async def _generate_device_id(db: AsyncSession, name: str) -> str:
         suffix += 1
 
 
-async def get_reader_or_404(db: AsyncSession, reader_id: int, org_id: int | None) -> RfidReader:
+async def get_reader_or_404(
+    db: AsyncSession, reader_id: int, org_id: int | list[int] | None
+) -> RfidReader:
     stmt = (
         select(RfidReader)
         .join(Location, RfidReader.location_id == Location.id)
@@ -147,10 +149,18 @@ async def get_reader_or_404(db: AsyncSession, reader_id: int, org_id: int | None
 
 
 async def _employee_in_tenant_or_404(
-    db: AsyncSession, employee_id: int, org_id: int | None
+    db: AsyncSession,
+    employee_id: int,
+    org_id: int | list[int] | None,
+    *,
+    node_scope: int | list[int] | None = None,
 ) -> Employee:
+    # Employee lookups are node-granular: a sub-unit grant must only resolve
+    # employees inside that sub-tree. Route the employee filter through the
+    # granted node scope when supplied, falling back to org_id otherwise.
+    employee_scope = node_scope if node_scope is not None else org_id
     stmt = select(Employee).where(Employee.id == employee_id)
-    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    stmt = apply_employee_tenant_filter(stmt, employee_scope, Employee.organization_id)
     employee = (await db.execute(stmt)).scalar_one_or_none()
     if employee is None:
         raise NotFoundError("Employee not found")
@@ -160,7 +170,7 @@ async def _employee_in_tenant_or_404(
 # ── Reader CRUD ───────────────────────────────────────────────────────────────
 
 
-async def list_readers(db: AsyncSession, org_id: int | None) -> list[RfidReaderOut]:
+async def list_readers(db: AsyncSession, org_id: int | list[int] | None) -> list[RfidReaderOut]:
     stmt = select(RfidReader).join(Location, RfidReader.location_id == Location.id)
     stmt = apply_tenant_filter(stmt, org_id, Location.organization_id)
     stmt = stmt.order_by(RfidReader.name)
@@ -203,7 +213,9 @@ async def create_reader(
     return format_reader(reader, 0, _online_threshold()), plain_token
 
 
-async def get_reader_out(db: AsyncSession, reader_id: int, org_id: int | None) -> RfidReaderOut:
+async def get_reader_out(
+    db: AsyncSession, reader_id: int, org_id: int | list[int] | None
+) -> RfidReaderOut:
     reader = await get_reader_or_404(db, reader_id, org_id)
     tap_counts = await _taps_today_by_reader(db, [reader.id])
     return format_reader(reader, tap_counts.get(reader.id, 0), _online_threshold())
@@ -292,9 +304,13 @@ async def regenerate_token(
 
 
 async def list_employee_cards(
-    db: AsyncSession, employee_id: int, org_id: int | None
+    db: AsyncSession,
+    employee_id: int,
+    org_id: int | list[int] | None,
+    *,
+    node_scope: int | list[int] | None = None,
 ) -> list[RfidCardOut]:
-    await _employee_in_tenant_or_404(db, employee_id, org_id)
+    await _employee_in_tenant_or_404(db, employee_id, org_id, node_scope=node_scope)
     stmt = (
         select(RfidCard)
         .where(RfidCard.employee_id == employee_id)
@@ -314,8 +330,9 @@ async def add_employee_card(
     *,
     user_id: int,
     ip_address: str | None,
+    node_scope: int | list[int] | None = None,
 ) -> RfidCardOut:
-    await _employee_in_tenant_or_404(db, employee_id, org_id)
+    await _employee_in_tenant_or_404(db, employee_id, org_id, node_scope=node_scope)
     uid = body.uid.strip().upper()
     existing = await db.execute(select(RfidCard).where(RfidCard.uid == uid))
     if existing.scalar_one_or_none():
@@ -345,13 +362,18 @@ async def revoke_card(
     *,
     user_id: int,
     ip_address: str | None,
+    node_scope: int | list[int] | None = None,
 ) -> None:
+    # A card is owned by an employee, so revoking it is an employee-keyed write:
+    # bound it to the granted node sub-tree so a sub-unit admin can only revoke
+    # cards of employees inside their unit.
+    employee_scope = node_scope if node_scope is not None else org_id
     stmt = (
         select(RfidCard)
         .join(Employee, RfidCard.employee_id == Employee.id)
         .where(RfidCard.id == card_id)
     )
-    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    stmt = apply_employee_tenant_filter(stmt, employee_scope, Employee.organization_id)
     card = (await db.execute(stmt)).scalar_one_or_none()
     if not card:
         raise NotFoundError("RFID card not found")
@@ -371,7 +393,7 @@ async def revoke_card(
 # ── Events & tap processing ───────────────────────────────────────────────────
 
 
-def events_query(org_id: int | None) -> Select:
+def events_query(org_id: int | list[int] | None) -> Select:
     stmt = (
         select(RfidEvent)
         .join(RfidReader, RfidEvent.rfid_reader_id == RfidReader.id, isouter=True)

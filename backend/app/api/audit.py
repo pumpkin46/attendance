@@ -8,9 +8,10 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import Select, func, or_, select
 
-from app.core.dependencies import DbSession, TenantOrgId, require_permission
+from app.core.dependencies import DbSession, TenantScope, require_permission
 from app.core.errors import ValidationError
 from app.core.pagination import PaginatedResponse, PaginationDep, paginate
+from app.middleware.tenant import as_scope_ids
 from app.models.audit import AuditLog
 from app.models.organization import Organization
 from app.models.user import User
@@ -113,7 +114,7 @@ def _apply_filters(
 @router.get("/audit-logs", response_model=PaginatedResponse[AuditLogOut])
 async def list_audit_logs(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("audit.view"),
     pagination: PaginationDep,
     action: str | None = Query(None),
@@ -141,7 +142,7 @@ async def list_audit_logs(
 @router.get("/audit-logs/stats", response_model=AuditStatsOut)
 async def audit_log_stats(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("audit.view"),
     tz_offset: int = TzOffsetQuery,
 ):
@@ -178,7 +179,7 @@ async def audit_log_stats(
 @router.get("/audit-logs/facets", response_model=AuditFacetsOut)
 async def audit_log_facets(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("audit.view"),
 ):
     """Distinct filter options actually present in the trail."""
@@ -220,7 +221,7 @@ async def audit_log_facets(
 @router.get("/audit-logs/export")
 async def export_audit_logs(
     db: DbSession,
-    org_id: TenantOrgId,
+    org_id: TenantScope,
     _: require_permission("audit.view"),
     export_format: Literal["csv", "xlsx"] = Query("csv", alias="format"),
     action: str | None = Query(None),
@@ -245,10 +246,17 @@ async def export_audit_logs(
     )
     logs = list((await db.execute(stmt)).scalars().all())
 
+    # The export header carries a single org label. With a multi-org read scope
+    # the trail spans several companies, so only stamp a name when the scope
+    # resolves to exactly one root; otherwise leave it None (same as a global
+    # super admin's trail-wide export).
     org_name = None
-    if org_id is not None:
+    scope_ids = as_scope_ids(org_id)
+    if scope_ids is not None and len(scope_ids) == 1:
         org_name = (
-            await db.execute(select(Organization.name).where(Organization.id == org_id))
+            await db.execute(
+                select(Organization.name).where(Organization.id == scope_ids[0])
+            )
         ).scalar_one_or_none()
     ctx = ExportContext(
         org_name=org_name,

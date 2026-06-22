@@ -465,9 +465,9 @@ def test_engine_recognize_cross_org_match_is_stripped(
     assert _pending_engine_events() == 0
 
 
-def test_register_assigns_single_active_org(client, fake_session, monkeypatch):
-    """Self-registration on a single-org box binds the account to that org so
-    it is not bricked by the tenant 403 in get_tenant_org_id."""
+def test_register_succeeds_without_org_assignment(client, fake_session, monkeypatch):
+    """Self-registration no longer binds the account to an organization — a
+    user's tenant is resolved from the single active company at request time."""
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "registration_enabled", True)
@@ -479,12 +479,11 @@ def test_register_assigns_single_active_org(client, fake_session, monkeypatch):
     )
 
     assert resp.status_code == 201
-    assert resp.json()["user"]["organization_id"] == 42
+    # The per-user organization link was removed from the model and response.
+    assert "organization_id" not in resp.json()["user"]
 
 
-def test_register_with_multiple_orgs_leaves_unassigned(
-    client, fake_session, monkeypatch
-):
+def test_register_unaffected_by_org_count(client, fake_session, monkeypatch):
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "registration_enabled", True)
@@ -496,7 +495,7 @@ def test_register_with_multiple_orgs_leaves_unassigned(
     )
 
     assert resp.status_code == 201
-    assert resp.json()["user"]["organization_id"] is None
+    assert "organization_id" not in resp.json()["user"]
 
 
 def test_unknown_identify_records_unknown_event(client, fake_session, monkeypatch):

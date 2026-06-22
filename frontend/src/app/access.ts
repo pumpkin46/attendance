@@ -19,5 +19,7 @@ export const ROUTE_PERMISSIONS: Record<string, string> = {
   '/rfid': 'rfid.manage',
   '/audit-logs': 'audit.view',
   '/security': 'security.view',
+  '/organizations': 'org_nodes.view',
+  '/locations': 'org_nodes.view',
   '/user-management': 'users.manage',
 }

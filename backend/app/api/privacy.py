@@ -6,9 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DbSession, TenantOrgId, require_permission
+from app.core.dependencies import CurrentUser, DbSession, TenantNodeScope, require_permission
 from app.core.errors import NotFoundError
-from app.middleware.tenant import apply_tenant_filter
+from app.middleware.tenant import apply_employee_tenant_filter
 from app.models.attendance import AttendanceRecord
 from app.models.employee import Employee
 from app.models.recognition import RecognitionEvent
@@ -117,11 +117,11 @@ async def erase_employee_data(
     employee_id: int,
     request: Request,
     db: DbSession,
-    org_id: TenantOrgId,
+    node_scope: TenantNodeScope,
     user: require_permission("employees.manage"),
 ):
     stmt = select(Employee).where(Employee.id == employee_id)
-    stmt = apply_tenant_filter(stmt, org_id, Employee.organization_id)
+    stmt = apply_employee_tenant_filter(stmt, node_scope, Employee.organization_id)
     result = await db.execute(stmt)
     emp = result.scalar_one_or_none()
     if not emp:
