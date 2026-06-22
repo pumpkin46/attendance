@@ -45,6 +45,9 @@ Celery worker + beat (background jobs) ── Redis broker (:6379)
 
 - **PostgreSQL** (`AttendancePostgres`) and **Redis/Memurai** (`Memurai`) run as Windows services.
 - **uvicorn**, **Celery worker**, **Celery beat**, and **nginx** are managed by the tray launcher.
+- The tray launcher also opens the UI in its own desktop window (an embedded
+  **WebView2**); the runtime is bundled and installed offline by bootstrap, with a
+  browser fallback if it is ever missing.
 - Writable runtime data lives in `C:\ProgramData\AttendancePlatform\appdata` (the
   install dir under Program Files is read-only for the non-elevated launcher).
 

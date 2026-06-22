@@ -1,12 +1,15 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using Microsoft.Web.WebView2.Core;
 
 namespace AttendanceLauncher;
 
 /// <summary>
 /// System-tray launcher for the Attendance Platform. Starts/stops the PostgreSQL
 /// and Redis (Memurai) services, the uvicorn API, the Celery worker + beat, and
-/// nginx; shows a live status of each service; and opens the browser UI.
+/// nginx; shows a live status of each service; and opens the UI in its own
+/// desktop window (an embedded WebView2), falling back to the browser when no
+/// WebView2 runtime is present.
 /// </summary>
 internal static class Program
 {
@@ -45,6 +48,12 @@ internal sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _startItem;
     private readonly ToolStripMenuItem _stopItem;
     private readonly System.Windows.Forms.Timer _statusTimer;
+    private readonly System.Windows.Forms.Timer _openTimer;
+
+    private MainWindow? _window;
+    private bool _webViewChecked;
+    private bool _webViewAvailable;
+    private bool _browserFallbackNotified;
 
     private readonly Dictionary<string, Process> _procs = new();
     private readonly List<Service> _services = new();
@@ -117,6 +126,13 @@ internal sealed class TrayApp : ApplicationContext
         _statusTimer.Start();
 
         StartAll();
+
+        // Open the app window shortly after the message loop starts (showing a
+        // form before Application.Run is unreliable). It displays a splash and
+        // navigates once the web server is reachable.
+        _openTimer = new System.Windows.Forms.Timer { Interval = 150 };
+        _openTimer.Tick += (_, _) => { _openTimer.Stop(); OpenUi(); };
+        _openTimer.Start();
     }
 
     private void AddService(ContextMenuStrip menu, string name, Func<bool> probe, string? logFile)
@@ -296,7 +312,58 @@ internal sealed class TrayApp : ApplicationContext
     private bool ProcUp(string label) => _procs.TryGetValue(label, out var p) && !p.HasExited;
 
     // ── UI helpers ─────────────────────────────────────────────────────────
-    private void OpenUi() => Process.Start(new ProcessStartInfo(UiUrl) { UseShellExecute = true });
+    private void OpenUi()
+    {
+        if (!WebViewAvailable())
+        {
+            if (!_browserFallbackNotified)
+            {
+                _browserFallbackNotified = true;
+                _tray.ShowBalloonTip(5000, "Attendance Platform",
+                    "WebView2 runtime not found - opening the UI in your browser instead.",
+                    ToolTipIcon.Info);
+            }
+            OpenInBrowser();
+            return;
+        }
+        try
+        {
+            if (_window == null || _window.IsDisposed)
+                _window = new MainWindow(_appDir, NginxPort, _icon, Log);
+            _window.Show();
+            if (_window.WindowState == FormWindowState.Minimized)
+                _window.WindowState = FormWindowState.Normal;
+            _window.Activate();
+            _window.BringToFront();
+        }
+        catch (Exception ex)
+        {
+            Log("launcher", "OpenUi failed; falling back to browser: " + ex);
+            OpenInBrowser();
+        }
+    }
+
+    private void OpenInBrowser() => Process.Start(new ProcessStartInfo(UiUrl) { UseShellExecute = true });
+
+    /// <summary>Is a WebView2 runtime (bundled or system) available to host the window?</summary>
+    private bool WebViewAvailable()
+    {
+        if (_webViewChecked) return _webViewAvailable;
+        _webViewChecked = true;
+        try
+        {
+            var ver = CoreWebView2Environment.GetAvailableBrowserVersionString(
+                MainWindow.BundledRuntimeFolder(_appDir));
+            _webViewAvailable = !string.IsNullOrEmpty(ver);
+            Log("launcher", "WebView2 runtime: " + (ver ?? "not found"));
+        }
+        catch (Exception ex)
+        {
+            _webViewAvailable = false;
+            Log("launcher", "WebView2 runtime check failed: " + ex.Message);
+        }
+        return _webViewAvailable;
+    }
 
     private void OpenLogs() => Process.Start(new ProcessStartInfo(_logDir) { UseShellExecute = true });
 
@@ -310,6 +377,8 @@ internal sealed class TrayApp : ApplicationContext
     private void Quit()
     {
         _statusTimer.Stop();
+        _openTimer.Stop();
+        _window?.ExitApp();
         StopAll();
         _tray.Visible = false;
         ExitThread();

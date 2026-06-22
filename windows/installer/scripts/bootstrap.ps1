@@ -35,6 +35,9 @@ try {
     # here. The backend boots against the (empty) database it created above and
     # its first-run /setup wizard applies the migrations and creates the admin.
     & "$PSScriptRoot\generate_nginx_conf.ps1"
+    # The tray launcher hosts the UI in a WebView2 window; make sure its runtime
+    # is present (best-effort - the launcher falls back to a browser otherwise).
+    & "$PSScriptRoot\install_webview2.ps1"
 
     # First run is driven by the in-app setup wizard (it creates the database
     # schema and the first administrator account), so there is no pre-seeded

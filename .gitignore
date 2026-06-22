@@ -118,6 +118,8 @@ windows/installer/prereqs/models/*
 !windows/installer/prereqs/models/.gitkeep
 windows/installer/prereqs/wheelhouse/*
 !windows/installer/prereqs/wheelhouse/.gitkeep
+windows/installer/prereqs/webview2/*
+!windows/installer/prereqs/webview2/.gitkeep
 
 # Launcher build artifacts (build with dotnet before compiling Inno Setup)
 windows/launcher/**/bin/

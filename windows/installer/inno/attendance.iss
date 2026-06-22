@@ -76,6 +76,9 @@ Source: "..\prereqs\models\MiniFASNetV2.onnx"; DestDir: "{app}\backend\models"; 
 ; -- Offline pip wheelhouse --
 Source: "..\prereqs\wheelhouse\*"; DestDir: "{app}\wheelhouse"; Flags: recursesubdirs createallsubdirs ignoreversion
 
+; -- WebView2 Evergreen runtime (offline standalone installer; bootstrap runs it) --
+Source: "..\prereqs\webview2\*"; DestDir: "{app}\webview2-runtime"; Flags: recursesubdirs createallsubdirs ignoreversion
+
 ; -- Self-contained tray launcher (publish output) --
 Source: "..\..\launcher\publish\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 

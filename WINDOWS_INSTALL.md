@@ -47,7 +47,9 @@ only through nginx), the Celery worker + beat (background jobs), and nginx
 The first time you open the app it runs a short setup wizard that creates the
 database schema and your administrator account. Open the UI and follow it:
 
-1. Browse to `http://localhost:8080` (the installer also shows this when it finishes).
+1. The app opens in its own desktop window automatically (and keeps running in the
+   tray). You can reopen it any time from the tray icon's **Open UI**, or browse to
+   `http://localhost:8080`.
 2. The wizard initializes the database, then asks for your organization name and
    the first administrator's name, email, and password.
 3. Sign in with the email and password you just chose.
