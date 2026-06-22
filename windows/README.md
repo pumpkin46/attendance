@@ -25,7 +25,7 @@ windows/
 │     ├─ init_postgres.ps1        # initdb + register service + create db
 │     ├─ init_redis.ps1           # install Memurai (Redis) MSI as a service
 │     ├─ configure_env.ps1        # write backend\.env (generated secrets)
-│     ├─ migrate_and_seed.ps1     # alembic upgrade + seed.py
+│     ├─ migrate_and_seed.ps1     # optional manual seeder (alembic + seed.py); not run by bootstrap
 │     ├─ generate_nginx_conf.ps1  # serve dist/ + proxy /api/v1
 │     └─ uninstall_cleanup.ps1
 └─ launcher/                      # .NET system-tray launcher

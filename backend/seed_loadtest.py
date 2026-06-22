@@ -43,7 +43,7 @@ from app.models.employee import Employee
 from app.models.location import Location
 from app.models.organization import Organization
 from app.models.recognition import RecognitionEvent, RecognitionResult
-from app.models.user import User
+from app.models.user import User, user_organization
 
 # Deterministic so reruns produce the same distribution.
 RNG = random.Random(1337)
@@ -119,15 +119,19 @@ async def seed() -> None:
 
         admin = (
             await db.execute(
-                select(User)
-                .where(User.organization_id == org.id, User.email == "admin@attendance.local")
-                .limit(1)
+                select(User).where(User.email == "admin@attendance.local").limit(1)
             )
         ).scalar_one_or_none()
         if admin is None:
+            # Users link to orgs via the user_organization M2M now (the
+            # User.organization_id column was dropped); fall back to any member
+            # of this org.
             admin = (
                 await db.execute(
-                    select(User).where(User.organization_id == org.id).limit(1)
+                    select(User)
+                    .join(user_organization, user_organization.c.user_id == User.id)
+                    .where(user_organization.c.organization_id == org.id)
+                    .limit(1)
                 )
             ).scalar_one_or_none()
         if admin is None:

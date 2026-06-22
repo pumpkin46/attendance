@@ -42,21 +42,18 @@ only through nginx), the Celery worker + beat (background jobs), and nginx
 > is for development/testing; production use requires a **Memurai Enterprise**
 > license (see WINDOWS_BUILD.md to bundle the Enterprise MSI).
 
-## First login
+## First run
 
-A unique administrator password is generated during install and saved to:
+The first time you open the app it runs a short setup wizard that creates the
+database schema and your administrator account. Open the UI and follow it:
 
-```
-C:\ProgramData\AttendancePlatform\ADMIN_CREDENTIALS.txt
-```
+1. Browse to `http://localhost:8080` (the installer also shows this when it finishes).
+2. The wizard initializes the database, then asks for your organization name and
+   the first administrator's name, email, and password.
+3. Sign in with the email and password you just chose.
 
-(The installer also shows this location when it finishes.) Open the UI and sign in:
-
-- **Email:** `admin@attendance.local`
-- **Password:** see `ADMIN_CREDENTIALS.txt`
-
-> **Change this password** after first login, then delete the credentials file.
-> A `superadmin@attendance.local` account is created with the same password.
+> There is no default login - you choose the administrator credentials in the
+> wizard. The account created there is a platform super-admin.
 
 ## Where things live
 
@@ -65,7 +62,7 @@ C:\Program Files\AttendancePlatform\        # application + bundled runtimes
 C:\ProgramData\AttendancePlatform\
 ├─ pgdata\                                   # PostgreSQL database files
 ├─ appdata\                                  # FAISS index, uploads, snapshots, beat schedule
-├─ ADMIN_CREDENTIALS.txt                     # first-login admin password
+├─ FIRST_RUN.txt                             # first-run setup instructions (delete after setup)
 └─ logs\                                     # install, uvicorn, celery-worker, celery-beat, nginx, postgres, redis
 ```
 

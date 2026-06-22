@@ -94,8 +94,12 @@ async def seed():
         # with the public /setup wizard).
         role_map = await ensure_roles_and_permissions(db)
 
+        # Users no longer carry an organization_id column (dropped in
+        # m9a0b1c2d3e4). A super admin is global (no org membership); other
+        # accounts draw their tenant scope from the user_organization M2M, so
+        # the org-admin is linked to the company root instead. Mirrors the
+        # /setup wizard's User() construction in app.api.setup.run_setup.
         super_admin = User(
-            organization_id=None,
             name="Platform Super Admin",
             email="superadmin@attendance.local",
             password=hash_password(_seed_password("SEED_SUPERADMIN_PASSWORD", "superadmin@attendance.local")),
@@ -104,12 +108,12 @@ async def seed():
         db.add(super_admin)
 
         admin = User(
-            organization_id=org.id,
             name="Organization Admin",
             email="admin@attendance.local",
             password=hash_password(_seed_password("SEED_ADMIN_PASSWORD", "admin@attendance.local")),
         )
         admin.roles = [role_map["org_admin"]]
+        admin.organizations = [org]
         db.add(admin)
         await db.flush()
 

@@ -9,22 +9,21 @@ Write-Log "AppDir = $AppDir"
 
 try {
     # Reuse credentials from a previous install if present, else generate fresh.
+    # No admin password is generated here: the first administrator account is
+    # created by the in-app /setup wizard, not seeded by the installer.
     $state = Get-State
-    if ($state -and $state.DbPassword -and $state.JwtSecret -and $state.AdminPassword) {
+    if ($state -and $state.DbPassword -and $state.JwtSecret) {
         Write-Log "Reusing credentials from previous install state."
-        $dbPassword    = $state.DbPassword
-        $jwtSecret     = $state.JwtSecret
-        $adminPassword = $state.AdminPassword
+        $dbPassword = $state.DbPassword
+        $jwtSecret  = $state.JwtSecret
     } else {
         Write-Log "Generating new credentials."
         Add-Type -AssemblyName System.Web
-        $dbPassword    = [System.Web.Security.Membership]::GeneratePassword(32, 6) -replace "[^A-Za-z0-9]", "x"
-        # Human-typable admin password (no ambiguous symbols), used for first login.
-        $adminPassword = [System.Web.Security.Membership]::GeneratePassword(16, 0) -replace "[^A-Za-z0-9]", "x"
+        $dbPassword = [System.Web.Security.Membership]::GeneratePassword(32, 6) -replace "[^A-Za-z0-9]", "x"
         $bytes = New-Object byte[] 48
         [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
         $jwtSecret = -join ($bytes | ForEach-Object { $_.ToString('x2') })
-        Save-State @{ DbPassword = $dbPassword; JwtSecret = $jwtSecret; AdminPassword = $adminPassword; NginxPort = $NginxPort; ApiPort = $ApiPort; PgPort = $PgPort }
+        Save-State @{ DbPassword = $dbPassword; JwtSecret = $jwtSecret; NginxPort = $NginxPort; ApiPort = $ApiPort; PgPort = $PgPort }
     }
 
     & "$PSScriptRoot\install_python.ps1"
@@ -32,21 +31,26 @@ try {
     & "$PSScriptRoot\init_postgres.ps1" -DbPassword $dbPassword
     & "$PSScriptRoot\init_redis.ps1"
     & "$PSScriptRoot\configure_env.ps1" -DbPassword $dbPassword -JwtSecret $jwtSecret
-    & "$PSScriptRoot\migrate_and_seed.ps1" -AdminPassword $adminPassword
+    # Schema migrations and the first-admin account are intentionally NOT run
+    # here. The backend boots against the (empty) database it created above and
+    # its first-run /setup wizard applies the migrations and creates the admin.
     & "$PSScriptRoot\generate_nginx_conf.ps1"
 
-    # Write the first-login credentials where the operator can find them.
-    $credFile = Join-Path $DataRoot 'ADMIN_CREDENTIALS.txt'
+    # First run is driven by the in-app setup wizard (it creates the database
+    # schema and the first administrator account), so there is no pre-seeded
+    # login to hand the operator - just point them at the URL.
+    $firstRunFile = Join-Path $DataRoot 'FIRST_RUN.txt'
     @(
-        "Attendance Platform - administrator sign-in"
-        "URL:      http://localhost:$NginxPort"
-        "Email:    admin@attendance.local"
-        "Password: $adminPassword"
+        "Attendance Platform - first-run setup"
+        "URL: http://localhost:$NginxPort"
         ""
-        "A super-admin account (superadmin@attendance.local) uses the same password."
-        "Change these after your first login. Delete this file once recorded."
-    ) | Set-Content -Path $credFile -Encoding utf8
-    Write-Log "Wrote first-login credentials to $credFile"
+        "Open the URL above. On first launch the app shows a short setup wizard"
+        "that creates the database schema and your first administrator account."
+        "You choose the admin email and password there - there is no default login."
+        ""
+        "Delete this file once setup is complete."
+    ) | Set-Content -Path $firstRunFile -Encoding utf8
+    Write-Log "Wrote first-run instructions to $firstRunFile"
 
     # Writable runtime data lives under ProgramData (FAISS index, uploads,
     # snapshots, the Celery beat schedule, nginx pid/temp, runtime logs). Create

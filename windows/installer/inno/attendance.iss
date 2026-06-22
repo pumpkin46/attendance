@@ -123,9 +123,9 @@ begin
     else
     begin
       MsgBox('Setup complete.' + #13#10 + #13#10 +
-             'Your administrator sign-in details are saved to:' + #13#10 +
-             ExpandConstant('{commonappdata}\AttendancePlatform\ADMIN_CREDENTIALS.txt') + #13#10 + #13#10 +
-             'Open the app from the tray icon, then browse to http://localhost:8080.',
+             'Open the app from the tray icon, then browse to http://localhost:8080.' + #13#10 +
+             'The first visit runs a short setup wizard that creates the database' + #13#10 +
+             'schema and your administrator account (you choose its email and password).',
              mbInformation, MB_OK);
     end;
   end;
