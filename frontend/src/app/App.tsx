@@ -9,6 +9,7 @@ import { AuthProvider } from '@/features/auth/AuthProvider'
 import { RealtimeProvider } from '@/features/realtime/RealtimeContext'
 import { ROUTE_PERMISSIONS } from '@/app/access'
 import AppLayout from '@/layouts/AppLayout'
+import { isDesktopApp, DRAG_REGION } from '@/shared/lib/desktop'
 
 const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'))
 const ChatPage = lazy(() => import('@/features/chat/ChatPage'))
@@ -54,6 +55,12 @@ export default function App() {
       <AuthProvider>
         <RealtimeProvider>
           <BrowserRouter>
+          {/* Frameless desktop app: a thin always-draggable strip along the very
+              top edge, so screens without the app header (login, setup) can still
+              move the window. No-op in a browser. */}
+          {isDesktopApp() && (
+            <div className={`fixed inset-x-0 top-0 z-[100] h-1.5 ${DRAG_REGION}`} aria-hidden />
+          )}
           <Suspense fallback={<FullScreenFallback />}>
             <Routes>
               <Route path="/setup" element={<SetupPage />} />

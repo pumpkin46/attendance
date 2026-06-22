@@ -5,15 +5,7 @@ import { prefetchRoute } from '@/app/routes'
 import { ROUTE_PERMISSIONS } from '@/app/access'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { cn } from '@/shared/lib/cn'
-
-type NavItem = { to: string; label: string; end?: boolean }
-
-type NavGroup = {
-  id: string
-  title: string
-  icon: ReactNode
-  items: NavItem[]
-}
+import { NAV_GROUPS, type NavGroup } from '@/app/navigation'
 
 function Icon({ children }: { children: ReactNode }) {
   return (
@@ -23,125 +15,62 @@ function Icon({ children }: { children: ReactNode }) {
   )
 }
 
-const navGroups: NavGroup[] = [
-  {
-    id: 'overview',
-    title: 'Overview',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/', label: 'Dashboard', end: true },
-      { to: '/chat', label: 'Chat' },
-    ],
-  },
-  {
-    id: 'people',
-    title: 'People',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="12" cy="8" r="4" />
-          <path d="M4 20c0-4 3.5-7 8-7s8 3 8 7" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/employees', label: 'Employees' },
-      { to: '/visitors', label: 'Visitors' },
-      { to: '/enrollment', label: 'Face Enrollment' },
-      { to: '/enrollment-simple', label: 'Quick Face Register' },
-    ],
-  },
-  {
-    id: 'recognition',
-    title: 'Face Recognition',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="12" cy="10" r="6" />
-          <path d="M8 18h8M10 14h.01M14 14h.01" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/recognition-engine', label: 'AI Engine' },
-      { to: '/live-kiosk', label: 'Live Kiosk' },
-      { to: '/liveness-test', label: 'Liveness Test' },
-      { to: '/recognition-test', label: 'Test Recognition' },
-      { to: '/unknown-faces', label: 'Unknown Faces' },
-    ],
-  },
-  {
-    id: 'attendance',
-    title: 'Attendance',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 2" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/attendance', label: 'Attendance' },
-      { to: '/anomalies', label: 'Anomalies' },
-      { to: '/shifts', label: 'Shifts' },
-    ],
-  },
-  {
-    id: 'devices',
-    title: 'Devices',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M4 8h16v10H4zM8 4h8v4H8z" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/cameras', label: 'Cameras' },
-      { to: '/rfid', label: 'RFID' },
-    ],
-  },
-  {
-    id: 'reports',
-    title: 'Reports & Compliance',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M4 19V5M4 19h16M8 15v-4M12 15V9M16 15v-2" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/reports', label: 'Reports' },
-      { to: '/audit-logs', label: 'Audit Logs' },
-      { to: '/privacy', label: 'Privacy & GDPR' },
-    ],
-  },
-  {
-    id: 'admin',
-    title: 'Administration',
-    icon: (
-      <Icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M12 3l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V7l8-4z" />
-        </svg>
-      </Icon>
-    ),
-    items: [
-      { to: '/user-management', label: 'Users & Permissions' },
-      { to: '/organizations', label: 'Organizations' },
-      { to: '/locations', label: 'Locations' },
-      { to: '/security', label: 'Security & Tenancy' },
-    ],
-  },
-]
+// Group icons live here (keyed by NAV_GROUPS id); the nav data itself is the
+// shared source of truth in @/app/navigation.
+const GROUP_ICONS: Record<string, ReactNode> = {
+  overview: (
+    <Icon>
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z" />
+      </svg>
+    </Icon>
+  ),
+  people: (
+    <Icon>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c0-4 3.5-7 8-7s8 3 8 7" />
+      </svg>
+    </Icon>
+  ),
+  recognition: (
+    <Icon>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="10" r="6" />
+        <path d="M8 18h8M10 14h.01M14 14h.01" />
+      </svg>
+    </Icon>
+  ),
+  attendance: (
+    <Icon>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+    </Icon>
+  ),
+  devices: (
+    <Icon>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 8h16v10H4zM8 4h8v4H8z" />
+      </svg>
+    </Icon>
+  ),
+  reports: (
+    <Icon>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 19V5M4 19h16M8 15v-4M12 15V9M16 15v-2" />
+      </svg>
+    </Icon>
+  ),
+  admin: (
+    <Icon>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M12 3l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V7l8-4z" />
+      </svg>
+    </Icon>
+  ),
+}
 
 function pathMatches(pathname: string, to: string, end?: boolean) {
   if (end) return pathname === to || (to === '/' && pathname === '/')
@@ -196,7 +125,7 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
   // are always visible; groups left with no items are dropped.
   const visibleGroups = useMemo(
     () =>
-      navGroups
+      NAV_GROUPS
         .map((group) => ({
           ...group,
           items: group.items.filter((item) => {
@@ -289,7 +218,7 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
                         : 'hover:bg-slate-800/60 [&_svg]:text-slate-400 hover:[&_svg]:text-slate-200'
                     )}
                   >
-                    {group.icon}
+                    {GROUP_ICONS[group.id]}
                   </button>
                 </li>
               )
@@ -371,7 +300,7 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
                         : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 hover:[&_span_svg]:text-slate-300'
                     )}
                   >
-                    {group.icon}
+                    {GROUP_ICONS[group.id]}
                     <span className="min-w-0 flex-1 truncate">{group.title}</span>
                     <svg
                       viewBox="0 0 24 24"

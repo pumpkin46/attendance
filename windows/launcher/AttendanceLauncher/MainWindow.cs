@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -34,6 +36,10 @@ internal sealed class MainWindow : Form
 
         Text = "Attendance Platform";
         Icon = icon;
+        // Frameless: the web app draws its own title bar (a drag region plus the
+        // minimize/maximize/close controls), so there's no redundant native
+        // caption stacked above it. Resize + Aero Snap are kept via CreateParams.
+        FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(1280, 840);
         MinimumSize = new Size(900, 600);
@@ -77,6 +83,9 @@ internal sealed class MainWindow : Form
             s.IsStatusBarEnabled = false;
             s.IsZoomControlEnabled = true;
             s.AreDevToolsEnabled = true; // handy while iterating; cheap to keep
+            // Honour CSS `app-region: drag` so the web header can act as the
+            // frameless window's title bar (drag / double-click-to-maximize).
+            s.IsNonClientRegionSupportEnabled = true;
 
             // External / target=_blank links open in the system browser instead
             // of a popup webview.
@@ -86,6 +95,11 @@ internal sealed class MainWindow : Form
                 try { Process.Start(new ProcessStartInfo(e.Uri) { UseShellExecute = true }); }
                 catch (Exception ex) { _log("launcher", "open external link failed: " + ex.Message); }
             };
+
+            // The web title bar's min/maximize/close buttons message the host.
+            _web.CoreWebView2.WebMessageReceived += OnWebMessage;
+            // Sync the maximize/restore icon once the page (and its listener) loads.
+            _web.CoreWebView2.NavigationCompleted += (_, _) => PostWindowState();
 
             _coreReady = true;
             ShowSplash();
@@ -171,5 +185,113 @@ internal sealed class MainWindow : Form
     {
         _exiting = true;
         try { Close(); } catch { /* ignore */ }
+    }
+
+    // ── Frameless window plumbing ────────────────────────────────────────────
+    // Re-add a resizable frame + Aero Snap to the borderless window. The sizing
+    // border stays in the (DWM-managed) non-client area, so resizing still works
+    // even though the WebView2 child fills the client area.
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            const int WS_THICKFRAME = 0x00040000;
+            const int WS_MINIMIZEBOX = 0x00020000;
+            const int WS_MAXIMIZEBOX = 0x00010000;
+            const int WS_SYSMENU = 0x00080000;
+            var cp = base.CreateParams;
+            cp.Style |= WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
+            return cp;
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        // Win11 polish: dark frame + rounded outer corners. Silently ignored on
+        // older Windows (e.g. Server 2019 / Win10), so it's safe to always try.
+        try
+        {
+            int dark = 1;
+            DwmSetWindowAttribute(Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+            int round = DWMWCP_ROUND;
+            DwmSetWindowAttribute(Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
+        }
+        catch { /* dwmapi unavailable */ }
+    }
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_GETMINMAXINFO = 0x0024;
+        // A frameless WS_THICKFRAME window maximizes a few pixels past the work
+        // area; clamp it so a maximized window doesn't cover the taskbar.
+        if (m.Msg == WM_GETMINMAXINFO)
+        {
+            var mmi = Marshal.PtrToStructure<MINMAXINFO>(m.LParam);
+            var scr = Screen.FromHandle(Handle);
+            mmi.ptMaxPosition = new POINT { x = scr.WorkingArea.Left - scr.Bounds.Left, y = scr.WorkingArea.Top - scr.Bounds.Top };
+            mmi.ptMaxSize = new POINT { x = scr.WorkingArea.Width, y = scr.WorkingArea.Height };
+            mmi.ptMinTrackSize = new POINT { x = MinimumSize.Width, y = MinimumSize.Height };
+            Marshal.StructureToPtr(mmi, m.LParam, true);
+            m.Result = IntPtr.Zero;
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        PostWindowState();
+    }
+
+    private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        string action;
+        try
+        {
+            using var doc = JsonDocument.Parse(e.WebMessageAsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return;
+            if (!root.TryGetProperty("type", out var type) || type.GetString() != "window") return;
+            if (!root.TryGetProperty("action", out var act)) return;
+            action = act.GetString() ?? "";
+        }
+        catch { return; }
+
+        switch (action)
+        {
+            case "minimize": WindowState = FormWindowState.Minimized; break;
+            case "maximize":
+                WindowState = WindowState == FormWindowState.Maximized
+                    ? FormWindowState.Normal : FormWindowState.Maximized;
+                break;
+            case "close": Close(); break;       // hides to the tray (see OnFormClosing)
+            case "state": PostWindowState(); break;
+        }
+    }
+
+    private void PostWindowState()
+    {
+        if (!_coreReady) return;
+        var maximized = WindowState == FormWindowState.Maximized ? "true" : "false";
+        try { _web.CoreWebView2.PostWebMessageAsJson($"{{\"type\":\"window-state\",\"maximized\":{maximized}}}"); }
+        catch { /* page not ready yet */ }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int x; public int y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize;
     }
 }
